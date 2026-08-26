@@ -1,4 +1,4 @@
-# SDLC Pipeline — YOLO DLC
+# DLC-YOLO
 
 Automated software development lifecycle as a KiroCrew app.
 
@@ -19,13 +19,13 @@ Intake → Requirements → [GATE: spec Q's] → Design → Tasks → [GATE: app
 ```bash
 cd ui && npm install && npm run build
 kirocrew app install /path/to/kiro-crew-yolo-dlc
-kirocrew app enable sdlc-pipeline
+kirocrew app enable dlc-yolo
 ```
 
 ## Development
 
 ```bash
-kirocrew app dev sdlc-pipeline
+kirocrew app dev dlc-yolo
 ```
 
 ## Structure
@@ -53,10 +53,10 @@ kiro-crew-yolo-dlc/
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/apps/sdlc-pipeline/cards` | GET | List all cards |
-| `/api/apps/sdlc-pipeline/cards` | POST | Create a card |
-| `/api/apps/sdlc-pipeline/cards/:id` | GET | Get one card |
-| `/api/apps/sdlc-pipeline/cards/:id/advance` | POST | Advance to next stage |
-| `/api/apps/sdlc-pipeline/cards/:id/gate-approve` | POST | Approve at gate |
-| `/api/apps/sdlc-pipeline/cards/:id/gate-reject` | POST | Reject at gate (regress) |
-| `/api/apps/sdlc-pipeline/status` | GET | Pipeline summary |
+| `/api/apps/dlc-yolo/cards` | GET | List all cards |
+| `/api/apps/dlc-yolo/cards` | POST | Create a card |
+| `/api/apps/dlc-yolo/cards/:id` | GET | Get one card |
+| `/api/apps/dlc-yolo/cards/:id/advance` | POST | Advance to next stage |
+| `/api/apps/dlc-yolo/cards/:id/gate-approve` | POST | Approve at gate |
+| `/api/apps/dlc-yolo/cards/:id/gate-reject` | POST | Reject at gate (regress) |
+| `/api/apps/dlc-yolo/status` | GET | Pipeline summary |

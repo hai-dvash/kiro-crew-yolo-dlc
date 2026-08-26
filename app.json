@@ -1,7 +1,7 @@
 {
-  "name": "sdlc-pipeline",
+  "name": "dlc-yolo",
   "version": "0.1.0",
-  "displayName": "SDLC Pipeline",
+  "displayName": "DLC-YOLO",
   "description": "Automated software development lifecycle — intake issues, spec them, implement, review, and ship PRs with configurable human gates.",
   "author": "haid",
   "tags": ["sdlc", "automation", "pipeline", "developer-tools"],
@@ -17,8 +17,10 @@
   ],
   "permissions": {
     "api": [
-      "/api/apps/sdlc-pipeline",
-      "/api/apps/sdlc-pipeline/*",
+      "/api/apps/dlc-yolo",
+      "/api/apps/dlc-yolo/*",
+      "/apps/dlc-yolo",
+      "/apps/dlc-yolo/*",
       "/api/chat",
       "/api/chat/*"
     ],
@@ -33,23 +35,21 @@
     ]
   },
   "backend": {
-    "entryPoint": "backend/server.py",
-    "port": "auto",
-    "healthCheck": "/health"
+    "routes": "backend.routes:register_routes"
   },
   "ui": {
     "entry": "dist/index.mjs",
     "pages": [
       {
-        "route": "/apps/sdlc-pipeline",
-        "label": "SDLC Pipeline",
+        "route": "/apps/dlc-yolo",
+        "label": "DLC-YOLO",
         "icon": "GitPullRequest"
       }
     ]
   },
   "crons": [
     {
-      "name": "sdlc-pipeline-advance",
+      "name": "dlc-yolo-advance",
       "every": 120,
       "message": "Check pipeline state and advance any cards in auto-stages that are ready to move."
     }

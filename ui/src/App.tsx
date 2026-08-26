@@ -40,9 +40,8 @@ export default function SdlcPipeline() {
 
   const fetchCards = useCallback(async () => {
     try {
-      const res = await api.fetch('/api/apps/sdlc-pipeline/cards')
-      const data = await res.json()
-      setCards(data.cards || [])
+      const data = await api.get('/api/apps/dlc-yolo/cards')
+      setCards(data?.cards || [])
     } catch (e) {
       console.error('Failed to fetch cards:', e)
     } finally {
@@ -66,7 +65,7 @@ export default function SdlcPipeline() {
 
   return (
     <>
-      <PageHeader title="SDLC Pipeline" subtitle="Automated dev lifecycle with human gates" />
+      <PageHeader title="⭐ DLC-YOLO" subtitle="Automated dev lifecycle with human gates" />
       <div className="px-6 pb-8 overflow-y-auto flex-1 min-h-0">
         <div className="grid gap-3.5 grid-cols-[repeat(auto-fit,minmax(150px,1fr))] mb-6">
           <StatCard label="Active" value={String(activeCount)} accent />
@@ -96,13 +95,13 @@ export default function SdlcPipeline() {
                           <div className="mt-2 flex gap-1">
                             <button
                               className="text-xs px-2 py-0.5 rounded bg-green-600 text-white"
-                              onClick={() => api.fetch(`/api/apps/sdlc-pipeline/cards/${card.id}/gate-approve`, { method: 'POST', body: '{}' }).then(fetchCards)}
+                              onClick={() => api.post(`/api/apps/dlc-yolo/cards/${card.id}/gate-approve`).then(fetchCards)}
                             >
                               Approve
                             </button>
                             <button
                               className="text-xs px-2 py-0.5 rounded bg-red-600 text-white"
-                              onClick={() => api.fetch(`/api/apps/sdlc-pipeline/cards/${card.id}/gate-reject`, { method: 'POST', body: '{}' }).then(fetchCards)}
+                              onClick={() => api.post(`/api/apps/dlc-yolo/cards/${card.id}/gate-reject`).then(fetchCards)}
                             >
                               Reject
                             </button>

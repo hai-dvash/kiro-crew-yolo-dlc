@@ -1,0 +1,57 @@
+{
+  "name": "sdlc-pipeline",
+  "version": "0.1.0",
+  "displayName": "SDLC Pipeline",
+  "description": "Automated software development lifecycle — intake issues, spec them, implement, review, and ship PRs with configurable human gates.",
+  "author": "haid",
+  "tags": ["sdlc", "automation", "pipeline", "developer-tools"],
+  "defaultEnabled": true,
+  "agents": [
+    "agents/pipeline-orchestrator.json",
+    "agents/spec-agent.json",
+    "agents/impl-agent.json",
+    "agents/review-agent.json"
+  ],
+  "skills": [
+    "skills/pipeline-workflow"
+  ],
+  "permissions": {
+    "api": [
+      "/api/apps/sdlc-pipeline",
+      "/api/apps/sdlc-pipeline/*",
+      "/api/chat",
+      "/api/chat/*"
+    ],
+    "storage": true,
+    "mcpTools": [
+      "kirocrew-core::spawn_run",
+      "kirocrew-core::spawn_list",
+      "kirocrew-core::send_message",
+      "kirocrew-core::ask_question",
+      "kirocrew-cron::cron_add",
+      "kirocrew-cron::cron_list"
+    ]
+  },
+  "backend": {
+    "entryPoint": "backend/server.py",
+    "port": "auto",
+    "healthCheck": "/health"
+  },
+  "ui": {
+    "entry": "dist/index.mjs",
+    "pages": [
+      {
+        "route": "/apps/sdlc-pipeline",
+        "label": "SDLC Pipeline",
+        "icon": "GitPullRequest"
+      }
+    ]
+  },
+  "crons": [
+    {
+      "name": "sdlc-pipeline-advance",
+      "every": 120,
+      "message": "Check pipeline state and advance any cards in auto-stages that are ready to move."
+    }
+  ]
+}

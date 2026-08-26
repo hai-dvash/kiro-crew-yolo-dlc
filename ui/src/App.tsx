@@ -14,6 +14,8 @@ interface PipelineCard {
   history: Array<{ from: string; to: string; at: string; agent: string }>
 }
 
+const STATE_PATH = '/tmp/dlc-yolo/state.json'
+
 const STAGES = [
   'intake', 'requirements', 'gate-spec', 'design', 'tasks',
   'gate-impl', 'implement', 'review', 'gate-review', 'pr', 'done'
@@ -33,21 +35,74 @@ const STAGE_LABELS: Record<string, string> = {
   'done': '✅ Done',
 }
 
+const GATES = new Set(['gate-spec', 'gate-impl', 'gate-review'])
+
 export default function SdlcPipeline() {
   const api = useAppApi()
   const [cards, setCards] = useState<PipelineCard[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
 
   const fetchCards = useCallback(async () => {
     try {
-      const data = await api.get('/api/apps/dlc-yolo/cards')
-      setCards(data?.cards || [])
-    } catch (e) {
-      console.error('Failed to fetch cards:', e)
+      const state = await api.get(`/api/file-read?path=${encodeURIComponent(STATE_PATH)}`)
+      if (state?.cards) {
+        setCards(state.cards)
+        setError('')
+      } else {
+        setCards([])
+      }
+    } catch (e: any) {
+      if (e?.message?.includes('404') || e?.message?.includes('not found')) {
+        setCards([])
+      } else {
+        setError(e?.message || 'Failed to load')
+        console.error('Failed to fetch cards:', e)
+      }
     } finally {
       setLoading(false)
     }
   }, [api])
+
+  const saveState = useCallback(async (newCards: PipelineCard[]) => {
+    const content = JSON.stringify({ cards: newCards }, null, 2)
+    await api.post('/api/file-write', { path: STATE_PATH, content })
+    setCards(newCards)
+  }, [api])
+
+  const advanceCard = useCallback(async (cardId: string) => {
+    const card = cards.find(c => c.id === cardId)
+    if (!card) return
+    const idx = STAGES.indexOf(card.stage)
+    if (idx >= STAGES.length - 1) return
+    const newCards = cards.map(c => {
+      if (c.id !== cardId) return c
+      return {
+        ...c,
+        stage: STAGES[idx + 1],
+        updated_at: new Date().toISOString(),
+        history: [...c.history, { from: c.stage, to: STAGES[idx + 1], at: new Date().toISOString(), agent: 'human' }]
+      }
+    })
+    await saveState(newCards)
+  }, [cards, saveState])
+
+  const rejectCard = useCallback(async (cardId: string) => {
+    const card = cards.find(c => c.id === cardId)
+    if (!card || !GATES.has(card.stage)) return
+    const idx = STAGES.indexOf(card.stage)
+    const newCards = cards.map(c => {
+      if (c.id !== cardId) return c
+      return {
+        ...c,
+        stage: STAGES[idx - 1],
+        updated_at: new Date().toISOString(),
+        gate_history: [...c.gate_history, { gate: c.stage, decision: 'rejected', at: new Date().toISOString(), notes: '' }],
+        history: [...c.history, { from: c.stage, to: STAGES[idx - 1], at: new Date().toISOString(), agent: 'human' }]
+      }
+    })
+    await saveState(newCards)
+  }, [cards, saveState])
 
   useEffect(() => {
     fetchCards()
@@ -67,6 +122,11 @@ export default function SdlcPipeline() {
     <>
       <PageHeader title="⭐ DLC-YOLO" subtitle="Automated dev lifecycle with human gates" />
       <div className="px-6 pb-8 overflow-y-auto flex-1 min-h-0">
+        {error && (
+          <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-sm text-red-400">
+            {error}
+          </div>
+        )}
         <div className="grid gap-3.5 grid-cols-[repeat(auto-fit,minmax(150px,1fr))] mb-6">
           <StatCard label="Active" value={String(activeCount)} accent />
           <StatCard label="Awaiting Gate" value={String(gatedCount)} />
@@ -91,17 +151,17 @@ export default function SdlcPipeline() {
                         <div className="text-xs text-muted mt-1">
                           {card.source?.repo && `${card.source.repo}#${card.source.issue}`}
                         </div>
-                        {card.stage.startsWith('gate-') && (
+                        {GATES.has(card.stage) && (
                           <div className="mt-2 flex gap-1">
                             <button
                               className="text-xs px-2 py-0.5 rounded bg-green-600 text-white"
-                              onClick={() => api.post(`/api/apps/dlc-yolo/cards/${card.id}/gate-approve`).then(fetchCards)}
+                              onClick={() => advanceCard(card.id)}
                             >
                               Approve
                             </button>
                             <button
                               className="text-xs px-2 py-0.5 rounded bg-red-600 text-white"
-                              onClick={() => api.post(`/api/apps/dlc-yolo/cards/${card.id}/gate-reject`).then(fetchCards)}
+                              onClick={() => rejectCard(card.id)}
                             >
                               Reject
                             </button>

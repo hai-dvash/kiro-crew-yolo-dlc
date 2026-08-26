@@ -21,6 +21,8 @@
       "/api/apps/dlc-yolo/*",
       "/apps/dlc-yolo",
       "/apps/dlc-yolo/*",
+      "/api/file-read",
+      "/api/file-write",
       "/api/chat",
       "/api/chat/*"
     ],

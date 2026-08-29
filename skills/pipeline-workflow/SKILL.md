@@ -64,6 +64,17 @@ A card can regress when:
     {"phase": "requirements", "trigger": "spec-builder", "at": "ISO8601"},
     {"phase": "implement", "trigger": "task-runner", "at": "ISO8601"}
   ],
+  "effort": {
+    "features": [
+      {"id": "f1", "note": "Rate-limit middleware", "size": "M", "points": 3},
+      {"id": "f2", "note": "Redis token bucket store", "size": "L", "points": 5}
+    ],
+    "total": 8,
+    "scope": {"requirements": 8, "design": 9, "tasks": 9}
+  },
+  "backstep_history": [
+    {"from": "design", "to": "requirements", "reason": "design scope 9 > 2x requirements-baseline", "at": "ISO8601"}
+  ],
   "parked": [
     {"id": "park-uuid", "note": "Needs auth redesign — can't spec now", "issue_url": "https://github.com/owner/repo/issues/57", "at": "ISO8601", "phase": "design"}
   ],
@@ -78,23 +89,148 @@ The top of `state.json` also carries pipeline-wide defaults that cards inherit u
 ```json
 {
   "config": { "trust": "assisted", "depth": "standard" },
+  "pipelines": [ ... ],
   "cards": [ ... ]
 }
 ```
 
-A card's effective mode = its own `trust`/`depth` if set, else `config.trust`/`config.depth`.
+A card's effective mode = its own `trust`/`depth`, else its **pipeline's** `trust`/`depth`, else `config`.
+
+### Pipeline (first-class object)
+
+A **pipeline** is the top-level unit of work: one per repo/workspace, configured via the
+Pipeline Setup modal, and owning the cards that flow through it. A pipeline exists even
+with zero cards, and holds the per-repo default modes that its cards inherit.
+
+```json
+{
+  "id": "pl-uuid",
+  "repo": "owner/name",
+  "workspace": "default",
+  "source": "issue-radar",           // where the repo came from: issue-radar | workspace | manual
+  "trust": "assisted",               // pipeline default (cards inherit unless they override)
+  "depth": "standard",
+  "backlog_intake": true,            // opt in to the dlc-yolo-backlog-intake cron for this repo
+  "sot": "github",                   // source of truth for stage: "github" | "local"
+  "steps": [
+    { "id": "requirements", "name": "Requirements", "type": "agent",
+      "agent": { "name": "spec-agent", "role": "produce requirements.md", "tools": ["ask_question"] },
+      "trust": "assisted", "depth": "standard", "label": "dlc:requirements" },
+    { "id": "gate-spec", "name": "Gate: Spec", "type": "gate", "label": "dlc:gate-spec" },
+    { "id": "implement", "name": "Implement", "type": "agent",
+      "agent": { "name": "impl-agent", "role": "write code + tests" },
+      "trust": "autonomous", "depth": "deep", "label": "dlc:implement" }
+  ],
+  "created_at": "ISO8601"
+}
+```
+
+Every card carries `"pipeline_id": "pl-uuid"` linking it to its pipeline. The mode
+resolution order is **card override → step override → pipeline default → global `config`**.
+The `dlc-yolo-backlog-intake` cron only back-feeds repos whose pipeline has
+`backlog_intake: true`.
+
+### Custom steps (per pipeline)
+
+A pipeline owns its OWN ordered `steps[]` — there is no fixed global stage list; the
+built-in 11-stage ladder is only the default the wizard offers. Each step is one of:
+
+- **`type: "gate"`** — a human approval point. No agent; the card waits here for
+  approve/reject.
+- **`type: "agent"`** — runs work. Carries an `agent` config: `{ name, role/prompt,
+  tools[] }`. A tiny **step wizard** (in the setup modal or the `/dlc-yolo` command)
+  collects that config conversationally when the step is created.
+
+Each step may set its OWN execution profile — `trust` (manual/assisted/autonomous) and
+`depth` (quick/standard/deep) — overriding the pipeline default for that step only. This
+is how "this step runs YOLO/autonomous+deep, that gate stays manual" is expressed.
+
+Every step has a `label` (`dlc:<step-id>`) used as the GitHub stage label (below).
+
+### Source of truth (GitHub-first, local fallback)
+
+`pipeline.sot` and each card's stage follow **GitHub as the source of truth**:
+
+- **`sot: "github"`** — the card's stage is authoritative from its GitHub issue's
+  `dlc:<step>` label. Advancing/rejecting a card **relabels the issue** (remove old
+  `dlc:*`, add the new one) via `gh`, then reflects it into `state.json`. External tools
+  (or a human relabeling on GitHub) can move a card by changing its label.
+- **`sot: "local"`** — used when `gh`/the repo is unavailable. The pipeline runs entirely
+  from `state.json`. When `gh` access returns, the orchestrator **re-syncs to GitHub as
+  SoT**: it files/updates the issue, applies the current `dlc:<step>` label, and flips the
+  card to `sot: "github"`.
+
+### Step labels on GitHub
+
+The orchestrator maintains a `dlc:<step-id>` label per pipeline step on the owned repo
+(alongside `dlc-backlog`). On stage change it moves the single active `dlc:*` label. Label
+creation is idempotent:
+`gh label create dlc:<step-id> --color <hex> --description "DLC-YOLO stage" 2>/dev/null || true`.
+Reading stage from GitHub = the issue's current `dlc:*` label; writing = remove others, add one.
+
+**Issue Radar integration (read-only).** The setup modal can list repos already connected
+in Issue Radar by READING `~/.kiro/crew/apps/issue-radar/data/config.json` (its
+`repos[]`). DLC-YOLO never writes to Issue Radar's data dir — that store is lock-guarded
+and cache-first, so it is strictly a read-only source of candidate repos. Issue Radar has
+no cron of its own (an in-process 60s watcher), so DLC-YOLO's own crons run independently
+and cannot interfere with it.
+
+## The `/dlc-yolo` command
+
+`/dlc-yolo` is a skill that turns the current chat session into a pipeline driver. On
+invoke it asks whether to:
+
+1. **Start a new pipeline conversation** — spec a feature/idea freely with the user, then
+   **file it to GitHub as an issue** on the target pipeline's repo (`gh issue create`),
+   apply the first `dlc:<step>` label, and record a card in `state.json` linked to that
+   issue (`sot: github`). The local advance cron then triggers off the labeled issue.
+2. **Maintain an existing pipeline** — pick an existing pipeline/card, review where it is
+   (read its issue's `dlc:*` label), and drive the next step: answer a gate, re-spec,
+   re-trigger a phase, or park/back-step.
+
+The command can spec anything; the invariant is that whatever it produces is **persisted to
+GitHub as an issue** so the pipeline is drivable locally from labels. If `gh` is
+unavailable it creates a `sot: local` card and tells the user it will re-sync to GitHub
+when access returns.
 
 ## Cron Behavior
 
-The `sdlc-pipeline-advance` cron (every 120s):
-1. Load pipeline state
-2. For each card in an auto-stage that has no active agent working on it:
-   - Spawn the appropriate agent
-   - Mark card as "in-progress"
-3. For each card at a human gate:
-   - Check if approval was given (via storage)
-   - If approved, advance to next stage
-4. Report errors but do NOT retry failed stages without user input
+DLC-YOLO uses a **two-tier** model, deliberately splitting deterministic bookkeeping from
+agent reasoning:
+
+- **`dlc-yolo-advance` (every 120s) — a zero-token SCRIPT cron.** Moving a card between
+  steps is pure bookkeeping (read `state.json` → next step in the pipeline's `steps[]` →
+  move the `dlc:<step>` label → write state), so it is NOT an LLM turn. The script
+  (`~/.kiro/crew/crons/dlc_yolo_advance.py:advance`):
+  1. advances any card whose current agent step is marked done (`step_status[step]=="done"`),
+  2. auto-approves gate steps only under `trust: autonomous` (else leaves them waiting),
+  3. escalates ON DEMAND — when a card lands on an agent step not yet started, it fires a
+     single `spawn_run` for the orchestrator to run THAT step, then moves on,
+  4. stays SILENT on empty cycles, and notifies only on a real signal (a gate awaiting a
+     human).
+- **Agent tier (on demand only).** The real reasoning lives in the step agents
+  (spec/design/impl/review), spawned by the escalation above or by the `/dlc-yolo` command
+  — never as a standing loop. `dlc-yolo-backlog-intake` (every 900s) likewise only reads
+  `dlc-backlog` issues and creates intake cards.
+
+### Step Review Contract (agents own the judgment)
+
+Because the advance loop is deterministic, every ambiguity/effort decision is the STEP
+AGENT's responsibility, recorded in state so the loop acts on numbers, not prose. Each
+agent step, when it finishes its work, MUST:
+
+1. Write its artifact(s) to the card's `artifacts` and spec dir.
+2. **Attribute effort / scope** for its phase into `effort.scope[<step>]` (and
+   `effort.features[]` / `effort.total` for the spec agent) — this is what the scope-growth
+   back-step compares.
+3. **Self-review** against the step's acceptance criteria; if the phase outgrew the prior
+   phase beyond the depth factor, or a feature can't be spec'd now, either flag a back-step
+   or park the feature to `dlc-backlog` (the agent decides — the loop does not).
+4. Set `card.step_status[<step>] = "done"` when the step is genuinely complete. The
+   deterministic loop advances ONLY on that signal; it never judges completeness itself.
+
+`step_status` values: `pending` (escalated / running), `done` (agent finished — safe to
+advance), `advanced` (loop has moved past it). Gates use `approved` (set by the UI / user).
 
 ---
 
@@ -199,3 +335,66 @@ CREATES cards — it never advances or executes, so it stays within the same saf
 
 Never park to a repo the card does not own, and never write issues cross-repo — the
 backlog lives in each card's own `source.repo`.
+
+---
+
+## Effort Attribution & Back-Step
+
+The **spec-agent** attributes an **effort estimate** to every spec. This drives two
+scope-safety movements: parking an over-scoped *feature* (backlog, above) and stepping a
+whole *card* back one pipeline level when a phase outgrows the phase before it.
+
+### Effort points
+
+Each feature/requirement gets a T-shirt size mapped to points:
+
+| Size | Points |
+|------|--------|
+| `S` | 1 |
+| `M` | 3 |
+| `L` | 5 |
+| `XL` | 8 |
+
+The spec-agent records per-feature effort in `effort.features[]` and the rolled-up
+`effort.total`. As each phase runs it records that phase's realized scope in
+`effort.scope[phase]` (sum of the effort points the phase actually produced — e.g. the
+design's component count × size, the tasks list total).
+
+### Scope-growth back-step (heuristic — no token accounting)
+
+At each auto-phase the orchestrator compares the phase's realized scope to the phase
+before it. If a step **outgrows its predecessor's scope** beyond a factor
+(default `GROWTH_FACTOR = 2.0`), the step is proposed to **back-step one level**:
+
+| Phase outgrows… | Back-step to | Meaning |
+|-----------------|--------------|---------|
+| `implement` > `design` scope | **design** | "this became a design ticket, not just coding" |
+| `tasks` > `design` scope | **design** | tasks reveal the design was underspecified |
+| `design` > `requirements` scope | **requirements** | scope creep — re-spec smaller |
+
+Rule: `scope[current] > GROWTH_FACTOR × scope[predecessor]` ⇒ propose back-step.
+A single over-scoped **feature** (rather than the whole card) is instead **parked** to the
+backlog; the whole-card back-step fires when the *aggregate* scope has grown.
+
+### Trust-gated proposal
+
+- `manual` / `assisted`: the orchestrator calls `ask_question` — "Card <title>'s <phase>
+  scope grew Nx over <predecessor>. Step back to re-scope, or continue?" Options:
+  `Step back to <predecessor>` | `Park the largest feature` | `Continue anyway`.
+- `autonomous`: auto-back-step (or auto-park the largest feature if that alone brings it
+  under the factor), and note it.
+
+Every back-step appends `{from, to, reason, at}` to `backstep_history` and moves the card
+to the predecessor stage; the re-run of that stage is expected to produce a smaller scope.
+Guard against ping-pong: do not back-step the same card across the same boundary more than
+twice — if it still overflows, park features instead and notify the user.
+
+### Budget source
+
+`GROWTH_FACTOR` is the only knob for the heuristic. Depth tunes it: `quick` is stricter
+(1.5), `standard` = 2.0, `deep` is lenient (3.0) since deep work is expected to expand.
+
+> **Parked (not built): predictive token budgeting (Option B).** A future `effort-budget`
+> side-skill would log real per-phase token spend, build a rolling baseline, and *predict*
+> the next phase's spend to trigger back-steps on projected cost rather than scope ratio.
+> Deferred until spend history exists; the heuristic above ships first and needs no data.

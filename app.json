@@ -14,7 +14,8 @@
     "agents/review-agent.json"
   ],
   "skills": [
-    "skills/pipeline-workflow"
+    "skills/pipeline-workflow",
+    "skills/dlc-yolo"
   ],
   "permissions": {
     "api": [
@@ -55,7 +56,7 @@
     {
       "name": "dlc-yolo-advance",
       "every": 120,
-      "message": "Load pipeline state from /tmp/dlc-yolo/state.json. For each card in an auto-stage (intake, requirements, design, tasks, implement, review, pr) that has no trigger decision recorded for its current phase: compute the card's effective trust/depth (card value else config default). Under trust=autonomous auto-pick the recommended trigger and auto-approve gates; under manual/assisted use ask_question for requirements/design/tasks (Spec Builder / inline / skip) and implement (Task Runner / inline / skip), then act and record to trigger_history. Handle intake/review/pr inline. Cards at a human gate (gate-*) wait for approval unless trust=autonomous. Persist state after any change. Do not re-ask for a card+phase already recorded."
+      "script": "~/.kiro/crew/crons/dlc_yolo_advance.py:advance"
     },
     {
       "name": "dlc-yolo-backlog-intake",

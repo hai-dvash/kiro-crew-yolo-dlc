@@ -196,6 +196,7 @@ scheduled crons, `/api/file-read` + `/api/file-write`, the SDK chat launcher
 
 ```bash
 cd ui && npm install --legacy-peer-deps && npx vite build
+cp crons/dlc_yolo_advance.py ~/.kiro/crew/crons/   # deploy the advance loop
 kirocrew app install /path/to/kiro-crew-yolo-dlc
 kirocrew app enable dlc-yolo
 ```
@@ -221,6 +222,8 @@ kiro-crew-yolo-dlc/
 ├── skills/
 │   ├── pipeline-workflow/SKILL.md    ← pipelines, steps, modes, sandbox, backlog, SoT, effort
 │   └── dlc-yolo/SKILL.md             ← the /dlc-yolo command
+├── crons/
+│   └── dlc_yolo_advance.py           ← zero-token deterministic advance loop (deployed to ~/.kiro/crew/crons/)
 ├── ui/
 │   ├── src/App.tsx                   ← kanban, graph, setup modal, agent panel (@kirocrew/app-sdk)
 │   └── vite.config.ts

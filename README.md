@@ -199,7 +199,7 @@ scheduled crons, `/api/file-read` + `/api/file-write`, the SDK chat launcher
 ## Installation
 
 ```bash
-cd ui && npm install --legacy-peer-deps && npx vite build
+cd ui && npm install --legacy-peer-deps && npx vite build   # outputs to ui/dist/ (served at /apps/dlc-yolo/ui/dist/index.mjs)
 cp crons/dlc_yolo_advance.py ~/.kiro/crew/crons/   # deploy the advance loop
 kirocrew app install /path/to/kiro-crew-yolo-dlc
 kirocrew app enable dlc-yolo

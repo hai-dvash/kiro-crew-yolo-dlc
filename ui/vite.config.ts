@@ -9,6 +9,8 @@ export default defineConfig({
       formats: ['es'],
       fileName: () => 'index.mjs',
     },
+    // App loads from /apps/dlc-yolo/ui/dist/index.mjs — the manifest "entry" resolves
+    // relative to the ui/ dir, so vite must output to ui/dist/.
     outDir: 'dist',
     rollupOptions: {
       external: [

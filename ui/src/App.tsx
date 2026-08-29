@@ -84,6 +84,14 @@ const STAGES = [
 
 type Stage = typeof STAGES[number]
 
+// Seed/demo repos shipped as sample data — surfaced as "Example: …" in the rail so
+// users know they are removable (and can delete them via the pipeline delete button).
+const EXAMPLE_REPOS = new Set([
+  'hai-dvash/webapp',
+  'hai-dvash/dashboard',
+  'hai-dvash/api-core',
+])
+
 const STAGE_LABELS: Record<Stage, string> = {
   'intake': 'Intake',
   'requirements': 'Requirements',
@@ -730,47 +738,79 @@ function BacklogView({ cards }: { cards: PipelineCard[] }) {
 }
 
 // --- Repo / workspace scroller (left sidebar, multi-select) ---
-function RepoScroller({ repos, selected, onToggle, onClear, onAddWorkspace }: {
+function RepoScroller({ repos, selected, onToggle, onClear, onAddWorkspace, onEdit }: {
   repos: { name: string; count: number }[]
   selected: Set<string>
   onToggle: (repo: string) => void
   onClear: () => void
   onAddWorkspace: () => void
+  onEdit: (repo: string) => void
 }) {
   const total = repos.reduce((n, r) => n + r.count, 0)
   const allSelected = selected.size === 0 // empty set = viewing all
 
   const Row = ({ name, count, label, checked, onClick, isAll }: {
     name?: string; count: number; label: string; checked: boolean; onClick: () => void; isAll?: boolean
-  }) => (
-    <button
-      onClick={onClick}
-      className="w-full text-left px-2.5 py-2 rounded-md transition-all flex items-center gap-2"
+  }) => {
+    const [hover, setHover] = useState(false)
+    return (
+    <div
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      className="relative w-full rounded-md transition-all flex items-center"
       style={{
         background: checked ? 'color-mix(in srgb, var(--accent) 16%, transparent)' : 'transparent',
         boxShadow: checked ? 'inset 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent)' : 'none',
       }}
     >
-      {/* checkbox (not shown for the All row) */}
-      {!isAll ? (
-        <span className="w-3.5 h-3.5 rounded flex items-center justify-center flex-shrink-0"
+      <button
+        onClick={onClick}
+        className="flex-1 min-w-0 text-left px-2.5 py-2 flex items-center gap-2"
+      >
+        {/* checkbox (not shown for the All row) */}
+        {!isAll ? (
+          <span className="w-3.5 h-3.5 rounded flex items-center justify-center flex-shrink-0"
+            style={{
+              background: checked ? 'var(--accent)' : 'transparent',
+              border: `1.5px solid ${checked ? 'var(--accent)' : 'var(--border-strong, var(--border))'}`,
+            }}>
+            {checked && (
+              <svg width="9" height="9" viewBox="0 0 10 10"><path d="M1 5l2.5 2.5L9 2" fill="none" stroke="var(--bg)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+            )}
+          </span>
+        ) : (
+          <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: checked ? 'var(--accent)' : 'var(--border-strong, var(--border))' }} />
+        )}
+        <span className="text-[12px] font-medium truncate flex-1"
+          style={{ color: checked ? 'var(--text-strong, var(--text))' : 'var(--muted-strong, var(--muted))' }}>{label}</span>
+        <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold flex-shrink-0"
+          style={{ background: 'var(--bg-hover, var(--border))', color: 'var(--muted)' }}>{count}</span>
+      </button>
+      {/* Pencil → Pipeline Edit modal (which contains the type-to-confirm Danger Zone). */}
+      {!isAll && name && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onEdit(name) }}
+          title={`Edit pipeline "${label}"`}
+          aria-label={`Edit pipeline ${label}`}
+          className="mr-1.5 w-6 h-6 rounded flex items-center justify-center flex-shrink-0 transition-all"
           style={{
-            background: checked ? 'var(--accent)' : 'transparent',
-            border: `1.5px solid ${checked ? 'var(--accent)' : 'var(--border-strong, var(--border))'}`,
-          }}>
-          {checked && (
-            <svg width="9" height="9" viewBox="0 0 10 10"><path d="M1 5l2.5 2.5L9 2" fill="none" stroke="var(--bg)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
-          )}
-        </span>
-      ) : (
-        <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: checked ? 'var(--accent)' : 'var(--border-strong, var(--border))' }} />
+            opacity: hover ? 1 : 0,
+            pointerEvents: hover ? 'auto' : 'none',
+            color: 'var(--text-strong, var(--text))',
+            background: 'var(--bg-hover, color-mix(in srgb, var(--accent) 12%, transparent))',
+            border: '1px solid var(--border-strong, var(--border))',
+          }}
+          onMouseEnter={(e) => { const t = e.currentTarget as HTMLElement; t.style.color = 'var(--accent)'; t.style.borderColor = 'var(--accent)' }}
+          onMouseLeave={(e) => { const t = e.currentTarget as HTMLElement; t.style.color = 'var(--text-strong, var(--text))'; t.style.borderColor = 'var(--border-strong, var(--border))' }}
+        >
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+            <path d="M11.5 1.5l3 3L5 14l-3.5.5L2 11 11.5 1.5z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round"/>
+          </svg>
+        </button>
       )}
-      <span className="text-[12px] font-medium truncate flex-1"
-        style={{ color: checked ? 'var(--text-strong, var(--text))' : 'var(--muted-strong, var(--muted))' }}>{label}</span>
-      <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold flex-shrink-0"
-        style={{ background: 'var(--bg-hover, var(--border))', color: 'var(--muted)' }}>{count}</span>
-    </button>
-  )
+    </div>
+    )
+  }
 
   return (
     <div className="flex-shrink-0 w-52 flex flex-col gap-1 pr-3 border-r self-stretch overflow-y-auto"
@@ -785,7 +825,7 @@ function RepoScroller({ repos, selected, onToggle, onClear, onAddWorkspace }: {
       <Row isAll count={total} label="All repos" checked={allSelected} onClick={onClear} />
       {repos.map(r => (
         <Row key={r.name} name={r.name} count={r.count}
-          label={r.name.includes('/') ? r.name.split('/')[1] : r.name}
+          label={(EXAMPLE_REPOS.has(r.name) ? 'Example: ' : '') + (r.name.includes('/') ? r.name.split('/')[1] : r.name)}
           checked={selected.has(r.name)} onClick={() => onToggle(r.name)} />
       ))}
 
@@ -973,21 +1013,28 @@ function AgentSetupPanel({ initial, knownAgents, repo, stepName, onSave, onClose
 // --- Pipeline Setup Modal ---
 interface RepoCandidate { repo: string; source: 'issue-radar' | 'workspace' | 'manual'; detail?: string }
 
-function PipelineSetupModal({ candidates, existingRepos, defaults, knownAgents, onCreate, onClose }: {
+function PipelineSetupModal({ candidates, existingRepos, defaults, knownAgents, onCreate, onClose, editPipeline, cardCount, isExample, onDelete }: {
   candidates: RepoCandidate[]
   existingRepos: Set<string>
   defaults: PipelineConfig
   knownAgents: string[]
   onCreate: (p: { repo: string; source: RepoCandidate['source']; trust: Trust; depth: Depth; backlog_intake: boolean; steps: PipelineStep[] }) => void
   onClose: () => void
+  editPipeline?: Pipeline          // when set, the modal is in EDIT mode
+  cardCount?: number               // cards in the pipeline (for the Danger Zone copy)
+  isExample?: boolean
+  onDelete?: (repo: string) => void
 }) {
-  const [repo, setRepo] = useState('')
-  const [source, setSource] = useState<RepoCandidate['source']>('manual')
-  const [trust, setTrust] = useState<Trust>(defaults.trust)
-  const [depth, setDepth] = useState<Depth>(defaults.depth)
-  const [backlog, setBacklog] = useState(true)
-  const [steps, setSteps] = useState<PipelineStep[]>(() => DEFAULT_STEPS.map(s => ({ ...s })))
+  const isEdit = !!editPipeline
+  const [repo, setRepo] = useState(editPipeline?.repo || '')
+  const [source, setSource] = useState<RepoCandidate['source']>(editPipeline?.source || 'manual')
+  const [trust, setTrust] = useState<Trust>(editPipeline?.trust || defaults.trust)
+  const [depth, setDepth] = useState<Depth>(editPipeline?.depth || defaults.depth)
+  const [backlog, setBacklog] = useState(editPipeline?.backlog_intake ?? true)
+  const [steps, setSteps] = useState<PipelineStep[]>(() => (editPipeline?.steps?.length ? editPipeline.steps.map(s => ({ ...s })) : DEFAULT_STEPS.map(s => ({ ...s }))))
   const [editingAgentIdx, setEditingAgentIdx] = useState<number | null>(null)
+  const [confirmText, setConfirmText] = useState('')
+  const [modalView, setModalView] = useState<'settings' | 'danger'>('settings')
 
   const slug = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'step'
   const updateStep = (i: number, patch: Partial<PipelineStep>) =>
@@ -1006,7 +1053,7 @@ function PipelineSetupModal({ candidates, existingRepos, defaults, knownAgents, 
 
   const pick = (c: RepoCandidate) => { setRepo(c.repo); setSource(c.source) }
   const valid = /^[^/\s]+\/[^/\s]+$/.test(repo.trim()) || candidates.some(c => c.repo === repo)
-  const dup = existingRepos.has(repo.trim())
+  const dup = !isEdit && existingRepos.has(repo.trim())
 
   const Seg = <T extends string>({ value, options, tokens, onPick }: {
     value: T; options: T[]; tokens: Record<string, string>; onPick: (v: T) => void
@@ -1064,13 +1111,35 @@ function PipelineSetupModal({ candidates, existingRepos, defaults, knownAgents, 
         {/* Header */}
         <div className="px-5 py-4 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border)' }}>
           <div>
-            <div className="text-base font-semibold" style={{ color: 'var(--text-strong, var(--text))' }}>New Pipeline</div>
-            <div className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>Configure a pipeline for a repository or workspace</div>
+            <div className="text-base font-semibold" style={{ color: 'var(--text-strong, var(--text))' }}>{isEdit ? 'Edit Pipeline' : 'New Pipeline'}</div>
+            <div className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>{isEdit ? (repo.includes('/') ? repo.split('/')[1] : repo) : 'Configure a pipeline for a repository or workspace'}</div>
           </div>
           <button onClick={onClose} className="text-lg leading-none px-2" style={{ color: 'var(--muted)' }}>×</button>
         </div>
 
-        <div className="px-5 py-4 flex flex-col gap-4 overflow-y-auto flex-1">
+        {/* Edit-mode tabs: Settings | Danger Zone (same modal, separate pages) */}
+        {isEdit && (
+          <div className="px-5 pt-3 flex gap-1" style={{ borderBottom: '1px solid var(--border)' }}>
+            {(['settings', 'danger'] as const).map(v => {
+              const on = modalView === v
+              const isDanger = v === 'danger'
+              return (
+                <button key={v} onClick={() => setModalView(v)}
+                  className="text-[12px] px-3 py-2 font-semibold transition-all"
+                  style={{
+                    color: on ? (isDanger ? 'var(--danger, #ef4444)' : 'var(--accent)') : 'var(--muted)',
+                    borderBottom: `2px solid ${on ? (isDanger ? 'var(--danger, #ef4444)' : 'var(--accent)') : 'transparent'}`,
+                    marginBottom: '-1px',
+                  }}>
+                  {v === 'settings' ? 'Settings' : 'Danger Zone'}
+                </button>
+              )
+            })}
+          </div>
+        )}
+
+        <div className="px-5 py-4 flex flex-col gap-4 overflow-y-auto flex-1"
+          style={{ display: isEdit && modalView === 'danger' ? 'none' : 'flex' }}>
           {/* Repo picker */}
           <div>
             <label className="text-[11px] uppercase tracking-wider" style={{ color: 'var(--muted)' }}>Repository</label>
@@ -1078,7 +1147,8 @@ function PipelineSetupModal({ candidates, existingRepos, defaults, knownAgents, 
               value={repo}
               onChange={e => { setRepo(e.target.value); setSource('manual') }}
               placeholder="owner/name"
-              className="mt-1 w-full px-3 py-2 rounded-md text-sm outline-none"
+              disabled={isEdit}
+              className="mt-1 w-full px-3 py-2 rounded-md text-sm outline-none disabled:opacity-60"
               style={{ background: 'var(--bg-elevated, var(--bg))', border: `1px solid ${dup ? 'var(--danger)' : 'var(--border)'}`, color: 'var(--text)' }}
             />
             {dup && <div className="text-[11px] mt-1" style={{ color: 'var(--danger)' }}>A pipeline for this repo already exists.</div>}
@@ -1192,22 +1262,159 @@ function PipelineSetupModal({ candidates, existingRepos, defaults, knownAgents, 
           </div>
         </div>
 
+        {/* Danger Zone tab (edit mode). Examples: one-click "Remove Example".
+            Real pipelines: type-to-confirm delete. */}
+        {isEdit && modalView === 'danger' && onDelete && (() => {
+          const dzName = repo.includes('/') ? repo.split('/')[1] : repo
+          const canDelete = confirmText.trim() === dzName
+          return (
+            <div className="px-5 pb-4 pt-4">
+              {isExample ? (
+                <div className="rounded-lg p-4 flex flex-col gap-3"
+                  style={{ border: '1px solid var(--border-strong, var(--border))', background: 'var(--bg-elevated, transparent)' }}>
+                  <div className="text-[12px]" style={{ color: 'var(--text, var(--muted))' }}>
+                    This is a bundled <strong>example</strong> pipeline ({cardCount ?? 0} sample card{(cardCount ?? 0) === 1 ? '' : 's'}). Remove it any time — it's demo data, not real work.
+                  </div>
+                  <button
+                    onClick={() => { onDelete(repo); onClose() }}
+                    className="w-full px-3 py-2 rounded-md text-[13px] font-semibold transition-all"
+                    style={{ background: 'var(--accent)', color: 'var(--bg)' }}
+                  >
+                    Remove Example
+                  </button>
+                </div>
+              ) : (
+                <div className="rounded-lg p-4 flex flex-col gap-3"
+                  style={{ border: '1px solid color-mix(in srgb, var(--danger, #ef4444) 45%, var(--border))', background: 'color-mix(in srgb, var(--danger, #ef4444) 6%, transparent)' }}>
+                  <div className="text-[12px] font-semibold uppercase tracking-wide" style={{ color: 'var(--danger, #ef4444)' }}>Danger Zone</div>
+                  <div className="text-[12px]" style={{ color: 'var(--text, var(--muted))' }}>
+                    Deleting removes this pipeline and its {cardCount ?? 0} card{(cardCount ?? 0) === 1 ? '' : 's'} from DLC-YOLO's local state.
+                    It does <strong>not</strong> touch GitHub issues or labels. This cannot be undone.
+                  </div>
+                  <label className="text-[11px]" style={{ color: 'var(--muted)' }}>
+                    Type <code className="px-1 py-0.5 rounded" style={{ background: 'var(--bg-hover, var(--border))', color: 'var(--text-strong, var(--text))' }}>{dzName}</code> to confirm:
+                  </label>
+                  <input
+                    value={confirmText}
+                    onChange={e => setConfirmText(e.target.value)}
+                    placeholder={dzName}
+                    className="w-full px-3 py-2 rounded-md text-[13px] outline-none"
+                    style={{ background: 'var(--bg-elevated, var(--bg))', border: '1px solid var(--border-strong, var(--border))', color: 'var(--text-strong, var(--text))' }}
+                  />
+                  <button
+                    disabled={!canDelete}
+                    onClick={() => { onDelete(repo); onClose() }}
+                    className="w-full px-3 py-2 rounded-md text-[13px] font-semibold transition-all"
+                    style={{
+                      background: canDelete ? 'var(--danger, #ef4444)' : 'color-mix(in srgb, var(--danger, #ef4444) 20%, transparent)',
+                      color: canDelete ? '#fff' : 'var(--muted)',
+                      cursor: canDelete ? 'pointer' : 'not-allowed',
+                    }}
+                  >
+                    Delete pipeline
+                  </button>
+                </div>
+              )}
+            </div>
+          )
+        })()}
+
         {/* Footer */}
         <div className="px-5 py-3 flex justify-end gap-2" style={{ borderTop: '1px solid var(--border)', background: 'var(--bg-elevated, var(--card))' }}>
           <button onClick={onClose} className="text-xs px-3 py-1.5 rounded-md font-medium" style={{ color: 'var(--muted)' }}>Cancel</button>
+          {!(isEdit && modalView === 'danger') && (
           <button
-            disabled={!valid || dup}
+            disabled={!valid || (!isEdit && dup)}
             onClick={() => onCreate({
               repo: repo.trim(), source, trust, depth, backlog_intake: backlog,
               steps: steps.map(s => ({ ...s, label: `dlc:${s.id}` })),
             })}
             className="text-xs px-3 py-1.5 rounded-md font-semibold transition-opacity disabled:opacity-40"
             style={{ background: 'var(--accent)', color: 'var(--bg)' }}>
-            Create Pipeline
+            {isEdit ? 'Save Pipeline' : 'Create Pipeline'}
           </button>
+          )}
         </div>
           </>
         )}
+      </div>
+    </div>
+  )
+}
+
+// --- Pipeline Edit Modal (opened from the rail pencil) ---
+// Shows pipeline summary + a Danger Zone whose "Delete pipeline" button stays disabled
+// until the user types the exact pipeline name — a type-to-confirm safety gate.
+function PipelineEditModal({ repo, cardCount, isExample, onDelete, onClose }: {
+  repo: string
+  cardCount: number
+  isExample: boolean
+  onDelete: (repo: string) => void
+  onClose: () => void
+}) {
+  const name = repo.includes('/') ? repo.split('/')[1] : repo
+  const [confirmText, setConfirmText] = useState('')
+  const canDelete = confirmText.trim() === name
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: 'color-mix(in srgb, var(--bg) 70%, black)' }} onClick={onClose}>
+      <div className="w-full max-w-md rounded-xl overflow-hidden flex flex-col"
+        style={{ background: 'var(--bg-elevated, var(--bg))', border: '1px solid var(--border)' }}
+        onClick={e => e.stopPropagation()}>
+        {/* header */}
+        <div className="px-5 py-4 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border)' }}>
+          <div className="min-w-0">
+            <div className="text-[15px] font-semibold truncate" style={{ color: 'var(--text-strong, var(--text))' }}>
+              {isExample ? 'Example: ' : ''}{name}
+            </div>
+            <div className="text-[11px] truncate" style={{ color: 'var(--muted)' }}>{repo}</div>
+          </div>
+          <button onClick={onClose} className="w-7 h-7 rounded flex items-center justify-center" style={{ color: 'var(--muted)' }} aria-label="Close">
+            <svg width="12" height="12" viewBox="0 0 12 12"><path d="M2 2l8 8M10 2l-8 8" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>
+          </button>
+        </div>
+
+        {/* body */}
+        <div className="px-5 py-4 flex flex-col gap-4">
+          <div className="text-[12px]" style={{ color: 'var(--muted)' }}>
+            {cardCount} card{cardCount === 1 ? '' : 's'} in this pipeline.
+            {isExample && ' This is bundled example data — safe to remove.'}
+          </div>
+
+          {/* Danger Zone */}
+          <div className="rounded-lg p-4 flex flex-col gap-3"
+            style={{ border: '1px solid color-mix(in srgb, var(--danger, #ef4444) 45%, var(--border))', background: 'color-mix(in srgb, var(--danger, #ef4444) 6%, transparent)' }}>
+            <div className="text-[12px] font-semibold uppercase tracking-wide" style={{ color: 'var(--danger, #ef4444)' }}>Danger Zone</div>
+            <div className="text-[12px]" style={{ color: 'var(--text, var(--muted))' }}>
+              Deleting removes this pipeline and its {cardCount} card{cardCount === 1 ? '' : 's'} from DLC-YOLO's local state.
+              It does <strong>not</strong> touch GitHub issues or labels. This cannot be undone.
+            </div>
+            <label className="text-[11px]" style={{ color: 'var(--muted)' }}>
+              Type <code className="px-1 py-0.5 rounded" style={{ background: 'var(--bg-hover, var(--border))', color: 'var(--text-strong, var(--text))' }}>{name}</code> to confirm:
+            </label>
+            <input
+              autoFocus
+              value={confirmText}
+              onChange={e => setConfirmText(e.target.value)}
+              placeholder={name}
+              className="w-full px-3 py-2 rounded-md text-[13px] outline-none"
+              style={{ background: 'var(--bg, #fff)', border: '1px solid var(--border-strong, var(--border))', color: 'var(--text-strong, var(--text))' }}
+            />
+            <button
+              disabled={!canDelete}
+              onClick={() => { onDelete(repo); onClose() }}
+              className="w-full px-3 py-2 rounded-md text-[13px] font-semibold transition-all"
+              style={{
+                background: canDelete ? 'var(--danger, #ef4444)' : 'color-mix(in srgb, var(--danger, #ef4444) 20%, transparent)',
+                color: canDelete ? '#fff' : 'var(--muted)',
+                cursor: canDelete ? 'pointer' : 'not-allowed',
+              }}
+            >
+              Delete pipeline
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   )
@@ -1223,6 +1430,7 @@ export default function SdlcPipeline() {
   const [view, setView] = useState<ViewMode>('pipeline')
   const [repoFilter, setRepoFilter] = useState<Set<string>>(new Set())
   const [setupOpen, setSetupOpen] = useState(false)
+  const [editRepo, setEditRepo] = useState<string | null>(null)
   const [candidates, setCandidates] = useState<RepoCandidate[]>([])
   const kanbanRef = useRef<HTMLDivElement>(null)
 
@@ -1423,16 +1631,36 @@ export default function SdlcPipeline() {
     const id = 'pl-' + Math.random().toString(36).slice(2, 10)
     await mutateState(state => {
       state.pipelines = state.pipelines || []
-      if (state.pipelines.some((pl: Pipeline) => pl.repo === p.repo)) return
-      state.pipelines.push({
-        id, repo: p.repo, source: p.source,
-        trust: p.trust, depth: p.depth, backlog_intake: p.backlog_intake,
-        sot: 'github', steps: p.steps,
-        created_at: now,
-      })
+      const existing = state.pipelines.find((pl: Pipeline) => pl.repo === p.repo)
+      if (existing) {
+        // Edit mode: update the existing pipeline in place.
+        existing.source = p.source
+        existing.trust = p.trust
+        existing.depth = p.depth
+        existing.backlog_intake = p.backlog_intake
+        existing.steps = p.steps
+      } else {
+        state.pipelines.push({
+          id, repo: p.repo, source: p.source,
+          trust: p.trust, depth: p.depth, backlog_intake: p.backlog_intake,
+          sot: 'github', steps: p.steps,
+          created_at: now,
+        })
+      }
     })
     setSetupOpen(false)
+    setEditRepo(null)
     setRepoFilter(new Set([p.repo]))
+  }, [mutateState])
+
+  // Pipeline deletion (invoked from the edit modal's type-to-confirm Danger Zone).
+  // Removes the pipeline entry (if any) AND every card for that repo. Does not touch GitHub.
+  const deletePipeline = useCallback(async (repo: string) => {
+    await mutateState(state => {
+      state.pipelines = (state.pipelines || []).filter((pl: Pipeline) => pl.repo !== repo)
+      state.cards = (state.cards || []).filter((c: PipelineCard) => (c.source?.repo || 'unlinked') !== repo)
+    })
+    setRepoFilter(prev => { const n = new Set(prev); n.delete(repo); return n })
   }, [mutateState])
 
   const cardsByStage = useMemo(() => {
@@ -1502,6 +1730,24 @@ export default function SdlcPipeline() {
           onClose={() => setSetupOpen(false)}
         />
       )}
+      {editRepo && (
+        <PipelineSetupModal
+          candidates={candidates}
+          existingRepos={new Set(pipelines.map(p => p.repo))}
+          defaults={config}
+          knownAgents={['spec-agent', 'design-agent', 'impl-agent', 'review-agent', 'orchestrator']}
+          editPipeline={
+            pipelines.find(p => p.repo === editRepo) ||
+            // demo repos have cards but no pipelines[] entry — synthesize a default to edit
+            { id: 'pl-' + editRepo, repo: editRepo, source: 'manual', trust: config.trust, depth: config.depth, backlog_intake: true, sot: 'github', steps: DEFAULT_STEPS.map(s => ({ ...s })), created_at: new Date().toISOString() }
+          }
+          cardCount={allCards.filter(c => (c.source?.repo || 'unlinked') === editRepo).length}
+          isExample={EXAMPLE_REPOS.has(editRepo)}
+          onCreate={createPipeline}
+          onDelete={deletePipeline}
+          onClose={() => setEditRepo(null)}
+        />
+      )}
       <div className="px-6 pb-8 overflow-y-auto flex-1 min-h-0">
         <PipelineWorld steps={activeSteps} cardsByStage={cardsByStage} onNodeClick={scrollToStage} />
 
@@ -1520,6 +1766,7 @@ export default function SdlcPipeline() {
             onToggle={toggleRepo}
             onClear={clearRepos}
             onAddWorkspace={openSetup}
+            onEdit={setEditRepo}
           />
 
           <div className="flex-1 min-w-0">

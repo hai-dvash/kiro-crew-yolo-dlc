@@ -183,4 +183,12 @@ kiro-crew-yolo-dlc/
 
 ## License
 
-MIT © hai-dvash 2026
+Apache License 2.0 © 2026 hai-dvash
+
+---
+
+*DLC-YOLO is an independent, community-built extension for the KiroCrew agent platform.
+It is not affiliated with, endorsed by, or an official product of KiroCrew. "KiroCrew"
+and related names are the property of their respective owners; they are referenced here
+only to describe the platform this app runs on. DLC-YOLO bundles no KiroCrew source —
+it links against the public `@kirocrew/app-sdk` at runtime.*

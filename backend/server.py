@@ -1,6 +1,7 @@
-"""SDLC Pipeline backend — state engine and API.
+"""DLC-YOLO backend — state engine and API.
 
-Manages pipeline cards, stage transitions, and gate approvals.
+The gateway proxies /apps/dlc-yolo/api/* to this server's root.
+So /apps/dlc-yolo/api/cards → this server's /cards
 """
 import json
 import os
@@ -10,8 +11,8 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 PORT = int(os.environ.get("PORT", 9100))
-APP_NAME = os.environ.get("KIROCREW_APP_NAME", "sdlc-pipeline")
-DATA_DIR = Path(os.environ.get("KIROCREW_APP_DATA", "/tmp/sdlc-pipeline"))
+APP_NAME = os.environ.get("KIROCREW_APP_NAME", "dlc-yolo")
+DATA_DIR = Path(os.environ.get("KIROCREW_APP_DATA", "/tmp/dlc-yolo"))
 
 STAGES = [
     "intake", "requirements", "gate-spec", "design", "tasks",
@@ -46,10 +47,10 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/health":
             self._json(200, {"status": "ok", "app": APP_NAME})
-        elif self.path == "/api/apps/sdlc-pipeline/cards":
+        elif self.path == "/api/cards":
             state = _load_state()
             self._json(200, {"cards": state["cards"]})
-        elif self.path.startswith("/api/apps/sdlc-pipeline/cards/"):
+        elif self.path.startswith("/api/cards/"):
             card_id = self.path.split("/")[-1]
             state = _load_state()
             card = next((c for c in state["cards"] if c["id"] == card_id), None)
@@ -57,7 +58,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, card)
             else:
                 self._json(404, {"error": "card not found"})
-        elif self.path == "/api/apps/sdlc-pipeline/status":
+        elif self.path == "/api/status":
             state = _load_state()
             by_stage = {}
             for c in state["cards"]:
@@ -68,9 +69,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         content_length = int(self.headers.get("Content-Length", 0))
-        body = json.loads(self.rfile.read(content_length)) if content_length else {}
+        try:
+            body = json.loads(self.rfile.read(content_length)) if content_length else {}
+        except json.JSONDecodeError:
+            self._json(400, {"error": "invalid JSON"})
+            return
 
-        if self.path == "/api/apps/sdlc-pipeline/cards":
+        if self.path == "/api/cards":
             # Create a new card
             card = {
                 "id": str(uuid.uuid4())[:8],
@@ -89,7 +94,6 @@ class Handler(BaseHTTPRequestHandler):
             self._json(201, card)
 
         elif self.path.endswith("/advance"):
-            # Advance a card to next stage
             card_id = self.path.split("/")[-2]
             state = _load_state()
             card = next((c for c in state["cards"] if c["id"] == card_id), None)
@@ -113,7 +117,6 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, card)
 
         elif self.path.endswith("/gate-approve"):
-            # Approve a gate
             card_id = self.path.split("/")[-2]
             state = _load_state()
             card = next((c for c in state["cards"] if c["id"] == card_id), None)
@@ -129,7 +132,6 @@ class Handler(BaseHTTPRequestHandler):
                 "at": _now(),
                 "notes": body.get("notes", ""),
             })
-            # Advance past the gate
             current_idx = STAGES.index(card["stage"])
             old_stage = card["stage"]
             card["stage"] = STAGES[current_idx + 1]
@@ -144,7 +146,6 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, card)
 
         elif self.path.endswith("/gate-reject"):
-            # Reject at a gate — regress to previous auto stage
             card_id = self.path.split("/")[-2]
             state = _load_state()
             card = next((c for c in state["cards"] if c["id"] == card_id), None)
@@ -160,7 +161,6 @@ class Handler(BaseHTTPRequestHandler):
                 "at": _now(),
                 "notes": body.get("notes", ""),
             })
-            # Regress to previous stage
             current_idx = STAGES.index(card["stage"])
             old_stage = card["stage"]
             card["stage"] = STAGES[current_idx - 1]

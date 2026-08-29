@@ -64,6 +64,17 @@ A card can regress when:
     {"phase": "requirements", "trigger": "spec-builder", "at": "ISO8601"},
     {"phase": "implement", "trigger": "task-runner", "at": "ISO8601"}
   ],
+  "effort": {
+    "features": [
+      {"id": "f1", "note": "Rate-limit middleware", "size": "M", "points": 3},
+      {"id": "f2", "note": "Redis token bucket store", "size": "L", "points": 5}
+    ],
+    "total": 8,
+    "scope": {"requirements": 8, "design": 9, "tasks": 9}
+  },
+  "backstep_history": [
+    {"from": "design", "to": "requirements", "reason": "design scope 9 > 2x requirements-baseline", "at": "ISO8601"}
+  ],
   "parked": [
     {"id": "park-uuid", "note": "Needs auth redesign — can't spec now", "issue_url": "https://github.com/owner/repo/issues/57", "at": "ISO8601", "phase": "design"}
   ],
@@ -199,3 +210,66 @@ CREATES cards — it never advances or executes, so it stays within the same saf
 
 Never park to a repo the card does not own, and never write issues cross-repo — the
 backlog lives in each card's own `source.repo`.
+
+---
+
+## Effort Attribution & Back-Step
+
+The **spec-agent** attributes an **effort estimate** to every spec. This drives two
+scope-safety movements: parking an over-scoped *feature* (backlog, above) and stepping a
+whole *card* back one pipeline level when a phase outgrows the phase before it.
+
+### Effort points
+
+Each feature/requirement gets a T-shirt size mapped to points:
+
+| Size | Points |
+|------|--------|
+| `S` | 1 |
+| `M` | 3 |
+| `L` | 5 |
+| `XL` | 8 |
+
+The spec-agent records per-feature effort in `effort.features[]` and the rolled-up
+`effort.total`. As each phase runs it records that phase's realized scope in
+`effort.scope[phase]` (sum of the effort points the phase actually produced — e.g. the
+design's component count × size, the tasks list total).
+
+### Scope-growth back-step (heuristic — no token accounting)
+
+At each auto-phase the orchestrator compares the phase's realized scope to the phase
+before it. If a step **outgrows its predecessor's scope** beyond a factor
+(default `GROWTH_FACTOR = 2.0`), the step is proposed to **back-step one level**:
+
+| Phase outgrows… | Back-step to | Meaning |
+|-----------------|--------------|---------|
+| `implement` > `design` scope | **design** | "this became a design ticket, not just coding" |
+| `tasks` > `design` scope | **design** | tasks reveal the design was underspecified |
+| `design` > `requirements` scope | **requirements** | scope creep — re-spec smaller |
+
+Rule: `scope[current] > GROWTH_FACTOR × scope[predecessor]` ⇒ propose back-step.
+A single over-scoped **feature** (rather than the whole card) is instead **parked** to the
+backlog; the whole-card back-step fires when the *aggregate* scope has grown.
+
+### Trust-gated proposal
+
+- `manual` / `assisted`: the orchestrator calls `ask_question` — "Card <title>'s <phase>
+  scope grew Nx over <predecessor>. Step back to re-scope, or continue?" Options:
+  `Step back to <predecessor>` | `Park the largest feature` | `Continue anyway`.
+- `autonomous`: auto-back-step (or auto-park the largest feature if that alone brings it
+  under the factor), and note it.
+
+Every back-step appends `{from, to, reason, at}` to `backstep_history` and moves the card
+to the predecessor stage; the re-run of that stage is expected to produce a smaller scope.
+Guard against ping-pong: do not back-step the same card across the same boundary more than
+twice — if it still overflows, park features instead and notify the user.
+
+### Budget source
+
+`GROWTH_FACTOR` is the only knob for the heuristic. Depth tunes it: `quick` is stricter
+(1.5), `standard` = 2.0, `deep` is lenient (3.0) since deep work is expected to expand.
+
+> **Parked (not built): predictive token budgeting (Option B).** A future `effort-budget`
+> side-skill would log real per-phase token spend, build a rolling baseline, and *predict*
+> the next phase's spend to trigger back-steps on projected cost rather than scope ratio.
+> Deferred until spend history exists; the heuristic above ships first and needs no data.

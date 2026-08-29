@@ -26,6 +26,12 @@ interface PipelineCard {
   artifacts: Record<string, unknown>
   gate_history: Array<{ gate: string; decision: string; at: string; notes: string }>
   trigger_history?: Array<{ phase: string; trigger: string; at: string }>
+  effort?: {
+    features?: Array<{ id: string; note: string; size: string; points: number }>
+    total?: number
+    scope?: Record<string, number>
+  }
+  backstep_history?: Array<{ from: string; to: string; reason: string; at: string }>
   parked?: ParkedIdea[]
   history: Array<{ from: string; to: string; at: string; agent: string }>
 }
@@ -317,6 +323,17 @@ function PipelineCardItem({ card, config, onApprove, onReject, onCycleTrust, onC
         </Pill>
         {parkedCount > 0 && (
           <Pill color="var(--warn)" title={`${parkedCount} parked idea(s)`}>⏸ {parkedCount}</Pill>
+        )}
+        {typeof card.effort?.total === 'number' && card.effort.total > 0 && (
+          <Pill color="var(--info)" title={`estimated effort: ${card.effort.total} points`}>
+            ⚡ {card.effort.total}
+          </Pill>
+        )}
+        {card.backstep_history && card.backstep_history.length > 0 && (
+          <Pill color="var(--danger)"
+            title={`stepped back ${card.backstep_history.length}× — last: ${card.backstep_history[card.backstep_history.length - 1].reason}`}>
+            ↩ {card.backstep_history.length}
+          </Pill>
         )}
       </div>
 

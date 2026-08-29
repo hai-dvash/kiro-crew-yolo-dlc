@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logos.png" alt="DLC-YOLO + KiroCrew" width="440">
+</p>
+
 # DLC-YOLO
 
 **Autonomous software development lifecycle, as a KiroCrew app.** Issues flow through a

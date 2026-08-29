@@ -48,10 +48,11 @@
       {
         "route": "/apps/dlc-yolo",
         "label": "DLC-YOLO",
-        "icon": "GitPullRequest"
+        "icon": "RefreshCw"
       }
     ]
   },
+  "iconUrl": "/app-assets/dlc-yolo/icon.svg",
   "crons": [
     {
       "name": "dlc-yolo-advance",

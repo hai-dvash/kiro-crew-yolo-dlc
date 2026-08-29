@@ -270,6 +270,239 @@ function PipelineGraph({ steps, cardsByStage, onNodeClick }: {
   )
 }
 
+// --- Pixel-art "Pipeline World" header ---
+// Faithful to KiroCrew's Agent Worlds canvas language: integer-scaled pixel art
+// (imageRendering: pixelated), a requestAnimationFrame tick, flat palette, blinking/
+// bobbing sprites. Renders the whole active step ladder as landmarks across one world
+// strip; each card is a sprite standing at its step, occupancy lights the landmark.
+const WORLD_COLORS = ['#e74c3c', '#3498db', '#f39c12', '#9b59b6', '#1abc9c', '#e67e22', '#2ecc71', '#e84393']
+
+function PipelineWorld({ steps, cardsByStage, onNodeClick }: {
+  steps: { id: string; name: string; type: 'agent' | 'gate' }[]
+  cardsByStage: Record<string, PipelineCard[]>
+  onNodeClick: (stage: string) => void
+}) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const wrapRef = useRef<HTMLDivElement | null>(null)
+  const tickRef = useRef(0)
+  const animRef = useRef<number | null>(null)
+  // live refs so the rAF loop always sees fresh data without re-subscribing
+  const stepsRef = useRef(steps)
+  const cardsRef = useRef(cardsByStage)
+  const hitRef = useRef<{ x: number; w: number; id: string }[]>([])
+  stepsRef.current = steps
+  cardsRef.current = cardsByStage
+
+  const S = 3                    // integer pixel scale (matches Agent Worlds)
+  const H = 116                  // css height (px)
+  const baseH = H / S            // logical height
+  const groundY = baseH - 26     // horizon line
+  const [wCss, setWCss] = useState(880)
+
+  // responsive width — fill the header, min 60 logical px per landmark
+  useEffect(() => {
+    const el = wrapRef.current
+    if (!el) return
+    const ro = new ResizeObserver(entries => {
+      const w = Math.max(360, Math.floor(entries[0].contentRect.width))
+      setWCss(w)
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
+  const isGate = (s: { id: string; type: string }) => s.type === 'gate' || s.id.startsWith('gate-')
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const baseW = Math.floor(wCss / S)
+    canvas.width = baseW * S
+    canvas.height = baseH * S
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    const d = (x: number, y: number, w: number, h: number, color: string) => {
+      ctx.fillStyle = color
+      ctx.fillRect(x * S, y * S, w * S, h * S)
+    }
+
+    const draw = () => {
+      const tick = tickRef.current
+      const stps = stepsRef.current
+      const cbs = cardsRef.current
+      const n = Math.max(1, stps.length)
+      const maxCount = Math.max(1, ...stps.map(s => cbs[s.id]?.length || 0))
+
+      // ── Sky + stars ──
+      d(0, 0, baseW, groundY, '#0f172a')
+      for (let i = 0; i < baseW / 5; i++) {
+        const sx = (i * 37) % baseW
+        const sy = (i * 13) % (groundY - 4)
+        if (Math.sin(tick * 0.03 + i * 2.1) > 0.35) d(sx, sy, 1, 1, '#e2e8f0')
+      }
+      // moon
+      d(baseW - 26, 8, 10, 10, '#fde68a')
+      d(baseW - 24, 7, 8, 8, '#0f172a')
+
+      // ── Ground ──
+      for (let i = 0; i < baseW; i += 16) {
+        for (let j = groundY; j < baseH; j += 16) {
+          d(i, j, 16, 16, (((i / 16) + (j / 16)) & 1) ? '#33261a' : '#2a1f14')
+        }
+      }
+      d(0, groundY - 2, baseW, 2, '#4a3520')
+
+      // ── Landmarks (one per step) ──
+      const slot = baseW / n
+      const hits: { x: number; w: number; id: string }[] = []
+      for (let i = 0; i < stps.length; i++) {
+        const s = stps[i]
+        const cx = Math.round(slot * (i + 0.5))
+        const cards = cbs[s.id] || []
+        const count = cards.length
+        const active = count > 0
+        const accent = WORLD_COLORS[i % WORLD_COLORS.length]
+        const gate = isGate(s)
+        const ly = groundY - 2
+        hits.push({ x: cx - Math.floor(slot / 2), w: Math.floor(slot), id: s.id })
+
+        // path connector to next landmark
+        if (i < stps.length - 1) {
+          const nx = Math.round(slot * (i + 1.5))
+          for (let px = cx + 8; px < nx - 8; px += 4) d(px, groundY - 1, 2, 1, '#4a3520')
+        }
+
+        if (gate) {
+          // Gate = a glowing obelisk / diamond marker
+          const gy = ly - 20
+          const col = active ? '#f39c12' : '#3a3222'
+          // pillar
+          d(cx - 3, gy, 6, 20, active ? '#5c4a2a' : '#2a2418')
+          // diamond top
+          for (let r = 0; r < 5; r++) d(cx - r, gy - 5 + r, r * 2 + 1, 1, col)
+          for (let r = 0; r < 5; r++) d(cx - (4 - r), gy - r, (4 - r) * 2 + 1, 1, col)
+          if (active) {
+            // pulse cap
+            const pulse = (Math.sin(tick * 0.08) + 1) / 2
+            ctx.globalAlpha = 0.35 + pulse * 0.4
+            d(cx - 1, gy - 6, 2, 2, '#ffd27a')
+            ctx.globalAlpha = 1
+          }
+        } else {
+          // Agent step = a desk workstation with a monitor
+          const dy = ly - 14
+          d(cx - 10, dy, 20, 3, '#7a5c47')       // desk
+          d(cx - 10, dy - 1, 20, 1, accent)      // accent edge
+          d(cx - 9, dy + 3, 2, 8, '#5c4033')     // legs
+          d(cx + 7, dy + 3, 2, 8, '#5c4033')
+          d(cx - 5, dy - 9, 10, 9, '#333')       // monitor bezel
+          d(cx - 4, dy - 8, 8, 7, active ? '#0a2a0a' : '#1a1a1a')
+          if (active) {
+            for (let l = 0; l < 3; l++) {
+              const lw = 2 + ((tick + l * 7) % 5)
+              d(cx - 3, dy - 7 + l * 2, lw, 0.8, '#33ff33')
+            }
+          }
+        }
+
+        // ── Card sprites clustered at the landmark ──
+        const shown = Math.min(count, 5)
+        for (let k = 0; k < shown; k++) {
+          const spread = shown > 1 ? (k - (shown - 1) / 2) * 8 : 0
+          const bx = Math.round(cx + spread) - 3
+          const by = ly - (gate ? 2 : 4)
+          const scolor = WORLD_COLORS[(i + k) % WORLD_COLORS.length]
+          const bob = Math.sin(tick * 0.08 + i + k) > 0 ? 1 : 0
+          // shadow
+          ctx.fillStyle = 'rgba(0,0,0,0.18)'
+          ctx.fillRect((bx) * S, (by + 8) * S, 6 * S, S)
+          // body
+          d(bx, by + bob, 6, 6, scolor)
+          // head
+          d(bx + 1, by - 4 + bob, 4, 4, '#fdd')
+          d(bx + 1, by - 5 + bob, 4, 1, '#333')  // hair
+          // eyes (blink)
+          if ((tick + i * 9 + k * 5) % 120 >= 3) {
+            d(bx + 2, by - 3 + bob, 1, 1, '#333')
+            d(bx + 4, by - 3 + bob, 1, 1, '#333')
+          }
+          // legs
+          d(bx + 1, by + 6, 1, 2, scolor)
+          d(bx + 4, by + 6, 1, 2, scolor)
+        }
+        // overflow tag
+        if (count > 5) {
+          ctx.fillStyle = accent
+          ctx.font = `${3 * S}px monospace`
+          ctx.fillText(`+${count - 5}`, (cx + 10) * S, (ly - 6) * S)
+        }
+
+        // count badge on the landmark
+        if (count > 0) {
+          ctx.fillStyle = accent
+          ctx.fillRect((cx + 6) * S, (ly - 30) * S, 9 * S, 9 * S)
+          ctx.fillStyle = '#0f172a'
+          ctx.font = `bold ${5 * S}px monospace`
+          ctx.textAlign = 'center'
+          ctx.fillText(String(count), (cx + 10.5) * S, (ly - 24) * S)
+          ctx.textAlign = 'left'
+        }
+
+        // step label
+        ctx.fillStyle = active ? '#e2e8f0' : '#6b7280'
+        ctx.font = `${3.4 * S}px monospace`
+        ctx.textAlign = 'center'
+        const lbl = s.name.length > 12 ? s.name.slice(0, 11) + '…' : s.name
+        ctx.fillText(lbl, cx * S, (baseH - 4) * S)
+        ctx.textAlign = 'left'
+      }
+      hitRef.current = hits
+
+      // world census (top-left)
+      const total = stps.reduce((a, s) => a + (cbs[s.id]?.length || 0), 0)
+      ctx.fillStyle = '#f90'
+      ctx.font = `bold ${3.6 * S}px monospace`
+      ctx.fillText(`${total} card${total !== 1 ? 's' : ''} · ${n} milestone${n !== 1 ? 's' : ''}`, 4 * S, 8 * S)
+    }
+
+    const loop = () => {
+      tickRef.current++
+      draw()
+      animRef.current = requestAnimationFrame(loop)
+    }
+    animRef.current = requestAnimationFrame(loop)
+    return () => { if (animRef.current) cancelAnimationFrame(animRef.current) }
+  }, [wCss, baseH, groundY])
+
+  const handleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const rect = canvas.getBoundingClientRect()
+    const lx = ((e.clientX - rect.left) / rect.width) * (canvas.width / S)
+    const hit = hitRef.current.find(hh => lx >= hh.x && lx <= hh.x + hh.w)
+    if (hit) onNodeClick(hit.id)
+  }
+
+  return (
+    <div ref={wrapRef} className="w-full mb-5">
+      <canvas
+        ref={canvasRef}
+        onClick={handleClick}
+        style={{
+          width: '100%',
+          height: H + 'px',
+          imageRendering: 'pixelated',
+          borderRadius: 8,
+          border: '1px solid var(--border, #333)',
+          cursor: 'pointer',
+          display: 'block',
+        }}
+      />
+    </div>
+  )
+}
+
 // --- View Tab Selector ---
 function ViewTabs({ active, onChange, counts }: {
   active: ViewMode; onChange: (v: ViewMode) => void; counts: Record<string, number>
@@ -1270,7 +1503,7 @@ export default function SdlcPipeline() {
         />
       )}
       <div className="px-6 pb-8 overflow-y-auto flex-1 min-h-0">
-        <PipelineGraph steps={activeSteps} cardsByStage={cardsByStage} onNodeClick={scrollToStage} />
+        <PipelineWorld steps={activeSteps} cardsByStage={cardsByStage} onNodeClick={scrollToStage} />
 
         <div className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(120px,1fr))] mb-5">
           <StatCard label="Active" value={String(activeCount)} accent />

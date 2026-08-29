@@ -9,6 +9,7 @@
   "agents": [
     "agents/pipeline-orchestrator.json",
     "agents/spec-agent.json",
+    "agents/design-agent.json",
     "agents/impl-agent.json",
     "agents/review-agent.json"
   ],
@@ -32,6 +33,7 @@
       "kirocrew-core::spawn_list",
       "kirocrew-core::send_message",
       "kirocrew-core::ask_question",
+      "kirocrew-core::task_run",
       "kirocrew-cron::cron_add",
       "kirocrew-cron::cron_list"
     ]
@@ -53,7 +55,12 @@
     {
       "name": "dlc-yolo-advance",
       "every": 120,
-      "message": "Check pipeline state and advance any cards in auto-stages that are ready to move."
+      "message": "Load pipeline state from /tmp/dlc-yolo/state.json. For each card in an auto-stage (intake, requirements, design, tasks, implement, review, pr) that has no trigger decision recorded for its current phase: compute the card's effective trust/depth (card value else config default). Under trust=autonomous auto-pick the recommended trigger and auto-approve gates; under manual/assisted use ask_question for requirements/design/tasks (Spec Builder / inline / skip) and implement (Task Runner / inline / skip), then act and record to trigger_history. Handle intake/review/pr inline. Cards at a human gate (gate-*) wait for approval unless trust=autonomous. Persist state after any change. Do not re-ask for a card+phase already recorded."
+    },
+    {
+      "name": "dlc-yolo-backlog-intake",
+      "every": 900,
+      "message": "Backlog back-feed. Collect the distinct owned repos from state.json cards' source.repo. For each repo, list open issues labeled dlc-backlog (gh issue list --repo <repo> --label dlc-backlog --state open --json number,title,url). For any such issue that does NOT already have a card (match on source.issue/url), create a new card at stage 'intake' inheriting config.trust/config.depth, linked to that issue. Only READ issues and CREATE intake cards — never advance or execute here. Persist state."
     }
   ]
 }

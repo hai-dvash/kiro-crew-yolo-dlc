@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1100 300" fill="none">
+  <!-- DLC-YOLO co-brand banner: DLC-YOLO logo + official KiroCrew logo tile, pixel font throughout.
+       The "+" is a Press Start 2P font glyph (not an SVG shape).
+       Uses the KiroCrew brand logo in a co-branded lockup at the project owner's explicit direction. -->
+  <defs>
+    <linearGradient id="panel" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1b1b22"/>
+      <stop offset="1" stop-color="#141419"/>
+    </linearGradient>
+    <clipPath id="tileClip"><rect x="430" y="80" width="150" height="150" rx="34"/></clipPath>
+  </defs>
+  <rect x="0" y="0" width="1100" height="300" rx="24" fill="url(#panel)"/>
+
+  <!-- ===== DLC-YOLO icon (left) — scaled so drawn height matches the 150px tile ===== -->
+  <g transform="translate(46 41)">
+    <g transform="scale(9.46)">
+      <g transform="scale(0.048)" fill="#a1a1aa">
+        <path d="M 325 410 L 125 410 A 5 5 0 0 1 120 405 L 120 135 L 95 135 L 140 65
+                 L 185 135 L 160 135 L 160 370 L 299 370 Z"/>
+        <path transform="rotate(180 250 250)"
+              d="M 325 410 L 125 410 A 5 5 0 0 1 120 405 L 120 135 L 95 135 L 140 65
+                 L 185 135 L 160 135 L 160 370 L 299 370 Z"/>
+      </g>
+      <g fill="#8b7bf7" transform="translate(12 12) scale(0.98) translate(-10.625 -11.925)">
+        <rect x="7.30" y="6.80" width="0.95" height="0.95"/><rect x="9.20" y="6.80" width="0.95" height="0.95"/>
+        <rect x="8.25" y="7.75" width="0.95" height="0.95"/><rect x="8.25" y="8.70" width="0.95" height="0.95"/>
+        <rect x="8.25" y="9.65" width="0.95" height="0.95"/><rect x="8.25" y="10.60" width="0.95" height="0.95"/>
+        <rect x="11.10" y="6.80" width="0.95" height="0.95"/><rect x="12.05" y="6.80" width="0.95" height="0.95"/>
+        <rect x="13.00" y="6.80" width="0.95" height="0.95"/><rect x="11.10" y="7.75" width="0.95" height="0.95"/>
+        <rect x="13.00" y="7.75" width="0.95" height="0.95"/><rect x="11.10" y="8.70" width="0.95" height="0.95"/>
+        <rect x="13.00" y="8.70" width="0.95" height="0.95"/><rect x="11.10" y="9.65" width="0.95" height="0.95"/>
+        <rect x="13.00" y="9.65" width="0.95" height="0.95"/><rect x="11.10" y="10.60" width="0.95" height="0.95"/>
+        <rect x="12.05" y="10.60" width="0.95" height="0.95"/><rect x="13.00" y="10.60" width="0.95" height="0.95"/>
+        <rect x="7.30" y="12.30" width="0.95" height="0.95"/><rect x="7.30" y="13.25" width="0.95" height="0.95"/>
+        <rect x="7.30" y="14.20" width="0.95" height="0.95"/><rect x="7.30" y="15.15" width="0.95" height="0.95"/>
+        <rect x="7.30" y="16.10" width="0.95" height="0.95"/><rect x="8.25" y="16.10" width="0.95" height="0.95"/>
+        <rect x="9.20" y="16.10" width="0.95" height="0.95"/>
+        <rect x="11.10" y="12.30" width="0.95" height="0.95"/><rect x="12.05" y="12.30" width="0.95" height="0.95"/>
+        <rect x="13.00" y="12.30" width="0.95" height="0.95"/><rect x="11.10" y="13.25" width="0.95" height="0.95"/>
+        <rect x="13.00" y="13.25" width="0.95" height="0.95"/><rect x="11.10" y="14.20" width="0.95" height="0.95"/>
+        <rect x="13.00" y="14.20" width="0.95" height="0.95"/><rect x="11.10" y="15.15" width="0.95" height="0.95"/>
+        <rect x="13.00" y="15.15" width="0.95" height="0.95"/><rect x="11.10" y="16.10" width="0.95" height="0.95"/>
+        <rect x="12.05" y="16.10" width="0.95" height="0.95"/><rect x="13.00" y="16.10" width="0.95" height="0.95"/>
+      </g>
+    </g>
+  </g>
+
+  <!-- ===== "+" : identical font/size/color to the DLC-YOLO title, centered exactly in the gap ===== -->
+  <!-- "+" centered in the real ink gap: (icon-right-ink 228 + tile-left-ink 430)/2 = 329, equal whitespace both sides -->
+  <text x="329" y="177" font-family="'Press Start 2P'" font-size="38" fill="#f4f4f5"
+        text-anchor="middle">+</text>
+
+  <!-- ===== official KiroCrew logo tile — 150px, matched + vertically centered ===== -->
+  <image x="430" y="80" width="150" height="150" clip-path="url(#tileClip)"
+         xlink:href="kirocrew-logo.png"/>
+
+  <!-- ===== pixel wordmarks (text block starts right after the tile) ===== -->
+  <text x="650" y="114" font-family="'Press Start 2P'" font-size="38" fill="#f4f4f5">DLC-YOLO</text>
+  <text x="652" y="158" font-family="'Press Start 2P'" font-size="20" fill="#a1a1aa">for KiroCrew</text>
+
+  <!-- ===== pixel tagline ===== -->
+  <text x="652" y="202" font-family="'Press Start 2P'" font-size="12" fill="#8b8b95">Autonomous SDLC pipeline</text>
+  <text x="652" y="228" font-family="'Press Start 2P'" font-size="12" fill="#8b8b95">spec design build review PR</text>
+  <text x="652" y="262" font-family="'Press Start 2P'" font-size="9"  fill="#5f5f6a">Apache-2.0  independent and unaffiliated</text>
+</svg>

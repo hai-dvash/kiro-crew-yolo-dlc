@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
+  <!-- DLC-YOLO: a squared SDLC cycle drawn as two solid arrow-loop arms (elbow with a
+       rounded corner and a filled triangular arrowhead whose base sits on the line floor),
+       mirrored 180 deg for symmetry, in sibling-glyph grey; around a bulky pixel YO / LO
+       wordmark in purple. Geometry authored in 500-space, scaled into the 24 viewBox. -->
+
+  <!-- grey arrow-loop arms (currentColor); one arm + its 180 deg mirror -->
+  <g transform="scale(0.048)" fill="currentColor">
+    <path d="M 325 410 L 125 410 A 5 5 0 0 1 120 405 L 120 135 L 95 135 L 140 65
+             L 185 135 L 160 135 L 160 370 L 299 370 Z"/>
+    <path transform="rotate(180 250 250)"
+          d="M 325 410 L 125 410 A 5 5 0 0 1 120 405 L 120 135 L 95 135 L 140 65
+             L 185 135 L 160 135 L 160 370 L 299 370 Z"/>
+  </g>
+
+  <!-- bulky pixel YO / LO wordmark, purple accent.
+       Group bbox is x:7.30..13.95 (w 6.65), y:6.80..17.05 (h 10.25) -> center (10.625, 11.925).
+       Scale 0.9 to clear the arms, then recenter the scaled block on the icon center (12,12). -->
+  <g fill="var(--ico-a, #6366f1)"
+     transform="translate(12 12) scale(0.98) translate(-10.625 -11.925)">
+    <!-- top row: Y O -->
+    <!-- Y -->
+    <rect x="7.30" y="6.80" width="0.95" height="0.95"/>
+    <rect x="9.20" y="6.80" width="0.95" height="0.95"/>
+    <rect x="8.25" y="7.75" width="0.95" height="0.95"/>
+    <rect x="8.25" y="8.70" width="0.95" height="0.95"/>
+    <rect x="8.25" y="9.65" width="0.95" height="0.95"/>
+    <rect x="8.25" y="10.60" width="0.95" height="0.95"/>
+    <!-- O -->
+    <rect x="11.10" y="6.80" width="0.95" height="0.95"/>
+    <rect x="12.05" y="6.80" width="0.95" height="0.95"/>
+    <rect x="13.00" y="6.80" width="0.95" height="0.95"/>
+    <rect x="11.10" y="7.75" width="0.95" height="0.95"/>
+    <rect x="13.00" y="7.75" width="0.95" height="0.95"/>
+    <rect x="11.10" y="8.70" width="0.95" height="0.95"/>
+    <rect x="13.00" y="8.70" width="0.95" height="0.95"/>
+    <rect x="11.10" y="9.65" width="0.95" height="0.95"/>
+    <rect x="13.00" y="9.65" width="0.95" height="0.95"/>
+    <rect x="11.10" y="10.60" width="0.95" height="0.95"/>
+    <rect x="12.05" y="10.60" width="0.95" height="0.95"/>
+    <rect x="13.00" y="10.60" width="0.95" height="0.95"/>
+
+    <!-- bottom row: L O -->
+    <!-- L (shifted one cell left) -->
+    <rect x="7.30" y="12.30" width="0.95" height="0.95"/>
+    <rect x="7.30" y="13.25" width="0.95" height="0.95"/>
+    <rect x="7.30" y="14.20" width="0.95" height="0.95"/>
+    <rect x="7.30" y="15.15" width="0.95" height="0.95"/>
+    <rect x="7.30" y="16.10" width="0.95" height="0.95"/>
+    <rect x="8.25" y="16.10" width="0.95" height="0.95"/>
+    <rect x="9.20" y="16.10" width="0.95" height="0.95"/>
+    <!-- O -->
+    <rect x="11.10" y="12.30" width="0.95" height="0.95"/>
+    <rect x="12.05" y="12.30" width="0.95" height="0.95"/>
+    <rect x="13.00" y="12.30" width="0.95" height="0.95"/>
+    <rect x="11.10" y="13.25" width="0.95" height="0.95"/>
+    <rect x="13.00" y="13.25" width="0.95" height="0.95"/>
+    <rect x="11.10" y="14.20" width="0.95" height="0.95"/>
+    <rect x="13.00" y="14.20" width="0.95" height="0.95"/>
+    <rect x="11.10" y="15.15" width="0.95" height="0.95"/>
+    <rect x="13.00" y="15.15" width="0.95" height="0.95"/>
+    <rect x="11.10" y="16.10" width="0.95" height="0.95"/>
+    <rect x="12.05" y="16.10" width="0.95" height="0.95"/>
+    <rect x="13.00" y="16.10" width="0.95" height="0.95"/>
+  </g>
+</svg>

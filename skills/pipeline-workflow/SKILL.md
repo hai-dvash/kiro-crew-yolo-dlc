@@ -283,6 +283,15 @@ agent reasoning:
   — never as a standing loop. `dlc-yolo-backlog-intake` (every 900s) likewise only reads
   `dlc-backlog` issues and creates intake cards.
 
+**Cron registration & reconcile.** Both crons are declared in the manifest (`app.json`), but
+live registration drifts: on an existing install `kirocrew app enable` does NOT re-scan crons,
+the CLI/MCP `cron add` cannot create the zero-token **script** cron (only the manifest scan
+can), and `kirocrew app uninstall` **removes the app's registered crons** (app data is kept).
+The supported fix is the idempotent `scripts/setup-crons.py` — it re-deploys the cron script
+and upserts both jobs to match the manifest (script cron for advance, `pipeline-orchestrator`
+agent cron for backlog), touching no other app's jobs (`--check` previews drift). Run it after
+a sync, an upgrade, or an uninstall→reinstall.
+
 ### Step Review Contract (agents own the judgment)
 
 Because the advance loop is deterministic, every ambiguity/effort decision is the STEP

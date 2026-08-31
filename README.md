@@ -244,9 +244,12 @@ scheduled crons, `/api/file-read` + `/api/file-write`, the SDK chat launcher
 kirocrew app install /path/to/kiro-crew-yolo-dlc
 kirocrew app enable dlc-yolo
 
-# 2. Deploy the zero-token advance cron to its sandboxed runtime location (the manifest
-#    references this path; app install does not copy it for you).
-cp crons/dlc_yolo_advance.py ~/.kiro/crew/crons/
+# 2. Deploy the zero-token advance cron + reconcile the cron registry to the manifest.
+#    This idempotent script copies crons/dlc_yolo_advance.py to its sandboxed runtime
+#    location AND upserts DLC-YOLO's two cron jobs in the scheduler (app install does not
+#    copy the script for you, and `app enable` does not re-scan crons on an existing
+#    install). Safe to re-run; it never touches other apps' jobs. Use --check to preview.
+python3 scripts/setup-crons.py
 
 # 3. If /dlc-yolo doesn't autocomplete in the command palette, link the skill into the
 #    palette's global scan dir (the installer registers it for the app; this makes the
@@ -255,21 +258,31 @@ ln -s ~/.kiro/crew/apps/dlc-yolo/skills/dlc-yolo      ~/.kiro/skills/dlc-yolo
 ln -s ~/.kiro/crew/apps/dlc-yolo/skills/pipeline-workflow ~/.kiro/skills/pipeline-workflow
 ```
 
-> **Upgrading an existing install — re-register the crons.** KiroCrew de-duplicates
-> crons **by name**: if `dlc-yolo-advance` / `dlc-yolo-backlog-intake` already exist from
-> a previous install, `kirocrew app install`/`enable` will **keep the old definitions**
-> and will *not* pick up manifest changes (e.g. the zero-token `[script]` advance cron or
-> the `agent: pipeline-orchestrator` binding on backlog-intake). After copying the script
-> in step 2, remove the stale jobs so the manifest re-registers them fresh:
+> **Upgrading an existing install.** Two things do not refresh automatically and need a
+> nudge after you pull new code and sync the app files:
 >
-> ```bash
-> kirocrew cron remove dlc-yolo-advance         2>/dev/null || true
-> kirocrew cron remove dlc-yolo-backlog-intake  2>/dev/null || true
-> kirocrew app enable dlc-yolo                   # re-registers both from app.json
-> ```
+> 1. **Crons.** KiroCrew reads the manifest's crons on first install; on an existing
+>    install, `app enable` does **not** re-scan them, and the CLI/MCP `cron add` cannot
+>    create the zero-token **script** cron (only the manifest scan can). So after syncing,
+>    re-run the idempotent reconcile script — it re-deploys the cron script and upserts
+>    DLC-YOLO's two jobs to match the manifest, leaving every other app's jobs untouched:
 >
-> Verify with `kirocrew cron list` — `dlc-yolo-advance` should show as a `script` cron and
-> `dlc-yolo-backlog-intake` should show `agent: pipeline-orchestrator`.
+>    ```bash
+>    python3 scripts/setup-crons.py            # deploy + reconcile
+>    python3 scripts/setup-crons.py --check     # preview drift only, change nothing
+>    ```
+>
+>    Verify with `kirocrew cron list` — `dlc-yolo-advance` should show as a `script` cron
+>    and `dlc-yolo-backlog-intake` as `agent: pipeline-orchestrator`.
+>
+>    > **Note:** `kirocrew app uninstall dlc-yolo` **removes the app's registered crons**
+>    > (they belong to the app; app *data* is preserved by default). Reinstalling does not
+>    > reliably re-register the zero-token **script** cron on its own — run
+>    > `python3 scripts/setup-crons.py` afterward to restore both jobs.
+>
+> 2. **New agents.** A new agent added to the manifest (e.g. `intent-agent` for
+>    self-enabling pipelines) is registered by re-enabling the app:
+>    `kirocrew app enable dlc-yolo`. Confirm with `kirocrew app info dlc-yolo` (agent count).
 
 ## Development
 
@@ -295,6 +308,8 @@ kiro-crew-yolo-dlc/
 │   └── dlc-yolo/SKILL.md             ← the /dlc-yolo command
 ├── crons/
 │   └── dlc_yolo_advance.py           ← zero-token deterministic advance loop (deployed to ~/.kiro/crew/crons/)
+├── scripts/
+│   └── setup-crons.py                ← idempotent post-sync: deploy the cron script + reconcile both cron jobs to the manifest
 ├── ui/
 │   ├── src/App.tsx                   ← kanban, graph, setup modal, agent panel (@kirocrew/app-sdk)
 │   └── vite.config.ts

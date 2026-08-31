@@ -120,6 +120,11 @@ with zero cards, and holds the per-repo default modes that its cards inherit.
   "depth": "standard",
   "backlog_intake": true,            // opt in to the dlc-yolo-backlog-intake cron for this repo
   "sot": "github",                   // source of truth for stage: "github" | "local"
+  "results_in_repo": false,          // false (default): phase results (requirements/design/…) live ONLY in
+                                     //   the workspace-partitioned .dlc-yolo results area
+                                     //   (<base>/workspaces/<ws>/data/results/<card-id>/); true: ALSO mirror
+                                     //   a copy into the owned repo (docs/dlc/<card-id>/) and commit it there,
+                                     //   so results are present in the workspace repo itself. Card may override.
   "steps": [
     { "id": "requirements", "name": "Requirements", "type": "agent",
       "agent": { "name": "spec-agent", "role": "produce requirements.md", "tools": ["ask_question"] },

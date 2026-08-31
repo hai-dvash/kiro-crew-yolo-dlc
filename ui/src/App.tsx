@@ -92,6 +92,7 @@ interface Pipeline {
   trust?: Trust
   depth?: Depth
   backlog_intake?: boolean
+  results_in_repo?: boolean
   sot?: 'github' | 'local'
   steps?: PipelineStep[]
   created_at: string
@@ -1134,7 +1135,7 @@ function PipelineSetupModal({ candidates, existingRepos, defaults, knownAgents, 
   defaults: PipelineConfig
   knownAgents: string[]
   crews: { name: string; description?: string }[]
-  onCreate: (p: { repo: string; source: RepoCandidate['source']; trust: Trust; depth: Depth; backlog_intake: boolean; steps: PipelineStep[] }) => void
+  onCreate: (p: { repo: string; source: RepoCandidate['source']; trust: Trust; depth: Depth; backlog_intake: boolean; results_in_repo: boolean; steps: PipelineStep[] }) => void
   onClose: () => void
   editPipeline?: Pipeline          // when set, the modal is in EDIT mode
   cardCount?: number               // cards in the pipeline (for the Danger Zone copy)
@@ -1147,6 +1148,7 @@ function PipelineSetupModal({ candidates, existingRepos, defaults, knownAgents, 
   const [trust, setTrust] = useState<Trust>(editPipeline?.trust || defaults.trust)
   const [depth, setDepth] = useState<Depth>(editPipeline?.depth || defaults.depth)
   const [backlog, setBacklog] = useState(editPipeline?.backlog_intake ?? true)
+  const [resultsInRepo, setResultsInRepo] = useState(editPipeline?.results_in_repo ?? false)
   const [steps, setSteps] = useState<PipelineStep[]>(() => (editPipeline?.steps?.length ? editPipeline.steps.map(s => ({ ...s })) : DEFAULT_STEPS.map(s => ({ ...s }))))
   const [editingAgentIdx, setEditingAgentIdx] = useState<number | null>(null)
   const [confirmText, setConfirmText] = useState('')
@@ -1341,6 +1343,20 @@ function PipelineSetupModal({ candidates, existingRepos, defaults, knownAgents, 
             </button>
           </label>
 
+          {/* Results location */}
+          <label className="flex items-center justify-between cursor-pointer">
+            <div>
+              <div className="text-sm" style={{ color: 'var(--text)' }}>Save results into repo</div>
+              <div className="text-[11px]" style={{ color: 'var(--muted)' }}>Also write &amp; commit phase results to <code style={{ color: 'var(--accent)' }}>docs/dlc/&lt;card&gt;/</code> in the owned repo (always kept in app data)</div>
+            </div>
+            <button onClick={() => setResultsInRepo(r => !r)}
+              className="w-10 h-5.5 rounded-full transition-all relative flex-shrink-0"
+              style={{ background: resultsInRepo ? 'var(--accent)' : 'var(--border-strong, var(--border))', height: 22, width: 40 }}>
+              <span className="absolute top-0.5 rounded-full transition-all"
+                style={{ height: 18, width: 18, background: 'var(--bg)', left: resultsInRepo ? 20 : 2 }} />
+            </button>
+          </label>
+
           {/* Custom steps editor */}
           <div>
             <div className="flex items-center justify-between mb-1.5">
@@ -1479,7 +1495,7 @@ function PipelineSetupModal({ candidates, existingRepos, defaults, knownAgents, 
           <button
             disabled={!valid || (!isEdit && dup)}
             onClick={() => onCreate({
-              repo: normalizeRepoInput(repo), source, trust, depth, backlog_intake: backlog,
+              repo: normalizeRepoInput(repo), source, trust, depth, backlog_intake: backlog, results_in_repo: resultsInRepo,
               steps: steps.map(s => ({ ...s, label: `dlc:${s.id}` })),
             })}
             className="text-xs px-3 py-1.5 rounded-md font-semibold transition-opacity disabled:opacity-40"
@@ -1806,7 +1822,7 @@ export default function SdlcPipeline() {
   }, [api])
 
   const createPipeline = useCallback(async (p: {
-    repo: string; source: RepoCandidate['source']; trust: Trust; depth: Depth; backlog_intake: boolean; steps: PipelineStep[]
+    repo: string; source: RepoCandidate['source']; trust: Trust; depth: Depth; backlog_intake: boolean; results_in_repo: boolean; steps: PipelineStep[]
   }) => {
     const now = new Date().toISOString()
     const id = 'pl-' + Math.random().toString(36).slice(2, 10)
@@ -1819,11 +1835,13 @@ export default function SdlcPipeline() {
         existing.trust = p.trust
         existing.depth = p.depth
         existing.backlog_intake = p.backlog_intake
+        existing.results_in_repo = p.results_in_repo
         existing.steps = p.steps
       } else {
         state.pipelines.push({
           id, repo: p.repo, source: p.source,
           trust: p.trust, depth: p.depth, backlog_intake: p.backlog_intake,
+          results_in_repo: p.results_in_repo,
           sot: 'github', steps: p.steps,
           created_at: now,
         })

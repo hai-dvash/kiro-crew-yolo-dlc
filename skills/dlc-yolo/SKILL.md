@@ -26,16 +26,24 @@ test — it is NOT the orchestrator/cron path.
   append and 404s on a missing file; the `write` tool creates parent dirs + the file and
   lets you do read-modify-write. So: `read` the current markdown (empty string if it does
   not exist yet), append the new turn, `write` the whole file back.
+- **FIRST STEP on invoke (do this before mode selection):** ensure the log exists. Resolve
+  `<workspace>` + the durable-first base, then use `write` to create
+  `~/.dlc-yolo/workspaces/<workspace>/data/pipeline_conversation.md` if it does not already
+  exist — write a `# DLC-YOLO pipeline conversation — <workspace>` header (and a `_started
+  <ISO8601>_` line). Do this whenever there is a pipeline in `state.json` (or the user is
+  about to create one), so the file is present the moment the command runs against a
+  pipeline — NOT lazily on the first action. If a `read` shows it already exists, leave it
+  and just append.
 - **What to log, one section per turn** (append, never truncate):
   ```
   ## <ISO8601> — <actor: user | dlc-yolo>
   <the user's message, OR a concise summary of your action:
    decision raised, crew created, issue filed (#n + url), stage moved, gate answered>
   ```
-- **When:** on invoke write a `# DLC-YOLO pipeline conversation — <repo>` header if the
-  file is new, then append the user's seed prompt; after each of your substantive actions
-  (a decision, a crew create, an issue file, a stage move) append a section. Keep entries
-  short — this is a presentation trail, not a full dump.
+- **When to append:** right after creating/confirming the file, append the user's seed
+  prompt; then after each of your substantive actions (a decision, a crew create, an issue
+  file, a stage move) append a section. Keep entries short — a presentation trail, not a
+  full dump.
 - Single writer: only this command writes the log, so no lock is needed. Presentation-only;
   no cross-workspace aggregation or future-proofing.
 
@@ -109,6 +117,13 @@ agent-setup panel's handoff). Do this conversationally:
    `state.json.pipelines[]` (default steps, inheriting `config` trust/depth,
    `source:"manual"`, `sot:"github"`) so the repo is added as a pipeline/workspace — this
    is the command-side equivalent of the UI's paste-a-link → add-pipeline flow.
+   **Ask the results-location preference** when creating (or confirm on an existing
+   pipeline): "Where should phase results (requirements/design/…) be saved?" — *App data
+   only* (`results_in_repo: false`, default — results live in the workspace-partitioned
+   `.dlc-yolo` results area) or *Also save into the repo* (`results_in_repo: true` — also
+   write + commit a copy into the owned repo's `docs/dlc/<card-id>/`). Write the choice onto
+   `pipeline.results_in_repo` in `state.json` (a card may override it). This is the same knob
+   the UI Pipeline Setup modal exposes as the "Save results into repo" toggle.
 2. **Spec the idea WITH the user.** Ask focused clarifying questions (1–3 at a time), state
    recommendations, keep it tight. You may spec anything — feature, bug, chore.
 3. **File it to GitHub as an issue** on the pipeline's repo — this is the invariant, because

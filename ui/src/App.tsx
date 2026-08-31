@@ -3,14 +3,16 @@ import { Card, CardTitle, PageHeader, StatCard } from '@kirocrew/app-sdk/ui'
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 
 // --- State file location ---------------------------------------------------
-// Durable-first, mirroring crons/dlc_yolo_advance.py:_resolve_state_path().
-// Order: ~/.dlc-yolo/state.json (durable, survives reboot) -> /tmp fallback
-// (ephemeral). The cron bootstraps the file (the UI's /api/file-write refuses
-// to CREATE files), so the UI just probes which resolved path actually exists
-// and uses it for all reads/writes. resolveStatePath() runs once on mount.
+// Persistence-authoritative, mirroring crons/dlc_yolo_advance.py:_resolve_state_path().
+// ~/.dlc-yolo/state.json is THE state home — when it exists it is the SOLE tier the UI
+// reads/writes (no /tmp mirror, so no split-brain). /tmp/dlc-yolo/state.json is used ONLY
+// as a last-resort scratch fallback when the durable file is genuinely absent (locked-down
+// env). The cron bootstraps + promotes the durable file (the UI's /api/file-write refuses
+// to CREATE files); the UI probes the durable path first and only falls to /tmp if that
+// read genuinely fails. resolveStatePath() runs once on mount.
 const DURABLE_STATE = '~/.dlc-yolo/state.json'
 const TMP_STATE = '/tmp/dlc-yolo/state.json'
-let STATE_PATH = DURABLE_STATE   // updated by resolveStatePath() at startup
+let STATE_PATH = DURABLE_STATE   // persistence-authoritative; only demoted to /tmp if durable is absent
 
 // --- Types ---
 type Trust = 'manual' | 'assisted' | 'autonomous'
@@ -1649,8 +1651,8 @@ export default function SdlcPipeline() {
       try {
         data = await api.get('/api/file-read?path=' + encodeURIComponent(STATE_PATH))
       } catch (primaryErr) {
-        // durable path not present/readable yet — fall back to the ephemeral /tmp
-        // location (mirrors the cron's resolution order) and pin it for all sites.
+        // durable file genuinely absent — demote to the last-resort /tmp scratch tier
+        // (persistence-authoritative; /tmp is used ONLY when durable can't be read).
         if (STATE_PATH !== TMP_STATE) {
           STATE_PATH = TMP_STATE
           data = await api.get('/api/file-read?path=' + encodeURIComponent(STATE_PATH))

@@ -34,11 +34,13 @@ def _resolve_state_path() -> Path:
     """Resolve the state.json location, in priority order:
 
     1. DLC_YOLO_STATE env var (explicit, stageable per environment/platform),
-    2. ~/.dlc-yolo/state.json (durable default; survives reboot — the true-
-       persistence tier; home is expanded server-side, UNIX-like gateways),
-    3. /tmp/dlc-yolo/state.json (ephemeral last-resort fallback — reboot-wiped,
-       used only if the durable home dir cannot be created).
+    2. ~/.dlc-yolo/state.json (durable persistence — THE state home; when this can be
+       created it is the SOLE tier: no /tmp mirror, so no split-brain is possible),
+    3. /tmp/dlc-yolo/state.json (last-resort SCRATCH only — used just when the durable
+       home dir genuinely cannot be created; /tmp is otherwise for truly-ephemeral
+       artifacts, NOT for saving the pipeline).
 
+    The tiers are MUTUALLY EXCLUSIVE for state — you get persistence OR /tmp, never both.
     The UI mirrors this exact order (see resolveStatePath in App.tsx).
     """
     env = os.environ.get("DLC_YOLO_STATE")
@@ -61,16 +63,37 @@ DEFAULT_STEP_IDS = [
 
 
 def _bootstrap() -> None:
-    """Create an empty state file if none exists yet. The UI's /api/file-write
-    refuses to CREATE files (404 if absent), so the cron is the bootstrapper:
-    once this file exists the UI can read/write it."""
-    if STATE.exists():
-        return
+    """Ensure the resolved state file exists. STATE is a SINGLE tier: persistence
+    (~/.dlc-yolo) when it can be created (the norm), else /tmp as a last-resort scratch
+    fallback — never both. The UI's /api/file-write cannot CREATE files, so the cron is the
+    bootstrapper.
+
+    One-time PROMOTION: if the durable file is missing/empty but a LEGACY /tmp state has real
+    data (pipelines/cards) — the historical layout before persistence existed — seed the
+    durable file FROM /tmp so that work is not orphaned. This is the only time /tmp feeds
+    persistence; thereafter persistence is authoritative and /tmp is ignored for state."""
+    def _content(p: Path) -> dict | None:
+        try:
+            return json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+
+    cur = _content(STATE)
+    cur_has = bool(cur and ((cur.get("pipelines")) or (cur.get("cards"))))
+    if cur_has:
+        return  # persistence already holds real work — authoritative, never clobber
+
+    seed = {"config": {"trust": "assisted", "depth": "standard"}, "pipelines": [], "cards": []}
+    # promote a legacy /tmp board ONLY when the durable tier is the resolved STATE (i.e. we
+    # are on persistence, not already on /tmp) and /tmp actually has data.
+    legacy = Path("/tmp/dlc-yolo/state.json")
+    if STATE != legacy:
+        tmp_state = _content(legacy)
+        if tmp_state and ((tmp_state.get("pipelines")) or (tmp_state.get("cards"))):
+            seed = tmp_state  # promote historical work into persistence
     try:
         STATE.parent.mkdir(parents=True, exist_ok=True)
-        STATE.write_text(json.dumps(
-            {"config": {"trust": "assisted", "depth": "standard"}, "pipelines": [], "cards": []},
-            indent=2), encoding="utf-8")
+        STATE.write_text(json.dumps(seed, indent=2), encoding="utf-8")
     except OSError:
         pass
 
@@ -187,6 +210,15 @@ def advance(ctx):
     moved: list[str] = []
     waiting_gates: list[str] = []
     changed = False
+    # Per-cycle work caps — a cron run has a hard ~30s budget, and each escalation is a
+    # slow spawn_run while each label-move is up to 3 `gh` calls (which HANG to their 20s
+    # timeout when a card's repo doesn't resolve). Without a cap, a board with many pending
+    # or fixture cards blows the budget and the whole cycle times out. Cap both; remaining
+    # work is picked up on the next tick (idempotent — the loop re-scans every 120s).
+    MAX_ESCALATIONS = 2
+    MAX_MOVES = 3
+    escalations = 0
+    moves = 0
 
     for card in cards:
         pl = _pipeline_for(state, card)
@@ -213,7 +245,9 @@ def advance(ctx):
             if status != "done":
                 # escalate ON DEMAND: if the step hasn't started, ask the orchestrator to
                 # run THIS card+step (one spawn), then move on. No standing agent loop.
-                if status in (None, "", "pending") and trust != "manual":
+                # Capped per cycle so a large pending board can't time out the run.
+                if (status in (None, "", "pending") and trust != "manual"
+                        and escalations < MAX_ESCALATIONS):
                     try:
                         ctx.call_tool("kirocrew-core", "spawn_run", {
                             "task": (f"Run pipeline step '{stage}' for DLC-YOLO card "
@@ -224,12 +258,16 @@ def advance(ctx):
                             "agent": "pipeline-orchestrator",
                         })
                         card.setdefault("step_status", {})[stage] = "pending"
+                        escalations += 1
                         changed = True
                     except Exception:
                         pass
                 continue
 
-        # perform the move
+        # perform the move — capped per cycle (label-moves do slow `gh` calls that hang on
+        # non-resolving repos). Over the cap, leave the card for the next tick.
+        if moves >= MAX_MOVES:
+            continue
         nxt = ladder[idx + 1]
         card["stage"] = nxt
         card["updated_at"] = now
@@ -237,6 +275,7 @@ def advance(ctx):
             {"from": stage, "to": nxt, "at": now, "agent": "advance-cron"})
         card.setdefault("step_status", {})[stage] = "advanced"
         _move_label(card, nxt)
+        moves += 1
         moved.append(f"{card.get('title', card.get('id'))}: {stage} → {nxt}")
         changed = True
 

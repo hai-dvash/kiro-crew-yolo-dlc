@@ -32,15 +32,13 @@
     "mcpTools": [
       "kirocrew-core::spawn_run",
       "kirocrew-core::spawn_list",
+      "kirocrew-core::select_crew",
       "kirocrew-core::send_message",
       "kirocrew-core::ask_question",
       "kirocrew-core::task_run",
       "kirocrew-cron::cron_add",
       "kirocrew-cron::cron_list"
     ]
-  },
-  "backend": {
-    "routes": "backend.routes:register_routes"
   },
   "ui": {
     "entry": "dist/index.mjs",
@@ -62,6 +60,7 @@
     {
       "name": "dlc-yolo-backlog-intake",
       "every": 900,
+      "agent": "pipeline-orchestrator",
       "message": "Backlog back-feed. Collect the distinct owned repos from state.json cards' source.repo. For each repo, list open issues labeled dlc-backlog (gh issue list --repo <repo> --label dlc-backlog --state open --json number,title,url). For any such issue that does NOT already have a card (match on source.issue/url), create a new card at stage 'intake' inheriting config.trust/config.depth, linked to that issue. Only READ issues and CREATE intake cards — never advance or execute here. Persist state."
     }
   ]

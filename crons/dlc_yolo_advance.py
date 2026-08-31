@@ -29,12 +29,50 @@ from pathlib import Path
 
 from kiro_crew.cron_script import Report, Skip
 
-STATE = Path("/tmp/dlc-yolo/state.json")
+
+def _resolve_state_path() -> Path:
+    """Resolve the state.json location, in priority order:
+
+    1. DLC_YOLO_STATE env var (explicit, stageable per environment/platform),
+    2. ~/.dlc-yolo/state.json (durable default; survives reboot — the true-
+       persistence tier; home is expanded server-side, UNIX-like gateways),
+    3. /tmp/dlc-yolo/state.json (ephemeral last-resort fallback — reboot-wiped,
+       used only if the durable home dir cannot be created).
+
+    The UI mirrors this exact order (see resolveStatePath in App.tsx).
+    """
+    env = os.environ.get("DLC_YOLO_STATE")
+    if env:
+        return Path(os.path.expanduser(env))
+    home = Path(os.path.expanduser("~/.dlc-yolo/state.json"))
+    try:
+        home.parent.mkdir(parents=True, exist_ok=True)
+        return home
+    except OSError:
+        return Path("/tmp/dlc-yolo/state.json")
+
+
+STATE = _resolve_state_path()
 
 DEFAULT_STEP_IDS = [
     "intake", "requirements", "gate-spec", "design", "tasks",
     "gate-impl", "implement", "review", "gate-review", "pr", "done",
 ]
+
+
+def _bootstrap() -> None:
+    """Create an empty state file if none exists yet. The UI's /api/file-write
+    refuses to CREATE files (404 if absent), so the cron is the bootstrapper:
+    once this file exists the UI can read/write it."""
+    if STATE.exists():
+        return
+    try:
+        STATE.parent.mkdir(parents=True, exist_ok=True)
+        STATE.write_text(json.dumps(
+            {"config": {"trust": "assisted", "depth": "standard"}, "pipelines": [], "cards": []},
+            indent=2), encoding="utf-8")
+    except OSError:
+        pass
 
 
 def _load() -> dict:
@@ -109,6 +147,7 @@ def _move_label(card: dict, new_step: str) -> None:
 def advance(ctx):
     from datetime import datetime, timezone
 
+    _bootstrap()
     state = _load()
     cards = state.get("cards") or []
     if not cards:

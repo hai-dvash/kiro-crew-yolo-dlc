@@ -16,6 +16,7 @@ Intake → Requirements → [GATE: spec questions] → Design → Tasks → [GAT
 | Stage | Type | Agent | Description |
 |-------|------|-------|-------------|
 | intake | auto | orchestrator | Issue arrives from Issue Radar or manual creation |
+| investigate | auto | crew/agent | Classify the issue: summarize, propose GitHub labels, write a triage note (human-aided). Crew-assignable; a first-class agent step (see below) |
 | requirements | auto | spec-agent | Produce requirements doc from issue |
 | gate-spec | human | — | User answers clarifying questions before design proceeds |
 | design | auto | design-agent | Produce design doc from approved requirements |
@@ -77,6 +78,13 @@ A card can regress when:
   ],
   "parked": [
     {"id": "park-uuid", "note": "Needs auth redesign — can't spec now", "issue_url": "https://github.com/owner/repo/issues/57", "at": "ISO8601", "phase": "design"}
+  ],
+  "decisions": [
+    {"id": "dec-uuid", "at": "ISO8601", "step": "design", "raised_by": "auto:intent-fidelity",
+     "kind": "intent-fidelity", "question": "Caching design vs the issue's p99 intent?",
+     "options": [{"id": "a", "note": "keep cache", "risk": "may not move p99"}, {"id": "b", "note": "profile hot path first", "risk": "adds a spike"}],
+     "chosen": "b", "rationale": "the feature is a means; the intent is p99 — validate the hot path",
+     "action": "add-step", "enhancement": {"target_step": "design", "add_step": "profile"}, "confidence": "med"}
   ],
   "history": [
     {"from": "intake", "to": "requirements", "at": "ISO8601", "agent": "spec-agent"}
@@ -146,6 +154,26 @@ Each step may set its OWN execution profile — `trust` (manual/assisted/autonom
 is how "this step runs YOLO/autonomous+deep, that gate stays manual" is expressed.
 
 Every step has a `label` (`dlc:<step-id>`) used as the GitHub stage label (below).
+
+### Investigation step (issue classification)
+
+The default ladder opens with an **`investigate`** agent step — a first-class,
+crew-assignable classification pass (the pipeline-owned equivalent of Issue Radar's
+Investigate button). When a card reaches it, the step's agent/crew:
+
+1. Reads the issue (title/body/labels) within the card's owned repo sandbox.
+2. Produces a short **triage note** (what it is, type: feature/bug/chore, rough size) into
+   the card's `artifacts.investigation` and spec dir.
+3. **Proposes GitHub labels** for the issue; under `manual`/`assisted` the user
+   accepts/adjusts (human-aided), under `autonomous` the orchestrator may apply them via
+   `gh` on the owned repo.
+4. Sets `step_status['investigate']='done'` when classified.
+
+Because it is a normal agent step, it can be crew-assigned (`step.agent.crew`, e.g. a
+`triage`/`research` crew) and carry `addenda[]` like any other step. Issue Radar stays the
+read-only source of candidate repos + its own Investigate button; DLC-YOLO's investigate
+step is the pipeline-owned classification that then drives the ticket onward. Pipelines
+that don't want it can delete the step in the setup modal.
 
 ### Source of truth (GitHub-first, local fallback)
 
@@ -226,8 +254,22 @@ agent step, when it finishes its work, MUST:
 3. **Self-review** against the step's acceptance criteria; if the phase outgrew the prior
    phase beyond the depth factor, or a feature can't be spec'd now, either flag a back-step
    or park the feature to `dlc-backlog` (the agent decides — the loop does not).
-4. Set `card.step_status[<step>] = "done"` when the step is genuinely complete. The
-   deterministic loop advances ONLY on that signal; it never judges completeness itself.
+3b. **Raise the Decision Gate when needed (protects shallow/unseen intent).** Before marking
+   done, self-check: does the artifact serve the card's INTENT (not just its literal text)?
+   Did this step introduce entities the predecessor never sanctioned (unseen scope)? Was a
+   consequential technical choice made implicitly? Would this step be materially better with
+   a crew/addendum/tool it lacks (capability-gap)? If any is true — or you otherwise sense a
+   fork worth surfacing — RAISE the gate: append a pending entry to `card.decisions[]`
+   (`{id, at, step, raised_by, kind, question, options[], chosen?, rationale, action,
+   enhancement?, confidence}`) with your recommendation, and do NOT set `step_status='done'`
+   until its `action` is resolved (the orchestrator deliberates + trust-gates it). Actions
+   include card-flow moves (back-step/re-scope/split/park/continue/escalate) AND pipeline
+   ENHANCEMENTS (add-crew/add-addendum/add-tool/add-step) that reshape the step/pipeline via
+   `state.json`. The gate is ON-DEMAND — not every step; skip it when the step cleanly
+   serves intent with no fork.
+4. Set `card.step_status[<step>] = "done"` when the step is genuinely complete (and any
+   raised decision is resolved). The deterministic loop advances ONLY on that signal; it
+   never judges completeness itself.
 
 `step_status` values: `pending` (escalated / running), `done` (agent finished — safe to
 advance), `advanced` (loop has moved past it). Gates use `approved` (set by the UI / user).

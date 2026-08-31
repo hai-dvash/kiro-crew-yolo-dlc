@@ -2,6 +2,16 @@ import { useAppApi, useChatLauncher } from '@kirocrew/app-sdk'
 import { Card, CardTitle, PageHeader, StatCard } from '@kirocrew/app-sdk/ui'
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 
+// --- State file location ---------------------------------------------------
+// Durable-first, mirroring crons/dlc_yolo_advance.py:_resolve_state_path().
+// Order: ~/.dlc-yolo/state.json (durable, survives reboot) -> /tmp fallback
+// (ephemeral). The cron bootstraps the file (the UI's /api/file-write refuses
+// to CREATE files), so the UI just probes which resolved path actually exists
+// and uses it for all reads/writes. resolveStatePath() runs once on mount.
+const DURABLE_STATE = '~/.dlc-yolo/state.json'
+const TMP_STATE = '/tmp/dlc-yolo/state.json'
+let STATE_PATH = DURABLE_STATE   // updated by resolveStatePath() at startup
+
 // --- Types ---
 type Trust = 'manual' | 'assisted' | 'autonomous'
 type Depth = 'quick' | 'standard' | 'deep'
@@ -33,18 +43,28 @@ interface PipelineCard {
     scope?: Record<string, number>
   }
   backstep_history?: Array<{ from: string; to: string; reason: string; at: string }>
+  decisions?: Array<{ id: string; at: string; step?: string; raised_by?: string; kind?: string; question?: string; chosen?: string; rationale?: string; action?: string; confidence?: string }>
   parked?: ParkedIdea[]
   history: Array<{ from: string; to: string; at: string; agent: string }>
 }
 
 interface PipelineConfig { trust: Trust; depth: Depth }
 
-interface StepAgent { name: string; role?: string; tools?: string[] }
+interface StepAgent { name: string; role?: string; tools?: string[]; crew?: string; model?: string }
+// Addendum crew (Model 2): a cross-cutting specialist run that layers onto an agent step
+// AFTER the canon crew, gated by a `when` integration trigger. Each is its own spawn_run.
+interface Addendum {
+  crew: string                                        // config.json agents entry to route to
+  when?: 'always' | 'depth:deep' | 'kind:bug' | 'manual' | string  // integration trigger; string = label:<x>
+  writes?: string                                     // artifact it produces in SPEC_DIR (e.g. research.md)
+}
 interface PipelineStep {
   id: string
   name: string
   type: 'agent' | 'gate'
   agent?: StepAgent
+  addenda?: Addendum[]
+  trigger?: 'ask' | 'spec-builder' | 'task-runner' | 'inline' | 'skip'  // default engine for this phase (ask = prompt at runtime)
   trust?: Trust
   depth?: Depth
   label?: string
@@ -52,6 +72,7 @@ interface PipelineStep {
 
 // Default step ladder the wizard seeds from (users edit freely per pipeline).
 const DEFAULT_STEPS: PipelineStep[] = [
+  { id: 'investigate', name: 'Investigate', type: 'agent', agent: { name: 'spec-agent', role: 'Classify the issue: summarize, propose labels, write a triage note (human-aided)' } },
   { id: 'requirements', name: 'Requirements', type: 'agent', agent: { name: 'spec-agent', role: 'Produce requirements.md' } },
   { id: 'gate-spec', name: 'Gate: Spec', type: 'gate' },
   { id: 'design', name: 'Design', type: 'agent', agent: { name: 'design-agent', role: 'Produce design.md' } },
@@ -612,10 +633,19 @@ function PipelineCardItem({ card, config, onApprove, onReject, onCycleTrust, onC
             ↩ {card.backstep_history.length}
           </Pill>
         )}
+        {card.decisions && card.decisions.length > 0 && (() => {
+          const d = card.decisions[card.decisions.length - 1]
+          return (
+            <Pill color="var(--accent)"
+              title={`${card.decisions.length} decision${card.decisions.length === 1 ? '' : 's'} — last: ${d.question || d.kind || ''}${d.action ? ` → ${d.action}` : ''}${d.rationale ? `\n${d.rationale}` : ''}`}>
+              ⚖ {card.decisions.length}
+            </Pill>
+          )
+        })()}
       </div>
 
       {isGate && onApprove && onReject && (
-        <div className="mt-2.5 flex gap-1.5">
+        <div className="mt-2.5 flex gap-1.5 items-center flex-wrap">
           <button
             className="text-[11px] px-2.5 py-1 rounded-md font-semibold transition-opacity hover:opacity-85"
             style={{ background: 'var(--ok)', color: 'var(--bg)' }}
@@ -630,6 +660,22 @@ function PipelineCardItem({ card, config, onApprove, onReject, onCycleTrust, onC
           >
             Reject
           </button>
+          {/* Review gate: hand off to Code Review Sage, scoped to the card's repo (+ PR if known). */}
+          {(card.stage === 'gate-review' || /review/i.test(card.stage || '')) && (() => {
+            const repo = card.source?.repo
+            if (!repo) return null
+            const pr = card.artifacts?.pr_url
+            const prNum = pr && /\/pull\/(\d+)/.exec(pr)?.[1]
+            const href = `/code-review-sage?repo=${encodeURIComponent('https://github.com/' + repo)}` + (prNum ? `&pr=${prNum}` : '')
+            return (
+              <a href={href} title={pr ? `Deep-review PR #${prNum} in Code Review Sage` : `Open Code Review Sage for ${repo}`}
+                className="text-[11px] px-2.5 py-1 rounded-md font-semibold transition-opacity hover:opacity-85 inline-flex items-center gap-1"
+                style={{ background: 'var(--bg-hover, var(--border))', color: 'var(--accent)', border: '1px solid color-mix(in srgb, var(--accent) 40%, var(--border))' }}>
+                <svg width="11" height="11" viewBox="0 0 16 16" fill="none"><circle cx="7" cy="7" r="4.5" stroke="currentColor" strokeWidth="1.5"/><path d="M10.5 10.5L14 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+                Review in Sage
+              </a>
+            )
+          })()}
         </div>
       )}
     </div>
@@ -858,13 +904,16 @@ interface AgentDraft {
   role?: string          // → agent `prompt`
   tools?: string[]
   model?: string         // '' / 'auto' → omit
+  crew?: string          // optional KiroCrew crew (config.json agents key) to route this step to
+  addenda?: Addendum[]   // optional addendum crews (Model 2) layered after the canon crew
   trust?: Trust          // step execution profile (DLC-YOLO)
   depth?: Depth
 }
 
-function AgentSetupPanel({ initial, knownAgents, repo, stepName, onSave, onClose }: {
+function AgentSetupPanel({ initial, knownAgents, crews, repo, stepName, onSave, onClose }: {
   initial: AgentDraft
   knownAgents: string[]
+  crews: { name: string; description?: string }[]
   repo: string
   stepName: string
   onSave: (a: AgentDraft) => void
@@ -875,10 +924,15 @@ function AgentSetupPanel({ initial, knownAgents, repo, stepName, onSave, onClose
   const [role, setRole] = useState(initial.role || '')
   const [tools, setTools] = useState<string[]>(initial.tools || ['read'])
   const [model, setModel] = useState(initial.model || 'auto')
+  const [crew, setCrew] = useState(initial.crew || '')
+  const [addenda, setAddenda] = useState<Addendum[]>(initial.addenda || [])
   const [trust, setTrust] = useState<Trust | ''>(initial.trust || '')
   const [depth, setDepth] = useState<Depth | ''>(initial.depth || '')
 
   const toggleTool = (t: string) => setTools(prev => prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t])
+  const addAddendum = () => setAddenda(prev => prev.length >= 3 ? prev : [...prev, { crew: crews[0]?.name || '', when: 'always', writes: '' }])
+  const updateAddendum = (i: number, patch: Partial<Addendum>) => setAddenda(prev => prev.map((a, idx) => idx === i ? { ...a, ...patch } : a))
+  const removeAddendum = (i: number) => setAddenda(prev => prev.filter((_, idx) => idx !== i))
   const valid = name.trim().length > 0
 
   return (
@@ -894,7 +948,7 @@ function AgentSetupPanel({ initial, knownAgents, repo, stepName, onSave, onClose
               `/dlc-yolo\n\nHelp me design a NEW agent for a custom pipeline step.\n` +
               `Pipeline repo: ${repo || '(unset)'}\nStep: ${stepName || '(unnamed)'}\n\n` +
               `Ask me what the step should do, then propose an agent config (name, role/prompt, tools, model). ` +
-              `When I'm happy, write it into this pipeline's step in /tmp/dlc-yolo/state.json (the step's agent {name, role, tools} and any trust/depth), keeping GitHub as the source of truth.`
+              `When I'm happy, write it into this pipeline's step in the DLC-YOLO state file (~/.dlc-yolo/state.json, or /tmp/dlc-yolo/state.json if that's what exists) — the step's agent {name, role, tools} and any trust/depth — keeping GitHub as the source of truth.`
             })}
             className="ml-auto text-[11px] px-2.5 py-1 rounded-md font-semibold flex items-center gap-1"
             style={{ background: 'color-mix(in srgb, var(--accent) 16%, transparent)', color: 'var(--accent)' }}
@@ -962,6 +1016,65 @@ function AgentSetupPanel({ initial, knownAgents, repo, stepName, onSave, onClose
               style={{ background: 'var(--bg-elevated, var(--bg))', border: '1px solid var(--border)', color: 'var(--text)' }} />
           </div>
 
+          {/* Crew: route this step to a KiroCrew crew (config.json agents). Empty = use the step agent above. */}
+          <div>
+            <div className="flex items-center justify-between">
+              <label className="text-[11px] uppercase tracking-wider" style={{ color: 'var(--muted)' }}>Crew</label>
+              <select value={crew} onChange={e => setCrew(e.target.value)}
+                className="w-52 px-2 py-1 rounded-md text-sm outline-none"
+                style={{ background: 'var(--bg-elevated, var(--bg))', border: '1px solid var(--border)', color: 'var(--text)' }}>
+                <option value="">— none (use step agent) —</option>
+                {crews.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+              </select>
+            </div>
+            {crew && (
+              <div className="text-[10px] mt-1 text-right" style={{ color: 'var(--muted)' }}>
+                {crews.find(c => c.name === crew)?.description || 'Runs this step via select_crew → spawn_run(agent=' + crew + ')'}
+              </div>
+            )}
+          </div>
+
+          {/* Addendum crews (Model 2): cross-cutting passes run AFTER the canon crew, gated by `when`. */}
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-[11px] uppercase tracking-wider" style={{ color: 'var(--muted)' }}>Addendum crews</label>
+              <button onClick={addAddendum} disabled={addenda.length >= 3}
+                className="text-[11px] px-2 py-0.5 rounded font-semibold disabled:opacity-40"
+                style={{ color: 'var(--accent)', border: '1px dashed color-mix(in srgb, var(--accent) 50%, var(--border))' }}>+ addendum</button>
+            </div>
+            <div className="text-[10px] mb-1.5" style={{ color: 'var(--muted)' }}>
+              Run after the canon crew as separate passes (e.g. research, secure-design). Max 3.
+            </div>
+            {addenda.length === 0 && (
+              <div className="text-[11px] italic" style={{ color: 'var(--muted)' }}>none</div>
+            )}
+            {addenda.map((a, i) => (
+              <div key={i} className="flex items-center gap-1.5 mb-1.5">
+                <select value={a.crew} onChange={e => updateAddendum(i, { crew: e.target.value })}
+                  className="flex-1 min-w-0 px-2 py-1 rounded-md text-[12px] outline-none"
+                  style={{ background: 'var(--bg-elevated, var(--bg))', border: '1px solid var(--border)', color: 'var(--text)' }}>
+                  {crews.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                </select>
+                <select value={a.when || 'always'} onChange={e => updateAddendum(i, { when: e.target.value })}
+                  title="Integration trigger — when this addendum runs"
+                  className="px-1.5 py-1 rounded-md text-[11px] outline-none"
+                  style={{ background: 'var(--bg-elevated, var(--bg))', border: '1px solid var(--border)', color: 'var(--text)' }}>
+                  <option value="always">always</option>
+                  <option value="depth:deep">depth:deep</option>
+                  <option value="kind:bug">kind:bug</option>
+                  <option value="manual">manual</option>
+                </select>
+                <input value={a.writes || ''} onChange={e => updateAddendum(i, { writes: e.target.value })}
+                  placeholder="writes (e.g. research.md)"
+                  className="w-32 px-2 py-1 rounded-md text-[11px] outline-none"
+                  style={{ background: 'var(--bg-elevated, var(--bg))', border: '1px solid var(--border)', color: 'var(--text)' }} />
+                <button onClick={() => removeAddendum(i)} className="w-5 h-5 flex items-center justify-center flex-shrink-0" style={{ color: 'var(--muted)' }} aria-label="Remove addendum">
+                  <svg width="10" height="10" viewBox="0 0 12 12"><path d="M2 2l8 8M10 2l-8 8" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>
+                </button>
+              </div>
+            ))}
+          </div>
+
           {/* Execution profile for the step */}
           <div className="flex items-center justify-between">
             <span className="text-[11px] uppercase tracking-wider" style={{ color: 'var(--muted)' }}>Trust</span>
@@ -1001,6 +1114,8 @@ function AgentSetupPanel({ initial, knownAgents, repo, stepName, onSave, onClose
             onClick={() => onSave({
               name: name.trim(), role: role.trim() || undefined, tools,
               model: model.trim() && model.trim() !== 'auto' ? model.trim() : undefined,
+              crew: crew || undefined,
+              addenda: addenda.length ? addenda.filter(a => a.crew) : undefined,
               trust: trust || undefined, depth: depth || undefined,
             })}
             className="text-xs px-3 py-1.5 rounded-md font-semibold transition-opacity disabled:opacity-40"
@@ -1013,11 +1128,12 @@ function AgentSetupPanel({ initial, knownAgents, repo, stepName, onSave, onClose
 // --- Pipeline Setup Modal ---
 interface RepoCandidate { repo: string; source: 'issue-radar' | 'workspace' | 'manual'; detail?: string }
 
-function PipelineSetupModal({ candidates, existingRepos, defaults, knownAgents, onCreate, onClose, editPipeline, cardCount, isExample, onDelete }: {
+function PipelineSetupModal({ candidates, existingRepos, defaults, knownAgents, crews, onCreate, onClose, editPipeline, cardCount, isExample, onDelete }: {
   candidates: RepoCandidate[]
   existingRepos: Set<string>
   defaults: PipelineConfig
   knownAgents: string[]
+  crews: { name: string; description?: string }[]
   onCreate: (p: { repo: string; source: RepoCandidate['source']; trust: Trust; depth: Depth; backlog_intake: boolean; steps: PipelineStep[] }) => void
   onClose: () => void
   editPipeline?: Pipeline          // when set, the modal is in EDIT mode
@@ -1052,8 +1168,22 @@ function PipelineSetupModal({ candidates, existingRepos, defaults, knownAgents, 
   }])
 
   const pick = (c: RepoCandidate) => { setRepo(c.repo); setSource(c.source) }
-  const valid = /^[^/\s]+\/[^/\s]+$/.test(repo.trim()) || candidates.some(c => c.repo === repo)
-  const dup = !isEdit && existingRepos.has(repo.trim())
+  // Accept a pasted GitHub/GitLab URL OR a bare owner/name and normalize to "owner/name".
+  // e.g. https://github.com/hai-dvash/repo(.git)(/…) -> hai-dvash/repo
+  const normalizeRepoInput = (raw: string): string => {
+    let s = (raw || '').trim()
+    if (!s) return ''
+    const m = s.match(/^(?:https?:\/\/)?(?:www\.)?(?:github|gitlab)\.com\/([^/\s]+\/[^/\s#?]+)/i)
+    if (m) s = m[1]
+    return s.replace(/\.git$/i, '').replace(/\/+$/, '')
+  }
+  const onRepoInput = (raw: string) => {
+    const looksUrl = /github\.com|gitlab\.com/i.test(raw)
+    setRepo(looksUrl ? normalizeRepoInput(raw) : raw)
+    setSource(looksUrl ? 'manual' : 'manual')
+  }
+  const valid = /^[^/\s]+\/[^/\s]+$/.test(normalizeRepoInput(repo)) || candidates.some(c => c.repo === repo)
+  const dup = !isEdit && existingRepos.has(normalizeRepoInput(repo))
 
   const Seg = <T extends string>({ value, options, tokens, onPick }: {
     value: T; options: T[]; tokens: Record<string, string>; onPick: (v: T) => void
@@ -1091,16 +1221,21 @@ function PipelineSetupModal({ candidates, existingRepos, defaults, knownAgents, 
               name: steps[editingAgentIdx]?.agent?.name || '',
               role: steps[editingAgentIdx]?.agent?.role,
               tools: steps[editingAgentIdx]?.agent?.tools,
+              model: steps[editingAgentIdx]?.agent?.model,
+              crew: steps[editingAgentIdx]?.agent?.crew,
+              addenda: steps[editingAgentIdx]?.addenda,
               trust: steps[editingAgentIdx]?.trust,
               depth: steps[editingAgentIdx]?.depth,
             }}
             knownAgents={knownAgents}
+            crews={crews}
             repo={repo}
             stepName={steps[editingAgentIdx]?.name || ''}
             onClose={() => setEditingAgentIdx(null)}
             onSave={(a) => {
               updateStep(editingAgentIdx, {
-                agent: { name: a.name, role: a.role, tools: a.tools },
+                agent: { name: a.name, role: a.role, tools: a.tools, model: a.model, crew: a.crew },
+                addenda: a.addenda,
                 trust: a.trust, depth: a.depth,
               })
               setEditingAgentIdx(null)
@@ -1142,15 +1277,19 @@ function PipelineSetupModal({ candidates, existingRepos, defaults, knownAgents, 
           style={{ display: isEdit && modalView === 'danger' ? 'none' : 'flex' }}>
           {/* Repo picker */}
           <div>
-            <label className="text-[11px] uppercase tracking-wider" style={{ color: 'var(--muted)' }}>Repository</label>
+            <label className="text-[11px] uppercase tracking-wider" style={{ color: 'var(--muted)' }}>Repository — paste a GitHub URL or owner/name</label>
             <input
               value={repo}
-              onChange={e => { setRepo(e.target.value); setSource('manual') }}
-              placeholder="owner/name"
+              onChange={e => onRepoInput(e.target.value)}
+              onPaste={e => { const t = e.clipboardData.getData('text'); if (/github\.com|gitlab\.com/i.test(t)) { e.preventDefault(); onRepoInput(t) } }}
+              placeholder="https://github.com/owner/name  ·  or  owner/name"
               disabled={isEdit}
               className="mt-1 w-full px-3 py-2 rounded-md text-sm outline-none disabled:opacity-60"
               style={{ background: 'var(--bg-elevated, var(--bg))', border: `1px solid ${dup ? 'var(--danger)' : 'var(--border)'}`, color: 'var(--text)' }}
             />
+            {!isEdit && repo && normalizeRepoInput(repo) !== repo && (
+              <div className="text-[11px] mt-1" style={{ color: 'var(--muted)' }}>→ <code style={{ color: 'var(--accent)' }}>{normalizeRepoInput(repo)}</code></div>
+            )}
             {dup && <div className="text-[11px] mt-1" style={{ color: 'var(--danger)' }}>A pipeline for this repo already exists.</div>}
 
             {/* Candidate sources */}
@@ -1231,16 +1370,30 @@ function PipelineSetupModal({ candidates, existingRepos, defaults, knownAgents, 
                   </div>
                   {/* Agent config (opens the agent setup modal) */}
                   {s.type === 'agent' && (
-                    <div className="mt-1.5 pl-5 flex items-center gap-2">
+                    <div className="mt-1.5 pl-5 flex items-center gap-2 flex-wrap">
                       <button onClick={() => setEditingAgentIdx(i)}
                         className="text-[11px] px-2 py-1 rounded-md font-medium flex items-center gap-1.5"
                         style={{ background: 'var(--bg-hover, var(--border))', color: 'var(--accent)' }}>
                         ⚙ {s.agent?.name ? `Agent: ${s.agent.name}` : 'Configure agent'}
                       </button>
+                      {/* Phase trigger: which engine runs this step (else ask at runtime). Editable/visible per §4. */}
+                      <span className="text-[9px] uppercase" style={{ color: 'var(--muted)' }}>trigger</span>
+                      <select value={s.trigger || 'ask'} onChange={e => updateStep(i, { trigger: (e.target.value === 'ask' ? undefined : e.target.value) as PipelineStep['trigger'] })}
+                        title="Which engine runs this phase (ask = prompt at runtime)"
+                        className="text-[10px] px-1 py-0.5 rounded outline-none" style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)' }}>
+                        <option value="ask">ask</option>
+                        <option value="spec-builder">Spec Builder</option>
+                        <option value="task-runner">Task Runner</option>
+                        <option value="inline">inline</option>
+                        <option value="skip">skip</option>
+                      </select>
                       {(s.trust || s.depth) && (
                         <span className="text-[10px]" style={{ color: 'var(--muted)' }}>
                           {[s.trust, s.depth].filter(Boolean).join(' · ')}
                         </span>
+                      )}
+                      {s.addenda && s.addenda.length > 0 && (
+                        <span className="text-[10px]" style={{ color: 'var(--accent)' }}>+{s.addenda.length} addendum{s.addenda.length === 1 ? '' : 's'}</span>
                       )}
                       {s.agent?.role && <span className="text-[10px] truncate" style={{ color: 'var(--muted)' }}>{s.agent.role}</span>}
                     </div>
@@ -1326,7 +1479,7 @@ function PipelineSetupModal({ candidates, existingRepos, defaults, knownAgents, 
           <button
             disabled={!valid || (!isEdit && dup)}
             onClick={() => onCreate({
-              repo: repo.trim(), source, trust, depth, backlog_intake: backlog,
+              repo: normalizeRepoInput(repo), source, trust, depth, backlog_intake: backlog,
               steps: steps.map(s => ({ ...s, label: `dlc:${s.id}` })),
             })}
             className="text-xs px-3 py-1.5 rounded-md font-semibold transition-opacity disabled:opacity-40"
@@ -1432,11 +1585,24 @@ export default function SdlcPipeline() {
   const [setupOpen, setSetupOpen] = useState(false)
   const [editRepo, setEditRepo] = useState<string | null>(null)
   const [candidates, setCandidates] = useState<RepoCandidate[]>([])
+  const [crews, setCrews] = useState<{ name: string; description?: string }[]>([])
   const kanbanRef = useRef<HTMLDivElement>(null)
 
   const fetchCards = useCallback(async () => {
     try {
-      const data = await api.get('/api/file-read?path=/tmp/dlc-yolo/state.json')
+      let data
+      try {
+        data = await api.get('/api/file-read?path=' + encodeURIComponent(STATE_PATH))
+      } catch (primaryErr) {
+        // durable path not present/readable yet — fall back to the ephemeral /tmp
+        // location (mirrors the cron's resolution order) and pin it for all sites.
+        if (STATE_PATH !== TMP_STATE) {
+          STATE_PATH = TMP_STATE
+          data = await api.get('/api/file-read?path=' + encodeURIComponent(STATE_PATH))
+        } else {
+          throw primaryErr
+        }
+      }
       setAllCards(data.cards || [])
       setPipelines(data.pipelines || [])
       setConfig({ ...DEFAULT_CONFIG, ...(data.config || {}) })
@@ -1495,6 +1661,21 @@ export default function SdlcPipeline() {
     return () => clearInterval(interval)
   }, [fetchCards])
 
+  // Load the KiroCrew crew roster (config.json `agents` map) once, for the step Crew dropdown.
+  // The UI reads config.json directly (same pattern as workspaces); select_crew binds these at run time.
+  useEffect(() => {
+    (async () => {
+      try {
+        const cfg = await api.get('/api/file-read?path=~/.kiro/crew/config.json')
+        const agents = cfg?.agents || {}
+        const list = Object.entries(agents).map(([name, v]: [string, any]) => ({
+          name, description: v?.description || undefined,
+        }))
+        setCrews(list)
+      } catch (e) { console.warn('crew roster (config.json) unreadable:', e) }
+    })()
+  }, [api])
+
   // Resolve the step ladder for a given card from state (its pipeline's steps, else default),
   // always bracketed by intake…done, returning an array of step ids.
   const ladderFor = (state: { pipelines?: Pipeline[] }, card: PipelineCard): string[] => {
@@ -1507,7 +1688,7 @@ export default function SdlcPipeline() {
 
   const advanceCard = useCallback(async (cardId: string) => {
     try {
-      const state = await api.get('/api/file-read?path=/tmp/dlc-yolo/state.json')
+      const state = await api.get('/api/file-read?path=' + encodeURIComponent(STATE_PATH))
       const card = state.cards?.find((c: PipelineCard) => c.id === cardId)
       if (!card) return
       const ladder = ladderFor(state, card)
@@ -1520,7 +1701,7 @@ export default function SdlcPipeline() {
       card.gate_history.push({ gate: prevStage, decision: 'approved', at: card.updated_at, notes: '' })
       card.history = card.history || []
       card.history.push({ from: prevStage, to: card.stage, at: card.updated_at, agent: 'human' })
-      await api.post('/api/file-write', { path: '/tmp/dlc-yolo/state.json', content: JSON.stringify(state, null, 2) })
+      await api.post('/api/file-write', { path: STATE_PATH, content: JSON.stringify(state, null, 2) })
       fetchCards()
     } catch (e) {
       console.error('Failed to advance card:', e)
@@ -1529,7 +1710,7 @@ export default function SdlcPipeline() {
 
   const rejectCard = useCallback(async (cardId: string) => {
     try {
-      const state = await api.get('/api/file-read?path=/tmp/dlc-yolo/state.json')
+      const state = await api.get('/api/file-read?path=' + encodeURIComponent(STATE_PATH))
       const card = state.cards?.find((c: PipelineCard) => c.id === cardId)
       if (!card) return
       const ladder = ladderFor(state, card)
@@ -1547,7 +1728,7 @@ export default function SdlcPipeline() {
       card.gate_history.push({ gate: prevStage, decision: 'rejected', at: card.updated_at, notes: '' })
       card.history = card.history || []
       card.history.push({ from: prevStage, to: card.stage, at: card.updated_at, agent: 'human' })
-      await api.post('/api/file-write', { path: '/tmp/dlc-yolo/state.json', content: JSON.stringify(state, null, 2) })
+      await api.post('/api/file-write', { path: STATE_PATH, content: JSON.stringify(state, null, 2) })
       fetchCards()
     } catch (e) {
       console.error('Failed to reject card:', e)
@@ -1556,10 +1737,10 @@ export default function SdlcPipeline() {
 
   const mutateState = useCallback(async (mutator: (state: { config?: PipelineConfig; pipelines?: Pipeline[]; cards: PipelineCard[] }) => void) => {
     try {
-      const state = await api.get('/api/file-read?path=/tmp/dlc-yolo/state.json')
+      const state = await api.get('/api/file-read?path=' + encodeURIComponent(STATE_PATH))
       state.cards = state.cards || []
       mutator(state)
-      await api.post('/api/file-write', { path: '/tmp/dlc-yolo/state.json', content: JSON.stringify(state, null, 2) })
+      await api.post('/api/file-write', { path: STATE_PATH, content: JSON.stringify(state, null, 2) })
       fetchCards()
     } catch (e) {
       console.error('Failed to mutate state:', e)
@@ -1726,6 +1907,7 @@ export default function SdlcPipeline() {
           existingRepos={new Set(pipelines.map(p => p.repo))}
           defaults={config}
           knownAgents={['spec-agent', 'design-agent', 'impl-agent', 'review-agent', 'orchestrator']}
+          crews={crews}
           onCreate={createPipeline}
           onClose={() => setSetupOpen(false)}
         />
@@ -1736,6 +1918,7 @@ export default function SdlcPipeline() {
           existingRepos={new Set(pipelines.map(p => p.repo))}
           defaults={config}
           knownAgents={['spec-agent', 'design-agent', 'impl-agent', 'review-agent', 'orchestrator']}
+          crews={crews}
           editPipeline={
             pipelines.find(p => p.repo === editRepo) ||
             // demo repos have cards but no pipelines[] entry — synthesize a default to edit

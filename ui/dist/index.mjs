@@ -1003,9 +1003,9 @@ function Le({ candidates: s, existingRepos: f, defaults: x, knownAgents: b, crew
                     /* @__PURE__ */ o("div", { children: [
                       /* @__PURE__ */ e("div", { className: "text-sm", style: { color: "var(--text)" }, children: "Save results into repo" }),
                       /* @__PURE__ */ o("div", { className: "text-[11px]", style: { color: "var(--muted)" }, children: [
-                        "Also write & commit phase results to ",
-                        /* @__PURE__ */ e("code", { style: { color: "var(--accent)" }, children: "docs/dlc/<card>/" }),
-                        " in the owned repo (always kept in app data)"
+                        "Also commit results & the pipeline conversation to a ",
+                        /* @__PURE__ */ e("code", { style: { color: "var(--accent)" }, children: ".dlc-yolo/" }),
+                        " copy in the owned repo (always kept in app data)"
                       ] })
                     ] }),
                     /* @__PURE__ */ e(

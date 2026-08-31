@@ -121,7 +121,8 @@ agent-setup panel's handoff). Do this conversationally:
    pipeline): "Where should phase results (requirements/design/…) be saved?" — *App data
    only* (`results_in_repo: false`, default — results live in the workspace-partitioned
    `.dlc-yolo` results area) or *Also save into the repo* (`results_in_repo: true` — also
-   write + commit a copy into the owned repo's `docs/dlc/<card-id>/`). Write the choice onto
+   write + commit a copy into the owned repo's `.dlc-yolo/` mirror — `.dlc-yolo/<card-id>/`
+   results AND `.dlc-yolo/workspaces/<ws>/data/pipeline_conversation.md`). Write the choice onto
    `pipeline.results_in_repo` in `state.json` (a card may override it). This is the same knob
    the UI Pipeline Setup modal exposes as the "Save results into repo" toggle.
 

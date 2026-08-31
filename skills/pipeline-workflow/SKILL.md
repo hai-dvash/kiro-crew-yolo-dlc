@@ -123,8 +123,9 @@ with zero cards, and holds the per-repo default modes that its cards inherit.
   "results_in_repo": false,          // false (default): phase results (requirements/design/…) live ONLY in
                                      //   the workspace-partitioned .dlc-yolo results area
                                      //   (<base>/workspaces/<ws>/data/results/<card-id>/); true: ALSO mirror
-                                     //   a copy into the owned repo (docs/dlc/<card-id>/) and commit it there,
-                                     //   so results are present in the workspace repo itself. Card may override.
+                                     //   a copy into the owned repo — a repo-root .dlc-yolo/ mirror of the app-data layout
+                                     //   (.dlc-yolo/<card-id>/ results + .dlc-yolo/workspaces/<ws>/data/pipeline_conversation.md)
+                                     //   committed there, so results are present in the workspace repo itself. Card may override.
   "self_enabling": false,            // true: orchestrator runs the setup->intent->per-step self-enabling flow
   "approach": "simplified",          // "simplified" (lean ladder) | "enhanced" (research gate + addendum crews + deeper);
                                      //   the chosen side of the setup dual-proposal; sets each agent's simplified/enhanced mode

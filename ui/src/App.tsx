@@ -1351,7 +1351,7 @@ function PipelineSetupModal({ candidates, existingRepos, defaults, knownAgents, 
           <label className="flex items-center justify-between cursor-pointer">
             <div>
               <div className="text-sm" style={{ color: 'var(--text)' }}>Save results into repo</div>
-              <div className="text-[11px]" style={{ color: 'var(--muted)' }}>Also write &amp; commit phase results to <code style={{ color: 'var(--accent)' }}>docs/dlc/&lt;card&gt;/</code> in the owned repo (always kept in app data)</div>
+              <div className="text-[11px]" style={{ color: 'var(--muted)' }}>Also commit results &amp; the pipeline conversation to a <code style={{ color: 'var(--accent)' }}>.dlc-yolo/</code> copy in the owned repo (always kept in app data)</div>
             </div>
             <button onClick={() => setResultsInRepo(r => !r)}
               className="w-10 h-5.5 rounded-full transition-all relative flex-shrink-0"

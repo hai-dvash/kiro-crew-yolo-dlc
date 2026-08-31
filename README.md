@@ -78,7 +78,9 @@ the audit trail of *why the pipeline built itself this way*.
 Phase results (requirements/design/…) are written to the workspace-partitioned app-data area
 `~/.dlc-yolo/workspaces/<ws>/data/results/<card-id>/` (durable; `/tmp` only as fallback). The
 per-pipeline **`results_in_repo`** knob (setup-modal toggle or `/dlc-yolo`) additionally
-mirrors + commits a copy into the owned repo's `docs/dlc/<card-id>/` — so results can live in
+mirrors + commits a copy into the owned repo's `.dlc-yolo/` (a repo-root mirror of the
+app-data layout — `.dlc-yolo/workspaces/<ws>/data/` with the pipeline conversation log, and
+`.dlc-yolo/<card-id>/` results) — so both results **and** pipeline conversations can live in
 the workspace repo itself when you want them there. Specialist agents (spec/design/impl) hold
 scoped `git add/commit/push` for this, confined to the owned repo and feature branches only.
 

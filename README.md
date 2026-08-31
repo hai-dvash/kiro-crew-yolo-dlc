@@ -215,6 +215,22 @@ ln -s ~/.kiro/crew/apps/dlc-yolo/skills/dlc-yolo      ~/.kiro/skills/dlc-yolo
 ln -s ~/.kiro/crew/apps/dlc-yolo/skills/pipeline-workflow ~/.kiro/skills/pipeline-workflow
 ```
 
+> **Upgrading an existing install — re-register the crons.** KiroCrew de-duplicates
+> crons **by name**: if `dlc-yolo-advance` / `dlc-yolo-backlog-intake` already exist from
+> a previous install, `kirocrew app install`/`enable` will **keep the old definitions**
+> and will *not* pick up manifest changes (e.g. the zero-token `[script]` advance cron or
+> the `agent: pipeline-orchestrator` binding on backlog-intake). After copying the script
+> in step 2, remove the stale jobs so the manifest re-registers them fresh:
+>
+> ```bash
+> kirocrew cron remove dlc-yolo-advance         2>/dev/null || true
+> kirocrew cron remove dlc-yolo-backlog-intake  2>/dev/null || true
+> kirocrew app enable dlc-yolo                   # re-registers both from app.json
+> ```
+>
+> Verify with `kirocrew cron list` — `dlc-yolo-advance` should show as a `script` cron and
+> `dlc-yolo-backlog-intake` should show `agent: pipeline-orchestrator`.
+
 ## Development
 
 ```bash

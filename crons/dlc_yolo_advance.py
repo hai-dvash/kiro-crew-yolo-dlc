@@ -125,21 +125,51 @@ def _is_gate(step: dict) -> bool:
     return step.get("type") == "gate" or str(step.get("id", "")).startswith("gate-")
 
 
+def _slug_step(step_id: str) -> str:
+    """Sanitize a step id for use in a `dlc:<id>` GitHub label. Strips anything
+    that isn't alnum/-/_/. and any leading '-' so a crafted step id can never
+    smuggle a leading '--flag' into the gh command line (M2)."""
+    s = "".join(c for c in str(step_id) if c.isalnum() or c in "-_.")
+    return s.lstrip("-") or "step"
+
+
+def _current_dlc_labels(repo: str, issue: int) -> list[str]:
+    """Best-effort: read the issue's existing dlc:* labels so we can remove them."""
+    try:
+        out = subprocess.run(
+            ["gh", "issue", "view", str(issue), "--repo", repo, "--json", "labels"],
+            capture_output=True, timeout=20, text=True)
+        if out.returncode != 0:
+            return []
+        labels = (json.loads(out.stdout or "{}") or {}).get("labels") or []
+        return [l.get("name") for l in labels
+                if str(l.get("name", "")).startswith("dlc:")]
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
+        return []
+
+
 def _move_label(card: dict, new_step: str) -> None:
-    """Move the dlc:<step> label on the card's GitHub issue (best-effort, sot=github)."""
+    """Move the dlc:<step> label on the card's GitHub issue (best-effort, sot=github):
+    remove any existing dlc:* labels, then add the single new one, so the issue's
+    label set is the unambiguous source of truth for the card's stage."""
     if card.get("sot") != "github":
         return
     src = card.get("source") or {}
     repo, issue = src.get("repo"), src.get("issue")
     if not (repo and issue):
         return
+    new_label = f"dlc:{_slug_step(new_step)}"
     try:
-        subprocess.run(["gh", "label", "create", f"dlc:{new_step}", "--repo", repo,
+        subprocess.run(["gh", "label", "create", new_label, "--repo", repo,
                         "--color", "6366f1", "--description", "DLC-YOLO stage"],
                        capture_output=True, timeout=20)
-        # remove any existing dlc:* labels, then add the new one
-        subprocess.run(["gh", "issue", "edit", str(issue), "--repo", repo,
-                        "--add-label", f"dlc:{new_step}"], capture_output=True, timeout=20)
+        # remove any existing dlc:* labels (except the target), then add the new one
+        stale = [l for l in _current_dlc_labels(repo, issue) if l != new_label]
+        edit = ["gh", "issue", "edit", str(issue), "--repo", repo,
+                "--add-label", new_label]
+        for l in stale:
+            edit += ["--remove-label", l]
+        subprocess.run(edit, capture_output=True, timeout=20)
     except (OSError, subprocess.SubprocessError):
         pass  # local-only fall-through; re-sync happens when gh returns
 
@@ -190,7 +220,7 @@ def advance(ctx):
                                      f"{card.get('id')} in repo {(card.get('source') or {}).get('repo')}. "
                                      f"Follow the pipeline-workflow skill; when the step's work is "
                                      f"complete set card.step_status['{stage}']='done' in "
-                                     f"/tmp/dlc-yolo/state.json. Stay within the card's owned repo."),
+                                     f"the DLC-YOLO state file at {STATE}. Stay within the card's owned repo."),
                             "agent": "pipeline-orchestrator",
                         })
                         card.setdefault("step_status", {})[stage] = "pending"

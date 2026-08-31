@@ -44,6 +44,46 @@ step.
 
 ---
 
+## Self-enabling pipelines
+
+A pipeline can **enable itself**. Self-enablement is an *autonomous variation of the
+orchestrator* — not a separate engine — that turns a fuzzy one-line idea into a configured,
+ticketed pipeline. The flow is **setup → intent → per-step → bootstrap**, and each agent
+(intent, spec, design, impl, review) runs in a **simplified** or **enhanced** mode.
+
+- **Setup first** *(trust/depth-gated)* — on creation the orchestrator proposes **simplified
+  vs enhanced** as a single decision-gate entry. *Simplified* is the lean ladder (minimal
+  crews, inline agents, no research gate); *enhanced* adds a research go/no-go gate, addendum
+  crews (secure-design / a11y / perf), extra gates, and deeper depth. Under `assisted` it asks
+  but defaults **mid** (assisted + standard, simplified) if you don't choose; under
+  `autonomous` it picks.
+- **Intent next** *(skippable)* — a dedicated **Intent Agent** resolves/sharpens the idea. It
+  is the decision gate's *smartest caller*: it classifies (needs-info / needs-research /
+  needs-sharpening / sufficient) and **raises into the one decision gate**, never a parallel
+  mechanism. Elaborating intent autonomously produces an **intent card** that can carry
+  research addenda. You can skip intent and go straight to elaborating any step.
+- **Per-step elaboration** — run or expand spec, or any step, on demand (à-la-carte), so the
+  pipeline is usable both fully-autonomous and one-step-at-a-time.
+- **Bootstrap** — infers the crew lineup, creates crews globally via `kirocrew agent create`
+  (namespaced `dlcyolo-<pipeline>-<role>`), wires `step.agent.crew` / `step.addenda[]`, and
+  opens the tickets. A `card.bootstrap` idempotency marker makes it safe to re-run; under
+  `autonomous` it caps new crews and escalates on low confidence.
+
+Toggle it per pipeline in the setup modal (**Self-enabling pipeline** + a simplified/enhanced
+selector) or via `/dlc-yolo`. Every self-designed choice is recorded in `card.decisions[]` as
+the audit trail of *why the pipeline built itself this way*.
+
+### Where results live
+
+Phase results (requirements/design/…) are written to the workspace-partitioned app-data area
+`~/.dlc-yolo/workspaces/<ws>/data/results/<card-id>/` (durable; `/tmp` only as fallback). The
+per-pipeline **`results_in_repo`** knob (setup-modal toggle or `/dlc-yolo`) additionally
+mirrors + commits a copy into the owned repo's `docs/dlc/<card-id>/` — so results can live in
+the workspace repo itself when you want them there. Specialist agents (spec/design/impl) hold
+scoped `git add/commit/push` for this, confined to the owned repo and feature branches only.
+
+---
+
 ## Operation modes
 
 Three orthogonal axes. Each has a pipeline-wide default; a pipeline, a **step**, or a card
@@ -244,7 +284,8 @@ cd ui && npm install --legacy-peer-deps && npx vite build    # rebuild ui/dist/i
 kiro-crew-yolo-dlc/
 ├── app.json                          ← manifest (agents, skills, crons, permissions)
 ├── agents/
-│   ├── pipeline-orchestrator.json    ← steps, triggers, gates, back-step, GH labels, backlog
+│   ├── pipeline-orchestrator.json    ← steps, triggers, gates, back-step, GH labels, backlog, self-enablement
+│   ├── intent-agent.json             ← front-door intent resolver (self-enabling pipelines)
 │   ├── spec-agent.json               ← requirements + effort attribution
 │   ├── design-agent.json             ← design
 │   ├── impl-agent.json               ← task breakdown + implementation

@@ -120,6 +120,14 @@ with zero cards, and holds the per-repo default modes that its cards inherit.
   "depth": "standard",
   "backlog_intake": true,            // opt in to the dlc-yolo-backlog-intake cron for this repo
   "sot": "github",                   // source of truth for stage: "github" | "local"
+  "results_in_repo": false,          // false (default): phase results (requirements/design/…) live ONLY in
+                                     //   the workspace-partitioned .dlc-yolo results area
+                                     //   (<base>/workspaces/<ws>/data/results/<card-id>/); true: ALSO mirror
+                                     //   a copy into the owned repo (docs/dlc/<card-id>/) and commit it there,
+                                     //   so results are present in the workspace repo itself. Card may override.
+  "self_enabling": false,            // true: orchestrator runs the setup->intent->per-step self-enabling flow
+  "approach": "simplified",          // "simplified" (lean ladder) | "enhanced" (research gate + addendum crews + deeper);
+                                     //   the chosen side of the setup dual-proposal; sets each agent's simplified/enhanced mode
   "steps": [
     { "id": "requirements", "name": "Requirements", "type": "agent",
       "agent": { "name": "spec-agent", "role": "produce requirements.md", "tools": ["ask_question"] },
@@ -220,6 +228,40 @@ The command can spec anything; the invariant is that whatever it produces is **p
 GitHub as an issue** so the pipeline is drivable locally from labels. If `gh` is
 unavailable it creates a `sot: local` card and tells the user it will re-sync to GitHub
 when access returns.
+
+## Self-Enablement (autonomous orchestrator variation)
+
+Self-enablement is an **autonomous variation of the orchestrator, not a separate engine**. The
+same orchestrator runs; each agent (**intent**, spec, design, impl, review) runs in a
+**simplified** or **enhanced** mode. Full design: `docs/self-enablement-spec.md`.
+
+**Sequence: setup → intent (skippable) → per-step elaboration → bootstrap.**
+
+1. **Setup FIRST (trust/depth-gated).** On pipeline creation the orchestrator proposes
+   **simplified vs enhanced** as ONE decision-gate entry:
+   - **Simplified** — lean default ladder, minimal/no new crews, inline agents, no research
+     gate, depth `standard`/`quick`.
+   - **Enhanced** — research crew as a go/no-go gate first, addendum crews
+     (secure-design/a11y/perf), extra gates, depth `deep`.
+   `manual` → ask at every fork; `assisted` → ask, and if the user doesn't choose **default
+   mid** (assisted+standard, simplified); `autonomous` → the orchestrator picks.
+2. **Intent NEXT, skippable.** The **Intent Agent** (`intent-agent`) resolves/sharpens intent,
+   raising `needs-info`/`needs-research` decisions into the **one** decision gate (it is the
+   gate's smartest caller, never a parallel mechanism). Elaborating intent autonomously produces
+   an **intent card** that may carry **research addenda** (`step.addenda[]` with a research crew).
+   Under `autonomous` intent runs by default; under `assisted`/`manual` the user may **skip** it
+   (recorded as `trigger_history {phase:"intent", trigger:"skip"}`).
+3. **Per-step elaboration.** If intent is skipped — or after it resolves — the user can
+   elaborate **spec, or any step**, on demand (simplified or enhanced). Same agent-run
+   machinery, triggered per-step; makes the pipeline usable fully-autonomous OR à-la-carte.
+4. **Bootstrap (realizes the chosen approach).** Simplified = minimal. Enhanced = infer the
+   crew lineup → propose (the enhanced side of the dual proposal) → `kirocrew agent create`
+   (global, namespaced `dlcyolo-<pipeline>-<role>`) → wire `step.agent.crew`/`step.addenda[]` →
+   open tickets → advance loop. Idempotency via a `card.bootstrap` marker; autonomous caps at
+   ≤3 new crews and escalates on low confidence / irreversible plans.
+
+The **Intent Agent** is the only genuinely new actor; everything else is orchestrator behavior
+plus the existing agents running enhanced-or-simplified.
 
 ## Cron Behavior
 

@@ -8,6 +8,7 @@
   "defaultEnabled": true,
   "agents": [
     "agents/pipeline-orchestrator.json",
+    "agents/intent-agent.json",
     "agents/spec-agent.json",
     "agents/design-agent.json",
     "agents/impl-agent.json",

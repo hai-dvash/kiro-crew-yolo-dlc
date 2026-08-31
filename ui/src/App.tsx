@@ -93,6 +93,8 @@ interface Pipeline {
   depth?: Depth
   backlog_intake?: boolean
   results_in_repo?: boolean
+  self_enabling?: boolean
+  approach?: 'simplified' | 'enhanced'
   sot?: 'github' | 'local'
   steps?: PipelineStep[]
   created_at: string
@@ -1135,7 +1137,7 @@ function PipelineSetupModal({ candidates, existingRepos, defaults, knownAgents, 
   defaults: PipelineConfig
   knownAgents: string[]
   crews: { name: string; description?: string }[]
-  onCreate: (p: { repo: string; source: RepoCandidate['source']; trust: Trust; depth: Depth; backlog_intake: boolean; results_in_repo: boolean; steps: PipelineStep[] }) => void
+  onCreate: (p: { repo: string; source: RepoCandidate['source']; trust: Trust; depth: Depth; backlog_intake: boolean; results_in_repo: boolean; self_enabling: boolean; approach: 'simplified' | 'enhanced'; steps: PipelineStep[] }) => void
   onClose: () => void
   editPipeline?: Pipeline          // when set, the modal is in EDIT mode
   cardCount?: number               // cards in the pipeline (for the Danger Zone copy)
@@ -1149,6 +1151,8 @@ function PipelineSetupModal({ candidates, existingRepos, defaults, knownAgents, 
   const [depth, setDepth] = useState<Depth>(editPipeline?.depth || defaults.depth)
   const [backlog, setBacklog] = useState(editPipeline?.backlog_intake ?? true)
   const [resultsInRepo, setResultsInRepo] = useState(editPipeline?.results_in_repo ?? false)
+  const [selfEnabling, setSelfEnabling] = useState(editPipeline?.self_enabling ?? false)
+  const [approach, setApproach] = useState<'simplified' | 'enhanced'>(editPipeline?.approach || 'simplified')
   const [steps, setSteps] = useState<PipelineStep[]>(() => (editPipeline?.steps?.length ? editPipeline.steps.map(s => ({ ...s })) : DEFAULT_STEPS.map(s => ({ ...s }))))
   const [editingAgentIdx, setEditingAgentIdx] = useState<number | null>(null)
   const [confirmText, setConfirmText] = useState('')
@@ -1357,6 +1361,41 @@ function PipelineSetupModal({ candidates, existingRepos, defaults, knownAgents, 
             </button>
           </label>
 
+          {/* Self-enablement */}
+          <label className="flex items-center justify-between cursor-pointer">
+            <div>
+              <div className="text-sm" style={{ color: 'var(--text)' }}>Self-enabling pipeline</div>
+              <div className="text-[11px]" style={{ color: 'var(--muted)' }}>Orchestrator resolves intent &amp; auto-configures crews/steps (setup → intent → per-step)</div>
+            </div>
+            <button onClick={() => setSelfEnabling(s => !s)}
+              className="w-10 h-5.5 rounded-full transition-all relative flex-shrink-0"
+              style={{ background: selfEnabling ? 'var(--accent)' : 'var(--border-strong, var(--border))', height: 22, width: 40 }}>
+              <span className="absolute top-0.5 rounded-full transition-all"
+                style={{ height: 18, width: 18, background: 'var(--bg)', left: selfEnabling ? 20 : 2 }} />
+            </button>
+          </label>
+
+          {/* Setup approach (only meaningful when self-enabling) */}
+          {selfEnabling && (
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm" style={{ color: 'var(--text)' }}>Setup approach</div>
+                <div className="text-[11px]" style={{ color: 'var(--muted)' }}>Simplified = lean ladder · Enhanced = research gate + addendum crews + deeper</div>
+              </div>
+              <div className="flex gap-1">
+                {(['simplified', 'enhanced'] as const).map(a => (
+                  <button key={a} onClick={() => setApproach(a)}
+                    className="text-[11px] px-2 py-1 rounded-md font-semibold transition-all capitalize"
+                    style={{
+                      background: approach === a ? 'var(--accent)' : 'transparent',
+                      color: approach === a ? 'var(--bg)' : 'var(--muted)',
+                      border: `1px solid ${approach === a ? 'var(--accent)' : 'var(--border)'}`,
+                    }}>{a}</button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Custom steps editor */}
           <div>
             <div className="flex items-center justify-between mb-1.5">
@@ -1495,7 +1534,7 @@ function PipelineSetupModal({ candidates, existingRepos, defaults, knownAgents, 
           <button
             disabled={!valid || (!isEdit && dup)}
             onClick={() => onCreate({
-              repo: normalizeRepoInput(repo), source, trust, depth, backlog_intake: backlog, results_in_repo: resultsInRepo,
+              repo: normalizeRepoInput(repo), source, trust, depth, backlog_intake: backlog, results_in_repo: resultsInRepo, self_enabling: selfEnabling, approach,
               steps: steps.map(s => ({ ...s, label: `dlc:${s.id}` })),
             })}
             className="text-xs px-3 py-1.5 rounded-md font-semibold transition-opacity disabled:opacity-40"
@@ -1822,7 +1861,7 @@ export default function SdlcPipeline() {
   }, [api])
 
   const createPipeline = useCallback(async (p: {
-    repo: string; source: RepoCandidate['source']; trust: Trust; depth: Depth; backlog_intake: boolean; results_in_repo: boolean; steps: PipelineStep[]
+    repo: string; source: RepoCandidate['source']; trust: Trust; depth: Depth; backlog_intake: boolean; results_in_repo: boolean; self_enabling: boolean; approach: 'simplified' | 'enhanced'; steps: PipelineStep[]
   }) => {
     const now = new Date().toISOString()
     const id = 'pl-' + Math.random().toString(36).slice(2, 10)
@@ -1836,12 +1875,15 @@ export default function SdlcPipeline() {
         existing.depth = p.depth
         existing.backlog_intake = p.backlog_intake
         existing.results_in_repo = p.results_in_repo
+        existing.self_enabling = p.self_enabling
+        existing.approach = p.approach
         existing.steps = p.steps
       } else {
         state.pipelines.push({
           id, repo: p.repo, source: p.source,
           trust: p.trust, depth: p.depth, backlog_intake: p.backlog_intake,
           results_in_repo: p.results_in_repo,
+          self_enabling: p.self_enabling, approach: p.approach,
           sot: 'github', steps: p.steps,
           created_at: now,
         })

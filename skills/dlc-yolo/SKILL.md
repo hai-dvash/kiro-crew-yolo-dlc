@@ -124,6 +124,15 @@ agent-setup panel's handoff). Do this conversationally:
    write + commit a copy into the owned repo's `docs/dlc/<card-id>/`). Write the choice onto
    `pipeline.results_in_repo` in `state.json` (a card may override it). This is the same knob
    the UI Pipeline Setup modal exposes as the "Save results into repo" toggle.
+
+   **Self-enablement (setup → intent → per-step).** After the pipeline exists, offer the
+   self-enabling flow (design: pipeline-workflow skill / `docs/self-enablement-spec.md`):
+   (a) **Setup** — propose **simplified vs enhanced** (trust/depth-gated; if the user doesn't
+   choose, default mid + simplified). (b) **Intent** — run the `intent-agent` to sharpen the
+   idea (it RAISES needs-info/needs-research into the one decision gate; autonomous elaboration
+   yields an intent card with optional research addenda), OR let the user **skip** intent. (c)
+   **Per-step elaboration** — if skipped, the user can elaborate spec or any step on demand.
+   Each agent then runs simplified or enhanced per the chosen approach.
 2. **Spec the idea WITH the user.** Ask focused clarifying questions (1–3 at a time), state
    recommendations, keep it tight. You may spec anything — feature, bug, chore.
 3. **File it to GitHub as an issue** on the pipeline's repo — this is the invariant, because

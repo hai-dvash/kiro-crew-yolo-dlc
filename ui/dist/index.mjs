@@ -1,10 +1,10 @@
-import { jsxs as o, Fragment as je, jsx as e } from "react/jsx-runtime";
-import { useAppApi as De, useChatLauncher as Le } from "@kirocrew/app-sdk";
-import { PageHeader as Me, StatCard as ke } from "@kirocrew/app-sdk/ui";
-import { useState as $, useRef as de, useCallback as K, useMemo as ie, useEffect as _e } from "react";
-const Ie = "~/.dlc-yolo/state.json", Ae = "/tmp/dlc-yolo/state.json";
-let oe = Ie;
-const fe = [
+import { jsxs as o, Fragment as Me, jsx as e } from "react/jsx-runtime";
+import { useAppApi as Be, useChatLauncher as We } from "@kirocrew/app-sdk";
+import { PageHeader as Ge, StatCard as Se } from "@kirocrew/app-sdk/ui";
+import { useState as _, useRef as ue, useCallback as Y, useMemo as pe, useEffect as Te } from "react";
+const ze = "~/.dlc-yolo/state.json", De = "/tmp/dlc-yolo/state.json";
+let se = ze;
+const Ne = [
   { id: "investigate", name: "Investigate", type: "agent", agent: { name: "spec-agent", role: "Classify the issue: summarize, propose labels, write a triage note (human-aided)" } },
   { id: "requirements", name: "Requirements", type: "agent", agent: { name: "spec-agent", role: "Produce requirements.md" } },
   { id: "gate-spec", name: "Gate: Spec", type: "gate" },
@@ -15,11 +15,11 @@ const fe = [
   { id: "review", name: "Review", type: "agent", agent: { name: "review-agent", role: "Severity-ranked review" } },
   { id: "gate-review", name: "Gate: Review", type: "gate" },
   { id: "pr", name: "PR", type: "agent", agent: { name: "orchestrator", role: "Open/update PR" } }
-], Oe = /* @__PURE__ */ new Set([
+], Ie = /* @__PURE__ */ new Set([
   "hai-dvash/webapp",
   "hai-dvash/dashboard",
   "hai-dvash/api-core"
-]), Be = {
+]), Fe = {
   intake: "orchestrator",
   requirements: "spec-agent",
   "gate-spec": "human",
@@ -31,131 +31,131 @@ const fe = [
   "gate-review": "human",
   pr: "orchestrator",
   done: "done"
-}, me = ["manual", "assisted", "autonomous"], ve = ["quick", "standard", "deep"], be = { trust: "assisted", depth: "standard" }, Re = {
+}, ve = ["manual", "assisted", "autonomous"], fe = ["quick", "standard", "deep"], ke = { trust: "assisted", depth: "standard" }, Ee = {
   manual: "var(--info)",
   assisted: "var(--accent)",
   autonomous: "var(--danger)"
-}, $e = {
+}, Ae = {
   quick: "var(--ok)",
   standard: "var(--muted)",
   deep: "var(--warn)"
 };
-function he({ color: s, children: f, title: v, onClick: x, active: L }) {
+function be({ color: s, children: f, title: x, onClick: b, active: L }) {
   return /* @__PURE__ */ e(
     "button",
     {
       type: "button",
-      title: v,
-      onClick: x,
+      title: x,
+      onClick: b,
       className: "text-[10px] leading-none px-1.5 py-1 rounded font-semibold tracking-wide transition-all",
       style: {
         color: s,
         background: `color-mix(in srgb, ${s} 14%, transparent)`,
         boxShadow: L ? `inset 0 0 0 1px color-mix(in srgb, ${s} 55%, transparent)` : "none",
-        opacity: x && !L ? 0.85 : 1,
-        cursor: x ? "pointer" : "default"
+        opacity: b && !L ? 0.85 : 1,
+        cursor: b ? "pointer" : "default"
       },
       children: f
     }
   );
 }
-const Ne = ["#e74c3c", "#3498db", "#f39c12", "#9b59b6", "#1abc9c", "#e67e22", "#2ecc71", "#e84393"];
-function We({ steps: s, cardsByStage: f, onNodeClick: v }) {
-  const x = de(null), L = de(null), I = de(0), A = de(null), w = de(s), R = de(f), y = de([]);
-  w.current = s, R.current = f;
-  const u = 3, N = 116, m = N / u, q = m - 26, [j, H] = $(880);
-  _e(() => {
-    const S = L.current;
-    if (!S) return;
-    const E = new ResizeObserver((h) => {
-      const k = Math.max(360, Math.floor(h[0].contentRect.width));
-      H(k);
+const _e = ["#e74c3c", "#3498db", "#f39c12", "#9b59b6", "#1abc9c", "#e67e22", "#2ecc71", "#e84393"];
+function Ue({ steps: s, cardsByStage: f, onNodeClick: x }) {
+  const b = ue(null), L = ue(null), M = ue(0), A = ue(null), h = ue(s), R = ue(f), y = ue([]);
+  h.current = s, R.current = f;
+  const m = 3, k = 116, g = k / m, U = g - 26, [O, F] = _(880);
+  Te(() => {
+    const N = L.current;
+    if (!N) return;
+    const j = new ResizeObserver((v) => {
+      const w = Math.max(360, Math.floor(v[0].contentRect.width));
+      F(w);
     });
-    return E.observe(S), () => E.disconnect();
+    return j.observe(N), () => j.disconnect();
   }, []);
-  const F = (S) => S.type === "gate" || S.id.startsWith("gate-");
-  return _e(() => {
-    const S = x.current;
-    if (!S) return;
-    const E = Math.floor(j / u);
-    S.width = E * u, S.height = m * u;
-    const h = S.getContext("2d");
-    if (!h) return;
-    const k = (b, B, W, V, Y) => {
-      h.fillStyle = Y, h.fillRect(b * u, B * u, W * u, V * u);
-    }, U = () => {
-      const b = I.current, B = w.current, W = R.current, V = Math.max(1, B.length);
-      Math.max(1, ...B.map((d) => {
-        var g;
-        return ((g = W[d.id]) == null ? void 0 : g.length) || 0;
-      })), k(0, 0, E, q, "#0f172a");
-      for (let d = 0; d < E / 5; d++) {
-        const g = d * 37 % E, C = d * 13 % (q - 4);
-        Math.sin(b * 0.03 + d * 2.1) > 0.35 && k(g, C, 1, 1, "#e2e8f0");
+  const B = (N) => N.type === "gate" || N.id.startsWith("gate-");
+  return Te(() => {
+    const N = b.current;
+    if (!N) return;
+    const j = Math.floor(O / m);
+    N.width = j * m, N.height = g * m;
+    const v = N.getContext("2d");
+    if (!v) return;
+    const w = ($, G, q, K, I) => {
+      v.fillStyle = I, v.fillRect($ * m, G * m, q * m, K * m);
+    }, W = () => {
+      const $ = M.current, G = h.current, q = R.current, K = Math.max(1, G.length);
+      Math.max(1, ...G.map((i) => {
+        var u;
+        return ((u = q[i.id]) == null ? void 0 : u.length) || 0;
+      })), w(0, 0, j, U, "#0f172a");
+      for (let i = 0; i < j / 5; i++) {
+        const u = i * 37 % j, C = i * 13 % (U - 4);
+        Math.sin($ * 0.03 + i * 2.1) > 0.35 && w(u, C, 1, 1, "#e2e8f0");
       }
-      k(E - 26, 8, 10, 10, "#fde68a"), k(E - 24, 7, 8, 8, "#0f172a");
-      for (let d = 0; d < E; d += 16)
-        for (let g = q; g < m; g += 16)
-          k(d, g, 16, 16, d / 16 + g / 16 & 1 ? "#33261a" : "#2a1f14");
-      k(0, q - 2, E, 2, "#4a3520");
-      const Y = E / V, ae = [];
-      for (let d = 0; d < B.length; d++) {
-        const g = B[d], C = Math.round(Y * (d + 0.5)), ee = (W[g.id] || []).length, te = ee > 0, le = Ne[d % Ne.length], re = F(g), Z = q - 2;
-        if (ae.push({ x: C - Math.floor(Y / 2), w: Math.floor(Y), id: g.id }), d < B.length - 1) {
-          const M = Math.round(Y * (d + 1.5));
-          for (let G = C + 8; G < M - 8; G += 4) k(G, q - 1, 2, 1, "#4a3520");
+      w(j - 26, 8, 10, 10, "#fde68a"), w(j - 24, 7, 8, 8, "#0f172a");
+      for (let i = 0; i < j; i += 16)
+        for (let u = U; u < g; u += 16)
+          w(i, u, 16, 16, i / 16 + u / 16 & 1 ? "#33261a" : "#2a1f14");
+      w(0, U - 2, j, 2, "#4a3520");
+      const I = j / K, Z = [];
+      for (let i = 0; i < G.length; i++) {
+        const u = G[i], C = Math.round(I * (i + 0.5)), ae = (q[u.id] || []).length, ne = ae > 0, re = _e[i % _e.length], xe = B(u), ee = U - 2;
+        if (Z.push({ x: C - Math.floor(I / 2), w: Math.floor(I), id: u.id }), i < G.length - 1) {
+          const T = Math.round(I * (i + 1.5));
+          for (let H = C + 8; H < T - 8; H += 4) w(H, U - 1, 2, 1, "#4a3520");
         }
-        if (re) {
-          const M = Z - 20, G = te ? "#f39c12" : "#3a3222";
-          k(C - 3, M, 6, 20, te ? "#5c4a2a" : "#2a2418");
-          for (let T = 0; T < 5; T++) k(C - T, M - 5 + T, T * 2 + 1, 1, G);
-          for (let T = 0; T < 5; T++) k(C - (4 - T), M - T, (4 - T) * 2 + 1, 1, G);
-          if (te) {
-            const T = (Math.sin(b * 0.08) + 1) / 2;
-            h.globalAlpha = 0.35 + T * 0.4, k(C - 1, M - 6, 2, 2, "#ffd27a"), h.globalAlpha = 1;
+        if (xe) {
+          const T = ee - 20, H = ne ? "#f39c12" : "#3a3222";
+          w(C - 3, T, 6, 20, ne ? "#5c4a2a" : "#2a2418");
+          for (let E = 0; E < 5; E++) w(C - E, T - 5 + E, E * 2 + 1, 1, H);
+          for (let E = 0; E < 5; E++) w(C - (4 - E), T - E, (4 - E) * 2 + 1, 1, H);
+          if (ne) {
+            const E = (Math.sin($ * 0.08) + 1) / 2;
+            v.globalAlpha = 0.35 + E * 0.4, w(C - 1, T - 6, 2, 2, "#ffd27a"), v.globalAlpha = 1;
           }
         } else {
-          const M = Z - 14;
-          if (k(C - 10, M, 20, 3, "#7a5c47"), k(C - 10, M - 1, 20, 1, le), k(C - 9, M + 3, 2, 8, "#5c4033"), k(C + 7, M + 3, 2, 8, "#5c4033"), k(C - 5, M - 9, 10, 9, "#333"), k(C - 4, M - 8, 8, 7, te ? "#0a2a0a" : "#1a1a1a"), te)
-            for (let G = 0; G < 3; G++) {
-              const T = 2 + (b + G * 7) % 5;
-              k(C - 3, M - 7 + G * 2, T, 0.8, "#33ff33");
+          const T = ee - 14;
+          if (w(C - 10, T, 20, 3, "#7a5c47"), w(C - 10, T - 1, 20, 1, re), w(C - 9, T + 3, 2, 8, "#5c4033"), w(C + 7, T + 3, 2, 8, "#5c4033"), w(C - 5, T - 9, 10, 9, "#333"), w(C - 4, T - 8, 8, 7, ne ? "#0a2a0a" : "#1a1a1a"), ne)
+            for (let H = 0; H < 3; H++) {
+              const E = 2 + ($ + H * 7) % 5;
+              w(C - 3, T - 7 + H * 2, E, 0.8, "#33ff33");
             }
         }
-        const pe = Math.min(ee, 5);
-        for (let M = 0; M < pe; M++) {
-          const G = pe > 1 ? (M - (pe - 1) / 2) * 8 : 0, T = Math.round(C + G) - 3, J = Z - (re ? 2 : 4), ce = Ne[(d + M) % Ne.length], ne = Math.sin(b * 0.08 + d + M) > 0 ? 1 : 0;
-          h.fillStyle = "rgba(0,0,0,0.18)", h.fillRect(T * u, (J + 8) * u, 6 * u, u), k(T, J + ne, 6, 6, ce), k(T + 1, J - 4 + ne, 4, 4, "#fdd"), k(T + 1, J - 5 + ne, 4, 1, "#333"), (b + d * 9 + M * 5) % 120 >= 3 && (k(T + 2, J - 3 + ne, 1, 1, "#333"), k(T + 4, J - 3 + ne, 1, 1, "#333")), k(T + 1, J + 6, 1, 2, ce), k(T + 4, J + 6, 1, 2, ce);
+        const ce = Math.min(ae, 5);
+        for (let T = 0; T < ce; T++) {
+          const H = ce > 1 ? (T - (ce - 1) / 2) * 8 : 0, E = Math.round(C + H) - 3, J = ee - (xe ? 2 : 4), ie = _e[(i + T) % _e.length], Q = Math.sin($ * 0.08 + i + T) > 0 ? 1 : 0;
+          v.fillStyle = "rgba(0,0,0,0.18)", v.fillRect(E * m, (J + 8) * m, 6 * m, m), w(E, J + Q, 6, 6, ie), w(E + 1, J - 4 + Q, 4, 4, "#fdd"), w(E + 1, J - 5 + Q, 4, 1, "#333"), ($ + i * 9 + T * 5) % 120 >= 3 && (w(E + 2, J - 3 + Q, 1, 1, "#333"), w(E + 4, J - 3 + Q, 1, 1, "#333")), w(E + 1, J + 6, 1, 2, ie), w(E + 4, J + 6, 1, 2, ie);
         }
-        ee > 5 && (h.fillStyle = le, h.font = `${3 * u}px monospace`, h.fillText(`+${ee - 5}`, (C + 10) * u, (Z - 6) * u)), ee > 0 && (h.fillStyle = le, h.fillRect((C + 6) * u, (Z - 30) * u, 9 * u, 9 * u), h.fillStyle = "#0f172a", h.font = `bold ${5 * u}px monospace`, h.textAlign = "center", h.fillText(String(ee), (C + 10.5) * u, (Z - 24) * u), h.textAlign = "left"), h.fillStyle = te ? "#e2e8f0" : "#6b7280", h.font = `${3.4 * u}px monospace`, h.textAlign = "center";
-        const se = g.name.length > 12 ? g.name.slice(0, 11) + "…" : g.name;
-        h.fillText(se, C * u, (m - 4) * u), h.textAlign = "left";
+        ae > 5 && (v.fillStyle = re, v.font = `${3 * m}px monospace`, v.fillText(`+${ae - 5}`, (C + 10) * m, (ee - 6) * m)), ae > 0 && (v.fillStyle = re, v.fillRect((C + 6) * m, (ee - 30) * m, 9 * m, 9 * m), v.fillStyle = "#0f172a", v.font = `bold ${5 * m}px monospace`, v.textAlign = "center", v.fillText(String(ae), (C + 10.5) * m, (ee - 24) * m), v.textAlign = "left"), v.fillStyle = ne ? "#e2e8f0" : "#6b7280", v.font = `${3.4 * m}px monospace`, v.textAlign = "center";
+        const me = u.name.length > 12 ? u.name.slice(0, 11) + "…" : u.name;
+        v.fillText(me, C * m, (g - 4) * m), v.textAlign = "left";
       }
-      y.current = ae;
-      const l = B.reduce((d, g) => {
+      y.current = Z;
+      const l = G.reduce((i, u) => {
         var C;
-        return d + (((C = W[g.id]) == null ? void 0 : C.length) || 0);
+        return i + (((C = q[u.id]) == null ? void 0 : C.length) || 0);
       }, 0);
-      h.fillStyle = "#f90", h.font = `bold ${3.6 * u}px monospace`, h.fillText(`${l} card${l !== 1 ? "s" : ""} · ${V} milestone${V !== 1 ? "s" : ""}`, 4 * u, 8 * u);
-    }, X = () => {
-      I.current++, U(), A.current = requestAnimationFrame(X);
+      v.fillStyle = "#f90", v.font = `bold ${3.6 * m}px monospace`, v.fillText(`${l} card${l !== 1 ? "s" : ""} · ${K} milestone${K !== 1 ? "s" : ""}`, 4 * m, 8 * m);
+    }, P = () => {
+      M.current++, W(), A.current = requestAnimationFrame(P);
     };
-    return A.current = requestAnimationFrame(X), () => {
+    return A.current = requestAnimationFrame(P), () => {
       A.current && cancelAnimationFrame(A.current);
     };
-  }, [j, m, q]), /* @__PURE__ */ e("div", { ref: L, className: "w-full mb-5", children: /* @__PURE__ */ e(
+  }, [O, g, U]), /* @__PURE__ */ e("div", { ref: L, className: "w-full mb-5", children: /* @__PURE__ */ e(
     "canvas",
     {
-      ref: x,
-      onClick: (S) => {
-        const E = x.current;
-        if (!E) return;
-        const h = E.getBoundingClientRect(), k = (S.clientX - h.left) / h.width * (E.width / u), U = y.current.find((X) => k >= X.x && k <= X.x + X.w);
-        U && v(U.id);
+      ref: b,
+      onClick: (N) => {
+        const j = b.current;
+        if (!j) return;
+        const v = j.getBoundingClientRect(), w = (N.clientX - v.left) / v.width * (j.width / m), W = y.current.find((P) => w >= P.x && w <= P.x + P.w);
+        W && x(W.id);
       },
       style: {
         width: "100%",
-        height: N + "px",
+        height: k + "px",
         imageRendering: "pixelated",
         borderRadius: 8,
         border: "1px solid var(--border, #333)",
@@ -165,7 +165,7 @@ function We({ steps: s, cardsByStage: f, onNodeClick: v }) {
     }
   ) });
 }
-function Ge({ active: s, onChange: f, counts: v }) {
+function He({ active: s, onChange: f, counts: x }) {
   return /* @__PURE__ */ e(
     "div",
     {
@@ -178,15 +178,15 @@ function Ge({ active: s, onChange: f, counts: v }) {
         { id: "status", label: "Status" },
         { id: "backlog", label: "Backlog" }
       ].map((L) => {
-        const I = s === L.id, A = v[L.id];
+        const M = s === L.id, A = x[L.id];
         return /* @__PURE__ */ o(
           "button",
           {
             onClick: () => f(L.id),
             className: "px-3 py-1.5 text-xs font-medium rounded-md transition-all duration-150 flex items-center gap-1.5",
             style: {
-              background: I ? "var(--accent)" : "transparent",
-              color: I ? "var(--bg)" : "var(--muted)"
+              background: M ? "var(--accent)" : "transparent",
+              color: M ? "var(--bg)" : "var(--muted)"
             },
             children: [
               L.label,
@@ -194,7 +194,7 @@ function Ge({ active: s, onChange: f, counts: v }) {
                 "span",
                 {
                   className: "text-[10px] px-1 rounded-full font-semibold",
-                  style: { background: I ? "color-mix(in srgb, var(--bg) 25%, transparent)" : "var(--bg-hover, var(--border))", color: I ? "var(--bg)" : "var(--muted)" },
+                  style: { background: M ? "color-mix(in srgb, var(--bg) 25%, transparent)" : "var(--bg-hover, var(--border))", color: M ? "var(--bg)" : "var(--muted)" },
                   children: A
                 }
               )
@@ -206,9 +206,9 @@ function Ge({ active: s, onChange: f, counts: v }) {
     }
   );
 }
-function Ce({ card: s, config: f, onApprove: v, onReject: x, onCycleTrust: L, onCycleDepth: I }) {
-  var N, m, q;
-  const A = s.stage.startsWith("gate-"), w = A ? "var(--warn)" : "var(--border-strong, var(--border))", R = s.trust || f.trust, y = s.depth || f.depth, u = ((N = s.parked) == null ? void 0 : N.length) || 0;
+function Re({ card: s, config: f, onApprove: x, onReject: b, onCycleTrust: L, onCycleDepth: M }) {
+  var k, g, U;
+  const A = s.stage.startsWith("gate-"), h = A ? "var(--warn)" : "var(--border-strong, var(--border))", R = s.trust || f.trust, y = s.depth || f.depth, m = ((k = s.parked) == null ? void 0 : k.length) || 0;
   return /* @__PURE__ */ o(
     "div",
     {
@@ -217,11 +217,11 @@ function Ce({ card: s, config: f, onApprove: v, onReject: x, onCycleTrust: L, on
         background: "var(--card)",
         color: "var(--card-fg, var(--text))",
         border: "1px solid var(--border)",
-        borderLeft: `2px solid ${w}`
+        borderLeft: `2px solid ${h}`
       },
       children: [
         /* @__PURE__ */ e("div", { className: "text-[13px] font-medium leading-snug truncate", style: { color: "var(--text-strong, var(--text))" }, children: s.title }),
-        ((m = s.source) == null ? void 0 : m.repo) && /* @__PURE__ */ o(
+        ((g = s.source) == null ? void 0 : g.repo) && /* @__PURE__ */ o(
           "a",
           {
             href: s.source.url || void 0,
@@ -237,9 +237,9 @@ function Ce({ card: s, config: f, onApprove: v, onReject: x, onCycleTrust: L, on
         ),
         /* @__PURE__ */ o("div", { className: "mt-2 flex items-center gap-1 flex-wrap", children: [
           /* @__PURE__ */ e(
-            he,
+            be,
             {
-              color: Re[R],
+              color: Ee[R],
               active: !!s.trust,
               onClick: L,
               title: `trust: ${R}${s.trust ? " (override)" : " (inherited)"} — click to cycle`,
@@ -247,25 +247,25 @@ function Ce({ card: s, config: f, onApprove: v, onReject: x, onCycleTrust: L, on
             }
           ),
           /* @__PURE__ */ e(
-            he,
+            be,
             {
-              color: $e[y],
+              color: Ae[y],
               active: !!s.depth,
-              onClick: I,
+              onClick: M,
               title: `depth: ${y}${s.depth ? " (override)" : " (inherited)"} — click to cycle`,
               children: y
             }
           ),
-          u > 0 && /* @__PURE__ */ o(he, { color: "var(--warn)", title: `${u} parked idea(s)`, children: [
+          m > 0 && /* @__PURE__ */ o(be, { color: "var(--warn)", title: `${m} parked idea(s)`, children: [
             "⏸ ",
-            u
+            m
           ] }),
-          typeof ((q = s.effort) == null ? void 0 : q.total) == "number" && s.effort.total > 0 && /* @__PURE__ */ o(he, { color: "var(--info)", title: `estimated effort: ${s.effort.total} points`, children: [
+          typeof ((U = s.effort) == null ? void 0 : U.total) == "number" && s.effort.total > 0 && /* @__PURE__ */ o(be, { color: "var(--info)", title: `estimated effort: ${s.effort.total} points`, children: [
             "⚡ ",
             s.effort.total
           ] }),
           s.backstep_history && s.backstep_history.length > 0 && /* @__PURE__ */ o(
-            he,
+            be,
             {
               color: "var(--danger)",
               title: `stepped back ${s.backstep_history.length}× — last: ${s.backstep_history[s.backstep_history.length - 1].reason}`,
@@ -276,13 +276,13 @@ function Ce({ card: s, config: f, onApprove: v, onReject: x, onCycleTrust: L, on
             }
           ),
           s.decisions && s.decisions.length > 0 && (() => {
-            const j = s.decisions[s.decisions.length - 1];
+            const O = s.decisions[s.decisions.length - 1];
             return /* @__PURE__ */ o(
-              he,
+              be,
               {
                 color: "var(--accent)",
-                title: `${s.decisions.length} decision${s.decisions.length === 1 ? "" : "s"} — last: ${j.question || j.kind || ""}${j.action ? ` → ${j.action}` : ""}${j.rationale ? `
-${j.rationale}` : ""}`,
+                title: `${s.decisions.length} decision${s.decisions.length === 1 ? "" : "s"} — last: ${O.question || O.kind || ""}${O.action ? ` → ${O.action}` : ""}${O.rationale ? `
+${O.rationale}` : ""}`,
                 children: [
                   "⚖ ",
                   s.decisions.length
@@ -291,13 +291,13 @@ ${j.rationale}` : ""}`,
             );
           })()
         ] }),
-        A && v && x && /* @__PURE__ */ o("div", { className: "mt-2.5 flex gap-1.5 items-center flex-wrap", children: [
+        A && x && b && /* @__PURE__ */ o("div", { className: "mt-2.5 flex gap-1.5 items-center flex-wrap", children: [
           /* @__PURE__ */ e(
             "button",
             {
               className: "text-[11px] px-2.5 py-1 rounded-md font-semibold transition-opacity hover:opacity-85",
               style: { background: "var(--ok)", color: "var(--bg)" },
-              onClick: v,
+              onClick: x,
               children: "Approve"
             }
           ),
@@ -306,20 +306,20 @@ ${j.rationale}` : ""}`,
             {
               className: "text-[11px] px-2.5 py-1 rounded-md font-semibold transition-opacity hover:opacity-85",
               style: { background: "var(--danger)", color: "var(--bg)" },
-              onClick: x,
+              onClick: b,
               children: "Reject"
             }
           ),
           (s.stage === "gate-review" || /review/i.test(s.stage || "")) && (() => {
-            var S, E, h;
-            const j = (S = s.source) == null ? void 0 : S.repo;
-            if (!j) return null;
-            const H = (E = s.artifacts) == null ? void 0 : E.pr_url, F = H && ((h = /\/pull\/(\d+)/.exec(H)) == null ? void 0 : h[1]), P = `/code-review-sage?repo=${encodeURIComponent("https://github.com/" + j)}` + (F ? `&pr=${F}` : "");
+            var N, j, v;
+            const O = (N = s.source) == null ? void 0 : N.repo;
+            if (!O) return null;
+            const F = (j = s.artifacts) == null ? void 0 : j.pr_url, B = F && ((v = /\/pull\/(\d+)/.exec(F)) == null ? void 0 : v[1]), V = `/code-review-sage?repo=${encodeURIComponent("https://github.com/" + O)}` + (B ? `&pr=${B}` : "");
             return /* @__PURE__ */ o(
               "a",
               {
-                href: P,
-                title: H ? `Deep-review PR #${F} in Code Review Sage` : `Open Code Review Sage for ${j}`,
+                href: V,
+                title: F ? `Deep-review PR #${B} in Code Review Sage` : `Open Code Review Sage for ${O}`,
                 className: "text-[11px] px-2.5 py-1 rounded-md font-semibold transition-opacity hover:opacity-85 inline-flex items-center gap-1",
                 style: { background: "var(--bg-hover, var(--border))", color: "var(--accent)", border: "1px solid color-mix(in srgb, var(--accent) 40%, var(--border))" },
                 children: [
@@ -337,8 +337,8 @@ ${j.rationale}` : ""}`,
     }
   );
 }
-function Se({ title: s, count: f, children: v, id: x }) {
-  return /* @__PURE__ */ o("div", { id: x, className: "min-w-[210px] max-w-[240px] flex-shrink-0", children: [
+function $e({ title: s, count: f, children: x, id: b }) {
+  return /* @__PURE__ */ o("div", { id: b, className: "min-w-[210px] max-w-[240px] flex-shrink-0", children: [
     /* @__PURE__ */ o("div", { className: "flex items-center gap-2 mb-2 px-0.5 sticky top-0", children: [
       /* @__PURE__ */ e("span", { className: "text-[11px] font-semibold uppercase tracking-wide truncate", style: { color: "var(--muted-strong, var(--muted))" }, children: s }),
       /* @__PURE__ */ e(
@@ -357,19 +357,19 @@ function Se({ title: s, count: f, children: v, id: x }) {
         style: { color: "var(--muted)", border: "1px dashed var(--border)" },
         children: "empty"
       }
-    ) : v })
+    ) : x })
   ] });
 }
-function ze({ config: s, onSet: f }) {
-  function v({ label: x, value: L, options: I, tokens: A, onPick: w }) {
+function qe({ config: s, onSet: f }) {
+  function x({ label: b, value: L, options: M, tokens: A, onPick: h }) {
     return /* @__PURE__ */ o("div", { className: "flex items-center gap-2", children: [
-      /* @__PURE__ */ e("span", { className: "text-[10px] uppercase tracking-wider", style: { color: "var(--muted)" }, children: x }),
-      /* @__PURE__ */ e("div", { className: "flex gap-0.5 p-0.5 rounded-md", style: { background: "var(--bg-elevated, var(--card))", border: "1px solid var(--border)" }, children: I.map((R) => {
+      /* @__PURE__ */ e("span", { className: "text-[10px] uppercase tracking-wider", style: { color: "var(--muted)" }, children: b }),
+      /* @__PURE__ */ e("div", { className: "flex gap-0.5 p-0.5 rounded-md", style: { background: "var(--bg-elevated, var(--card))", border: "1px solid var(--border)" }, children: M.map((R) => {
         const y = L === R;
         return /* @__PURE__ */ e(
           "button",
           {
-            onClick: () => w(R),
+            onClick: () => h(R),
             className: "text-[11px] px-2 py-0.5 rounded font-semibold transition-all",
             style: {
               color: y ? A[R] : "var(--muted)",
@@ -390,20 +390,20 @@ function ze({ config: s, onSet: f }) {
       style: { background: "var(--card)", border: "1px solid var(--border)" },
       children: [
         /* @__PURE__ */ e("span", { className: "text-xs font-semibold", style: { color: "var(--muted-strong, var(--muted))" }, children: "Defaults" }),
-        /* @__PURE__ */ e(v, { label: "Trust", value: s.trust, options: me, tokens: Re, onPick: (x) => f({ trust: x }) }),
-        /* @__PURE__ */ e(v, { label: "Depth", value: s.depth, options: ve, tokens: $e, onPick: (x) => f({ depth: x }) }),
+        /* @__PURE__ */ e(x, { label: "Trust", value: s.trust, options: ve, tokens: Ee, onPick: (b) => f({ trust: b }) }),
+        /* @__PURE__ */ e(x, { label: "Depth", value: s.depth, options: fe, tokens: Ae, onPick: (b) => f({ depth: b }) }),
         /* @__PURE__ */ e("span", { className: "text-[10px] ml-auto", style: { color: "var(--muted)" }, children: "click a card badge to override per-card" })
       ]
     }
   );
 }
-function Fe({ cards: s }) {
+function Ve({ cards: s }) {
   const f = s.flatMap(
-    (v) => (v.parked || []).map((x) => {
+    (x) => (x.parked || []).map((b) => {
       var L;
-      return { ...x, cardTitle: v.title, repo: (L = v.source) == null ? void 0 : L.repo };
+      return { ...b, cardTitle: x.title, repo: (L = x.source) == null ? void 0 : L.repo };
     })
-  ).sort((v, x) => (x.at || "").localeCompare(v.at || ""));
+  ).sort((x, b) => (b.at || "").localeCompare(x.at || ""));
   return f.length === 0 ? /* @__PURE__ */ o("div", { className: "rounded-lg p-6 text-center max-w-xl", style: { border: "1px dashed var(--border)", color: "var(--muted)" }, children: [
     /* @__PURE__ */ e("div", { className: "text-sm font-medium", style: { color: "var(--text)" }, children: "No parked ideas yet" }),
     /* @__PURE__ */ o("div", { className: "text-xs mt-1", children: [
@@ -411,62 +411,62 @@ function Fe({ cards: s }) {
       /* @__PURE__ */ e("code", { style: { color: "var(--warn)" }, children: "dlc-backlog" }),
       " issues on each card's owned repo. The intake cron back-feeds them as new cards."
     ] })
-  ] }) : /* @__PURE__ */ e("div", { className: "flex flex-col gap-2 max-w-2xl", children: f.map((v) => /* @__PURE__ */ o("div", { className: "rounded-lg p-3", style: { background: "var(--card)", border: "1px solid var(--border)", borderLeft: "2px solid var(--warn)" }, children: [
-    /* @__PURE__ */ e("div", { className: "text-[13px] font-medium", style: { color: "var(--text-strong, var(--text))" }, children: v.note }),
+  ] }) : /* @__PURE__ */ e("div", { className: "flex flex-col gap-2 max-w-2xl", children: f.map((x) => /* @__PURE__ */ o("div", { className: "rounded-lg p-3", style: { background: "var(--card)", border: "1px solid var(--border)", borderLeft: "2px solid var(--warn)" }, children: [
+    /* @__PURE__ */ e("div", { className: "text-[13px] font-medium", style: { color: "var(--text-strong, var(--text))" }, children: x.note }),
     /* @__PURE__ */ o("div", { className: "text-[11px] mt-1 flex items-center gap-2 flex-wrap", style: { color: "var(--muted)" }, children: [
       /* @__PURE__ */ o("span", { children: [
         "from ",
-        /* @__PURE__ */ e("span", { style: { color: "var(--text)" }, children: v.cardTitle })
+        /* @__PURE__ */ e("span", { style: { color: "var(--text)" }, children: x.cardTitle })
       ] }),
-      v.phase && /* @__PURE__ */ o("span", { children: [
+      x.phase && /* @__PURE__ */ o("span", { children: [
         "· parked at ",
-        v.phase
+        x.phase
       ] }),
-      v.repo && /* @__PURE__ */ o("span", { children: [
+      x.repo && /* @__PURE__ */ o("span", { children: [
         "· ",
-        v.repo
+        x.repo
       ] }),
-      v.issue_url && /* @__PURE__ */ e("a", { href: v.issue_url, target: "_blank", rel: "noreferrer", className: "hover:underline", style: { color: "var(--accent)" }, children: "view issue →" })
+      x.issue_url && /* @__PURE__ */ e("a", { href: x.issue_url, target: "_blank", rel: "noreferrer", className: "hover:underline", style: { color: "var(--accent)" }, children: "view issue →" })
     ] })
-  ] }, v.id)) });
+  ] }, x.id)) });
 }
-function Ue({ repos: s, selected: f, onToggle: v, onClear: x, onAddWorkspace: L, onEdit: I }) {
-  const A = s.reduce((y, u) => y + u.count, 0), w = f.size === 0, R = ({ name: y, count: u, label: N, checked: m, onClick: q, isAll: j }) => {
-    const [H, F] = $(!1);
+function Ke({ repos: s, selected: f, onToggle: x, onClear: b, onAddWorkspace: L, onEdit: M }) {
+  const A = s.reduce((y, m) => y + m.count, 0), h = f.size === 0, R = ({ name: y, count: m, label: k, checked: g, onClick: U, isAll: O }) => {
+    const [F, B] = _(!1);
     return /* @__PURE__ */ o(
       "div",
       {
-        onMouseEnter: () => F(!0),
-        onMouseLeave: () => F(!1),
+        onMouseEnter: () => B(!0),
+        onMouseLeave: () => B(!1),
         className: "relative w-full rounded-md transition-all flex items-center",
         style: {
-          background: m ? "color-mix(in srgb, var(--accent) 16%, transparent)" : "transparent",
-          boxShadow: m ? "inset 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent)" : "none"
+          background: g ? "color-mix(in srgb, var(--accent) 16%, transparent)" : "transparent",
+          boxShadow: g ? "inset 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent)" : "none"
         },
         children: [
           /* @__PURE__ */ o(
             "button",
             {
-              onClick: q,
+              onClick: U,
               className: "flex-1 min-w-0 text-left px-2.5 py-2 flex items-center gap-2",
               children: [
-                j ? /* @__PURE__ */ e("span", { className: "w-1.5 h-1.5 rounded-full flex-shrink-0", style: { background: m ? "var(--accent)" : "var(--border-strong, var(--border))" } }) : /* @__PURE__ */ e(
+                O ? /* @__PURE__ */ e("span", { className: "w-1.5 h-1.5 rounded-full flex-shrink-0", style: { background: g ? "var(--accent)" : "var(--border-strong, var(--border))" } }) : /* @__PURE__ */ e(
                   "span",
                   {
                     className: "w-3.5 h-3.5 rounded flex items-center justify-center flex-shrink-0",
                     style: {
-                      background: m ? "var(--accent)" : "transparent",
-                      border: `1.5px solid ${m ? "var(--accent)" : "var(--border-strong, var(--border))"}`
+                      background: g ? "var(--accent)" : "transparent",
+                      border: `1.5px solid ${g ? "var(--accent)" : "var(--border-strong, var(--border))"}`
                     },
-                    children: m && /* @__PURE__ */ e("svg", { width: "9", height: "9", viewBox: "0 0 10 10", children: /* @__PURE__ */ e("path", { d: "M1 5l2.5 2.5L9 2", fill: "none", stroke: "var(--bg)", strokeWidth: "1.8", strokeLinecap: "round", strokeLinejoin: "round" }) })
+                    children: g && /* @__PURE__ */ e("svg", { width: "9", height: "9", viewBox: "0 0 10 10", children: /* @__PURE__ */ e("path", { d: "M1 5l2.5 2.5L9 2", fill: "none", stroke: "var(--bg)", strokeWidth: "1.8", strokeLinecap: "round", strokeLinejoin: "round" }) })
                   }
                 ),
                 /* @__PURE__ */ e(
                   "span",
                   {
                     className: "text-[12px] font-medium truncate flex-1",
-                    style: { color: m ? "var(--text-strong, var(--text))" : "var(--muted-strong, var(--muted))" },
-                    children: N
+                    style: { color: g ? "var(--text-strong, var(--text))" : "var(--muted-strong, var(--muted))" },
+                    children: k
                   }
                 ),
                 /* @__PURE__ */ e(
@@ -474,35 +474,35 @@ function Ue({ repos: s, selected: f, onToggle: v, onClear: x, onAddWorkspace: L,
                   {
                     className: "text-[10px] px-1.5 py-0.5 rounded-full font-semibold flex-shrink-0",
                     style: { background: "var(--bg-hover, var(--border))", color: "var(--muted)" },
-                    children: u
+                    children: m
                   }
                 )
               ]
             }
           ),
-          !j && y && /* @__PURE__ */ e(
+          !O && y && /* @__PURE__ */ e(
             "button",
             {
-              onClick: (P) => {
-                P.stopPropagation(), I(y);
+              onClick: (V) => {
+                V.stopPropagation(), M(y);
               },
-              title: `Edit pipeline "${N}"`,
-              "aria-label": `Edit pipeline ${N}`,
+              title: `Edit pipeline "${k}"`,
+              "aria-label": `Edit pipeline ${k}`,
               className: "mr-1.5 w-6 h-6 rounded flex items-center justify-center flex-shrink-0 transition-all",
               style: {
-                opacity: H ? 1 : 0,
-                pointerEvents: H ? "auto" : "none",
+                opacity: F ? 1 : 0,
+                pointerEvents: F ? "auto" : "none",
                 color: "var(--text-strong, var(--text))",
                 background: "var(--bg-hover, color-mix(in srgb, var(--accent) 12%, transparent))",
                 border: "1px solid var(--border-strong, var(--border))"
               },
-              onMouseEnter: (P) => {
-                const S = P.currentTarget;
-                S.style.color = "var(--accent)", S.style.borderColor = "var(--accent)";
+              onMouseEnter: (V) => {
+                const N = V.currentTarget;
+                N.style.color = "var(--accent)", N.style.borderColor = "var(--accent)";
               },
-              onMouseLeave: (P) => {
-                const S = P.currentTarget;
-                S.style.color = "var(--text-strong, var(--text))", S.style.borderColor = "var(--border-strong, var(--border))";
+              onMouseLeave: (V) => {
+                const N = V.currentTarget;
+                N.style.color = "var(--text-strong, var(--text))", N.style.borderColor = "var(--border-strong, var(--border))";
               },
               children: /* @__PURE__ */ e("svg", { width: "13", height: "13", viewBox: "0 0 16 16", fill: "none", children: /* @__PURE__ */ e("path", { d: "M11.5 1.5l3 3L5 14l-3.5.5L2 11 11.5 1.5z", stroke: "currentColor", strokeWidth: "1.6", strokeLinejoin: "round" }) })
             }
@@ -519,17 +519,17 @@ function Ue({ repos: s, selected: f, onToggle: v, onClear: x, onAddWorkspace: L,
       children: [
         /* @__PURE__ */ o("div", { className: "flex items-center justify-between px-2.5 mb-1", children: [
           /* @__PURE__ */ e("span", { className: "text-[10px] uppercase tracking-wider", style: { color: "var(--muted)" }, children: "Workspaces" }),
-          f.size > 0 && /* @__PURE__ */ e("button", { onClick: x, className: "text-[10px] hover:underline", style: { color: "var(--accent)" }, children: "clear" })
+          f.size > 0 && /* @__PURE__ */ e("button", { onClick: b, className: "text-[10px] hover:underline", style: { color: "var(--accent)" }, children: "clear" })
         ] }),
-        /* @__PURE__ */ e(R, { isAll: !0, count: A, label: "All repos", checked: w, onClick: x }),
+        /* @__PURE__ */ e(R, { isAll: !0, count: A, label: "All repos", checked: h, onClick: b }),
         s.map((y) => /* @__PURE__ */ e(
           R,
           {
             name: y.name,
             count: y.count,
-            label: (Oe.has(y.name) ? "Example: " : "") + (y.name.includes("/") ? y.name.split("/")[1] : y.name),
+            label: (Ie.has(y.name) ? "Example: " : "") + (y.name.includes("/") ? y.name.split("/")[1] : y.name),
             checked: f.has(y.name),
-            onClick: () => v(y.name)
+            onClick: () => x(y.name)
           },
           y.name
         )),
@@ -554,7 +554,7 @@ function Ue({ repos: s, selected: f, onToggle: v, onClear: x, onAddWorkspace: L,
     }
   );
 }
-const He = [
+const Ye = [
   "read",
   "write",
   "shell",
@@ -565,12 +565,12 @@ const He = [
   "task_run",
   "send_message"
 ];
-function qe({ initial: s, knownAgents: f, crews: v, repo: x, stepName: L, onSave: I, onClose: A }) {
-  var ae;
-  const { openChat: w } = Le(), [R, y] = $(s.name || ""), [u, N] = $(s.role || ""), [m, q] = $(s.tools || ["read"]), [j, H] = $(s.model || "auto"), [F, P] = $(s.crew || ""), [S, E] = $(s.addenda || []), [h, k] = $(s.trust || ""), [U, X] = $(s.depth || ""), b = (l) => q((d) => d.includes(l) ? d.filter((g) => g !== l) : [...d, l]), B = () => E((l) => {
-    var d;
-    return l.length >= 3 ? l : [...l, { crew: ((d = v[0]) == null ? void 0 : d.name) || "", when: "always", writes: "" }];
-  }), W = (l, d) => E((g) => g.map((C, ge) => ge === l ? { ...C, ...d } : C)), V = (l) => E((d) => d.filter((g, C) => C !== l)), Y = R.trim().length > 0;
+function Je({ initial: s, knownAgents: f, crews: x, repo: b, stepName: L, onSave: M, onClose: A }) {
+  var Z;
+  const { openChat: h } = We(), [R, y] = _(s.name || ""), [m, k] = _(s.role || ""), [g, U] = _(s.tools || ["read"]), [O, F] = _(s.model || "auto"), [B, V] = _(s.crew || ""), [N, j] = _(s.addenda || []), [v, w] = _(s.trust || ""), [W, P] = _(s.depth || ""), $ = (l) => U((i) => i.includes(l) ? i.filter((u) => u !== l) : [...i, l]), G = () => j((l) => {
+    var i;
+    return l.length >= 3 ? l : [...l, { crew: ((i = x[0]) == null ? void 0 : i.name) || "", when: "always", writes: "" }];
+  }), q = (l, i) => j((u) => u.map((C, le) => le === l ? { ...C, ...i } : C)), K = (l) => j((i) => i.filter((u, C) => C !== l)), I = R.trim().length > 0;
   return /* @__PURE__ */ o("div", { className: "flex flex-col h-full", children: [
     /* @__PURE__ */ o("div", { className: "px-5 py-3 flex items-center gap-2", style: { borderBottom: "1px solid var(--border)" }, children: [
       /* @__PURE__ */ e("button", { onClick: A, className: "text-sm leading-none", style: { color: "var(--accent)" }, children: "← Steps" }),
@@ -581,11 +581,11 @@ function qe({ initial: s, knownAgents: f, crews: v, repo: x, stepName: L, onSave
       /* @__PURE__ */ e(
         "button",
         {
-          onClick: () => w({
+          onClick: () => h({
             message: `/dlc-yolo
 
 Help me design a NEW agent for a custom pipeline step.
-Pipeline repo: ${x || "(unset)"}
+Pipeline repo: ${b || "(unset)"}
 Step: ${L || "(unnamed)"}
 
 Ask me what the step should do, then propose an agent config (name, role/prompt, tools, model). When I'm happy, write it into this pipeline's step in the DLC-YOLO state file (~/.dlc-yolo/state.json, or /tmp/dlc-yolo/state.json if that's what exists) — the step's agent {name, role, tools} and any trust/depth — keeping GitHub as the source of truth.`
@@ -633,8 +633,8 @@ Ask me what the step should do, then propose an agent config (name, role/prompt,
         /* @__PURE__ */ e(
           "textarea",
           {
-            value: u,
-            onChange: (l) => N(l.target.value),
+            value: m,
+            onChange: (l) => k(l.target.value),
             rows: 3,
             placeholder: "What this agent does in this step…",
             className: "mt-1 w-full px-3 py-2 rounded-md text-sm outline-none resize-y",
@@ -644,17 +644,17 @@ Ask me what the step should do, then propose an agent config (name, role/prompt,
       ] }),
       /* @__PURE__ */ o("div", { children: [
         /* @__PURE__ */ e("label", { className: "text-[11px] uppercase tracking-wider", style: { color: "var(--muted)" }, children: "Tools" }),
-        /* @__PURE__ */ e("div", { className: "mt-1 flex flex-wrap gap-1.5", children: He.map((l) => {
-          const d = m.includes(l);
+        /* @__PURE__ */ e("div", { className: "mt-1 flex flex-wrap gap-1.5", children: Ye.map((l) => {
+          const i = g.includes(l);
           return /* @__PURE__ */ e(
             "button",
             {
-              onClick: () => b(l),
+              onClick: () => $(l),
               className: "text-[11px] px-2 py-1 rounded-md font-medium transition-all",
               style: {
-                background: d ? "color-mix(in srgb, var(--accent) 16%, transparent)" : "var(--bg-hover, var(--border))",
-                color: d ? "var(--accent)" : "var(--muted)",
-                boxShadow: d ? "inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent)" : "none"
+                background: i ? "color-mix(in srgb, var(--accent) 16%, transparent)" : "var(--bg-hover, var(--border))",
+                color: i ? "var(--accent)" : "var(--muted)",
+                boxShadow: i ? "inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent)" : "none"
               },
               children: l
             },
@@ -667,8 +667,8 @@ Ask me what the step should do, then propose an agent config (name, role/prompt,
         /* @__PURE__ */ e(
           "input",
           {
-            value: j,
-            onChange: (l) => H(l.target.value),
+            value: O,
+            onChange: (l) => F(l.target.value),
             placeholder: "auto",
             className: "w-40 px-2 py-1 rounded-md text-sm outline-none",
             style: { background: "var(--bg-elevated, var(--bg))", border: "1px solid var(--border)", color: "var(--text)" }
@@ -681,18 +681,18 @@ Ask me what the step should do, then propose an agent config (name, role/prompt,
           /* @__PURE__ */ o(
             "select",
             {
-              value: F,
-              onChange: (l) => P(l.target.value),
+              value: B,
+              onChange: (l) => V(l.target.value),
               className: "w-52 px-2 py-1 rounded-md text-sm outline-none",
               style: { background: "var(--bg-elevated, var(--bg))", border: "1px solid var(--border)", color: "var(--text)" },
               children: [
                 /* @__PURE__ */ e("option", { value: "", children: "— none (use step agent) —" }),
-                v.map((l) => /* @__PURE__ */ e("option", { value: l.name, children: l.name }, l.name))
+                x.map((l) => /* @__PURE__ */ e("option", { value: l.name, children: l.name }, l.name))
               ]
             }
           )
         ] }),
-        F && /* @__PURE__ */ e("div", { className: "text-[10px] mt-1 text-right", style: { color: "var(--muted)" }, children: ((ae = v.find((l) => l.name === F)) == null ? void 0 : ae.description) || "Runs this step via select_crew → spawn_run(agent=" + F + ")" })
+        B && /* @__PURE__ */ e("div", { className: "text-[10px] mt-1 text-right", style: { color: "var(--muted)" }, children: ((Z = x.find((l) => l.name === B)) == null ? void 0 : Z.description) || "Runs this step via select_crew → spawn_run(agent=" + B + ")" })
       ] }),
       /* @__PURE__ */ o("div", { children: [
         /* @__PURE__ */ o("div", { className: "flex items-center justify-between mb-1", children: [
@@ -700,8 +700,8 @@ Ask me what the step should do, then propose an agent config (name, role/prompt,
           /* @__PURE__ */ e(
             "button",
             {
-              onClick: B,
-              disabled: S.length >= 3,
+              onClick: G,
+              disabled: N.length >= 3,
               className: "text-[11px] px-2 py-0.5 rounded font-semibold disabled:opacity-40",
               style: { color: "var(--accent)", border: "1px dashed color-mix(in srgb, var(--accent) 50%, var(--border))" },
               children: "+ addendum"
@@ -709,23 +709,23 @@ Ask me what the step should do, then propose an agent config (name, role/prompt,
           )
         ] }),
         /* @__PURE__ */ e("div", { className: "text-[10px] mb-1.5", style: { color: "var(--muted)" }, children: "Run after the canon crew as separate passes (e.g. research, secure-design). Max 3." }),
-        S.length === 0 && /* @__PURE__ */ e("div", { className: "text-[11px] italic", style: { color: "var(--muted)" }, children: "none" }),
-        S.map((l, d) => /* @__PURE__ */ o("div", { className: "flex items-center gap-1.5 mb-1.5", children: [
+        N.length === 0 && /* @__PURE__ */ e("div", { className: "text-[11px] italic", style: { color: "var(--muted)" }, children: "none" }),
+        N.map((l, i) => /* @__PURE__ */ o("div", { className: "flex items-center gap-1.5 mb-1.5", children: [
           /* @__PURE__ */ e(
             "select",
             {
               value: l.crew,
-              onChange: (g) => W(d, { crew: g.target.value }),
+              onChange: (u) => q(i, { crew: u.target.value }),
               className: "flex-1 min-w-0 px-2 py-1 rounded-md text-[12px] outline-none",
               style: { background: "var(--bg-elevated, var(--bg))", border: "1px solid var(--border)", color: "var(--text)" },
-              children: v.map((g) => /* @__PURE__ */ e("option", { value: g.name, children: g.name }, g.name))
+              children: x.map((u) => /* @__PURE__ */ e("option", { value: u.name, children: u.name }, u.name))
             }
           ),
           /* @__PURE__ */ o(
             "select",
             {
               value: l.when || "always",
-              onChange: (g) => W(d, { when: g.target.value }),
+              onChange: (u) => q(i, { when: u.target.value }),
               title: "Integration trigger — when this addendum runs",
               className: "px-1.5 py-1 rounded-md text-[11px] outline-none",
               style: { background: "var(--bg-elevated, var(--bg))", border: "1px solid var(--border)", color: "var(--text)" },
@@ -741,25 +741,25 @@ Ask me what the step should do, then propose an agent config (name, role/prompt,
             "input",
             {
               value: l.writes || "",
-              onChange: (g) => W(d, { writes: g.target.value }),
+              onChange: (u) => q(i, { writes: u.target.value }),
               placeholder: "writes (e.g. research.md)",
               className: "w-32 px-2 py-1 rounded-md text-[11px] outline-none",
               style: { background: "var(--bg-elevated, var(--bg))", border: "1px solid var(--border)", color: "var(--text)" }
             }
           ),
-          /* @__PURE__ */ e("button", { onClick: () => V(d), className: "w-5 h-5 flex items-center justify-center flex-shrink-0", style: { color: "var(--muted)" }, "aria-label": "Remove addendum", children: /* @__PURE__ */ e("svg", { width: "10", height: "10", viewBox: "0 0 12 12", children: /* @__PURE__ */ e("path", { d: "M2 2l8 8M10 2l-8 8", fill: "none", stroke: "currentColor", strokeWidth: "1.6", strokeLinecap: "round" }) }) })
-        ] }, d))
+          /* @__PURE__ */ e("button", { onClick: () => K(i), className: "w-5 h-5 flex items-center justify-center flex-shrink-0", style: { color: "var(--muted)" }, "aria-label": "Remove addendum", children: /* @__PURE__ */ e("svg", { width: "10", height: "10", viewBox: "0 0 12 12", children: /* @__PURE__ */ e("path", { d: "M2 2l8 8M10 2l-8 8", fill: "none", stroke: "currentColor", strokeWidth: "1.6", strokeLinecap: "round" }) }) })
+        ] }, i))
       ] }),
       /* @__PURE__ */ o("div", { className: "flex items-center justify-between", children: [
         /* @__PURE__ */ e("span", { className: "text-[11px] uppercase tracking-wider", style: { color: "var(--muted)" }, children: "Trust" }),
-        /* @__PURE__ */ e("div", { className: "flex gap-0.5 p-0.5 rounded-md", style: { background: "var(--bg-elevated, var(--card))", border: "1px solid var(--border)" }, children: ["", ...me].map((l) => {
-          const d = h === l;
+        /* @__PURE__ */ e("div", { className: "flex gap-0.5 p-0.5 rounded-md", style: { background: "var(--bg-elevated, var(--card))", border: "1px solid var(--border)" }, children: ["", ...ve].map((l) => {
+          const i = v === l;
           return /* @__PURE__ */ e(
             "button",
             {
-              onClick: () => k(l),
+              onClick: () => w(l),
               className: "text-[11px] px-2 py-0.5 rounded font-semibold",
-              style: { color: d ? l ? Re[l] : "var(--text)" : "var(--muted)", background: d ? "var(--bg-hover, var(--border))" : "transparent" },
+              style: { color: i ? l ? Ee[l] : "var(--text)" : "var(--muted)", background: i ? "var(--bg-hover, var(--border))" : "transparent" },
               children: l || "inherit"
             },
             l || "inherit"
@@ -768,14 +768,14 @@ Ask me what the step should do, then propose an agent config (name, role/prompt,
       ] }),
       /* @__PURE__ */ o("div", { className: "flex items-center justify-between", children: [
         /* @__PURE__ */ e("span", { className: "text-[11px] uppercase tracking-wider", style: { color: "var(--muted)" }, children: "Depth" }),
-        /* @__PURE__ */ e("div", { className: "flex gap-0.5 p-0.5 rounded-md", style: { background: "var(--bg-elevated, var(--card))", border: "1px solid var(--border)" }, children: ["", ...ve].map((l) => {
-          const d = U === l;
+        /* @__PURE__ */ e("div", { className: "flex gap-0.5 p-0.5 rounded-md", style: { background: "var(--bg-elevated, var(--card))", border: "1px solid var(--border)" }, children: ["", ...fe].map((l) => {
+          const i = W === l;
           return /* @__PURE__ */ e(
             "button",
             {
-              onClick: () => X(l),
+              onClick: () => P(l),
               className: "text-[11px] px-2 py-0.5 rounded font-semibold",
-              style: { color: d ? l ? $e[l] : "var(--text)" : "var(--muted)", background: d ? "var(--bg-hover, var(--border))" : "transparent" },
+              style: { color: i ? l ? Ae[l] : "var(--text)" : "var(--muted)", background: i ? "var(--bg-hover, var(--border))" : "transparent" },
               children: l || "inherit"
             },
             l || "inherit"
@@ -788,16 +788,16 @@ Ask me what the step should do, then propose an agent config (name, role/prompt,
       /* @__PURE__ */ e(
         "button",
         {
-          disabled: !Y,
-          onClick: () => I({
+          disabled: !I,
+          onClick: () => M({
             name: R.trim(),
-            role: u.trim() || void 0,
-            tools: m,
-            model: j.trim() && j.trim() !== "auto" ? j.trim() : void 0,
-            crew: F || void 0,
-            addenda: S.length ? S.filter((l) => l.crew) : void 0,
-            trust: h || void 0,
-            depth: U || void 0
+            role: m.trim() || void 0,
+            tools: g,
+            model: O.trim() && O.trim() !== "auto" ? O.trim() : void 0,
+            crew: B || void 0,
+            addenda: N.length ? N.filter((l) => l.crew) : void 0,
+            trust: v || void 0,
+            depth: W || void 0
           }),
           className: "text-xs px-3 py-1.5 rounded-md font-semibold transition-opacity disabled:opacity-40",
           style: { background: "var(--accent)", color: "var(--bg)" },
@@ -807,53 +807,53 @@ Ask me what the step should do, then propose an agent config (name, role/prompt,
     ] })
   ] });
 }
-function Ee({ candidates: s, existingRepos: f, defaults: v, knownAgents: x, crews: L, onCreate: I, onClose: A, editPipeline: w, cardCount: R, isExample: y, onDelete: u }) {
-  var J, ce, ne, ye, xe, we, ue, t, r, n, c, p, _, Q;
-  const N = !!w, [m, q] = $((w == null ? void 0 : w.repo) || ""), [j, H] = $((w == null ? void 0 : w.source) || "manual"), [F, P] = $((w == null ? void 0 : w.trust) || v.trust), [S, E] = $((w == null ? void 0 : w.depth) || v.depth), [h, k] = $((w == null ? void 0 : w.backlog_intake) ?? !0), [U, X] = $((w == null ? void 0 : w.results_in_repo) ?? !1), [b, B] = $(() => {
+function Le({ candidates: s, existingRepos: f, defaults: x, knownAgents: b, crews: L, onCreate: M, onClose: A, editPipeline: h, cardCount: R, isExample: y, onDelete: m }) {
+  var ye, Ce, ge, t, r, n, c, p, S, te, he, we, de, oe;
+  const k = !!h, [g, U] = _((h == null ? void 0 : h.repo) || ""), [O, F] = _((h == null ? void 0 : h.source) || "manual"), [B, V] = _((h == null ? void 0 : h.trust) || x.trust), [N, j] = _((h == null ? void 0 : h.depth) || x.depth), [v, w] = _((h == null ? void 0 : h.backlog_intake) ?? !0), [W, P] = _((h == null ? void 0 : h.results_in_repo) ?? !1), [$, G] = _((h == null ? void 0 : h.self_enabling) ?? !1), [q, K] = _((h == null ? void 0 : h.approach) || "simplified"), [I, Z] = _(() => {
     var a;
-    return (a = w == null ? void 0 : w.steps) != null && a.length ? w.steps.map((i) => ({ ...i })) : fe.map((i) => ({ ...i }));
-  }), [W, V] = $(null), [Y, ae] = $(""), [l, d] = $("settings"), g = (a) => a.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "step", C = (a, i) => B((O) => O.map((z, D) => D === a ? { ...z, ...i } : z)), ge = (a) => B((i) => i.filter((O, z) => z !== a)), ee = (a, i) => B((O) => {
-    const z = a + i;
-    if (z < 0 || z >= O.length) return O;
-    const D = [...O];
-    return [D[a], D[z]] = [D[z], D[a]], D;
-  }), te = (a) => B((i) => [...i, {
+    return (a = h == null ? void 0 : h.steps) != null && a.length ? h.steps.map((d) => ({ ...d })) : Ne.map((d) => ({ ...d }));
+  }), [l, i] = _(null), [u, C] = _(""), [le, ae] = _("settings"), ne = (a) => a.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "step", re = (a, d) => Z((z) => z.map((X, D) => D === a ? { ...X, ...d } : X)), xe = (a) => Z((d) => d.filter((z, X) => X !== a)), ee = (a, d) => Z((z) => {
+    const X = a + d;
+    if (X < 0 || X >= z.length) return z;
+    const D = [...z];
+    return [D[a], D[X]] = [D[X], D[a]], D;
+  }), ce = (a) => Z((d) => [...d, {
     id: `${a}-${Math.random().toString(36).slice(2, 6)}`,
     name: a === "gate" ? "New Gate" : "New Step",
     type: a,
     agent: a === "agent" ? { name: "impl-agent", role: "" } : void 0
-  }]), le = (a) => {
-    q(a.repo), H(a.source);
-  }, re = (a) => {
-    let i = (a || "").trim();
-    if (!i) return "";
-    const O = i.match(/^(?:https?:\/\/)?(?:www\.)?(?:github|gitlab)\.com\/([^/\s]+\/[^/\s#?]+)/i);
-    return O && (i = O[1]), i.replace(/\.git$/i, "").replace(/\/+$/, "");
-  }, Z = (a) => {
-    const i = /github\.com|gitlab\.com/i.test(a);
-    q(i ? re(a) : a), H("manual");
-  }, pe = /^[^/\s]+\/[^/\s]+$/.test(re(m)) || s.some((a) => a.repo === m), se = !N && f.has(re(m)), M = ({ value: a, options: i, tokens: O, onPick: z }) => /* @__PURE__ */ e("div", { className: "flex gap-0.5 p-0.5 rounded-md", style: { background: "var(--bg-elevated, var(--card))", border: "1px solid var(--border)" }, children: i.map((D) => {
-    const Te = a === D;
+  }]), me = (a) => {
+    U(a.repo), F(a.source);
+  }, T = (a) => {
+    let d = (a || "").trim();
+    if (!d) return "";
+    const z = d.match(/^(?:https?:\/\/)?(?:www\.)?(?:github|gitlab)\.com\/([^/\s]+\/[^/\s#?]+)/i);
+    return z && (d = z[1]), d.replace(/\.git$/i, "").replace(/\/+$/, "");
+  }, H = (a) => {
+    const d = /github\.com|gitlab\.com/i.test(a);
+    U(d ? T(a) : a), F("manual");
+  }, E = /^[^/\s]+\/[^/\s]+$/.test(T(g)) || s.some((a) => a.repo === g), J = !k && f.has(T(g)), ie = ({ value: a, options: d, tokens: z, onPick: X }) => /* @__PURE__ */ e("div", { className: "flex gap-0.5 p-0.5 rounded-md", style: { background: "var(--bg-elevated, var(--card))", border: "1px solid var(--border)" }, children: d.map((D) => {
+    const Oe = a === D;
     return /* @__PURE__ */ e(
       "button",
       {
-        onClick: () => z(D),
+        onClick: () => X(D),
         className: "text-[11px] px-2.5 py-1 rounded font-semibold transition-all",
         style: {
-          color: Te ? O[D] : "var(--muted)",
-          background: Te ? `color-mix(in srgb, ${O[D]} 16%, transparent)` : "transparent",
-          boxShadow: Te ? `inset 0 0 0 1px color-mix(in srgb, ${O[D]} 45%, transparent)` : "none"
+          color: Oe ? z[D] : "var(--muted)",
+          background: Oe ? `color-mix(in srgb, ${z[D]} 16%, transparent)` : "transparent",
+          boxShadow: Oe ? `inset 0 0 0 1px color-mix(in srgb, ${z[D]} 45%, transparent)` : "none"
         },
         children: D
       },
       D
     );
-  }) }), G = { "issue-radar": [], workspace: [], manual: [] };
+  }) }), Q = { "issue-radar": [], workspace: [], manual: [] };
   s.forEach((a) => {
-    var i;
-    (G[i = a.source] || (G[i] = [])).push(a);
+    var d;
+    (Q[d = a.source] || (Q[d] = [])).push(a);
   });
-  const T = { "issue-radar": "Issue Radar", workspace: "KiroCrew Workspaces", manual: "Manual" };
+  const je = { "issue-radar": "Issue Radar", workspace: "KiroCrew Workspaces", manual: "Manual" };
   return /* @__PURE__ */ e(
     "div",
     {
@@ -866,51 +866,51 @@ function Ee({ candidates: s, existingRepos: f, defaults: v, knownAgents: x, crew
           className: "w-full max-w-lg rounded-xl overflow-hidden flex flex-col",
           style: { background: "var(--card)", border: "1px solid var(--border-strong, var(--border))", boxShadow: "0 20px 60px rgba(0,0,0,0.4)", maxHeight: "82vh" },
           onClick: (a) => a.stopPropagation(),
-          children: W !== null ? /* @__PURE__ */ e(
-            qe,
+          children: l !== null ? /* @__PURE__ */ e(
+            Je,
             {
               initial: {
-                name: ((ce = (J = b[W]) == null ? void 0 : J.agent) == null ? void 0 : ce.name) || "",
-                role: (ye = (ne = b[W]) == null ? void 0 : ne.agent) == null ? void 0 : ye.role,
-                tools: (we = (xe = b[W]) == null ? void 0 : xe.agent) == null ? void 0 : we.tools,
-                model: (t = (ue = b[W]) == null ? void 0 : ue.agent) == null ? void 0 : t.model,
-                crew: (n = (r = b[W]) == null ? void 0 : r.agent) == null ? void 0 : n.crew,
-                addenda: (c = b[W]) == null ? void 0 : c.addenda,
-                trust: (p = b[W]) == null ? void 0 : p.trust,
-                depth: (_ = b[W]) == null ? void 0 : _.depth
+                name: ((Ce = (ye = I[l]) == null ? void 0 : ye.agent) == null ? void 0 : Ce.name) || "",
+                role: (t = (ge = I[l]) == null ? void 0 : ge.agent) == null ? void 0 : t.role,
+                tools: (n = (r = I[l]) == null ? void 0 : r.agent) == null ? void 0 : n.tools,
+                model: (p = (c = I[l]) == null ? void 0 : c.agent) == null ? void 0 : p.model,
+                crew: (te = (S = I[l]) == null ? void 0 : S.agent) == null ? void 0 : te.crew,
+                addenda: (he = I[l]) == null ? void 0 : he.addenda,
+                trust: (we = I[l]) == null ? void 0 : we.trust,
+                depth: (de = I[l]) == null ? void 0 : de.depth
               },
-              knownAgents: x,
+              knownAgents: b,
               crews: L,
-              repo: m,
-              stepName: ((Q = b[W]) == null ? void 0 : Q.name) || "",
-              onClose: () => V(null),
+              repo: g,
+              stepName: ((oe = I[l]) == null ? void 0 : oe.name) || "",
+              onClose: () => i(null),
               onSave: (a) => {
-                C(W, {
+                re(l, {
                   agent: { name: a.name, role: a.role, tools: a.tools, model: a.model, crew: a.crew },
                   addenda: a.addenda,
                   trust: a.trust,
                   depth: a.depth
-                }), V(null);
+                }), i(null);
               }
             }
-          ) : /* @__PURE__ */ o(je, { children: [
+          ) : /* @__PURE__ */ o(Me, { children: [
             /* @__PURE__ */ o("div", { className: "px-5 py-4 flex items-center justify-between", style: { borderBottom: "1px solid var(--border)" }, children: [
               /* @__PURE__ */ o("div", { children: [
-                /* @__PURE__ */ e("div", { className: "text-base font-semibold", style: { color: "var(--text-strong, var(--text))" }, children: N ? "Edit Pipeline" : "New Pipeline" }),
-                /* @__PURE__ */ e("div", { className: "text-xs mt-0.5", style: { color: "var(--muted)" }, children: N ? m.includes("/") ? m.split("/")[1] : m : "Configure a pipeline for a repository or workspace" })
+                /* @__PURE__ */ e("div", { className: "text-base font-semibold", style: { color: "var(--text-strong, var(--text))" }, children: k ? "Edit Pipeline" : "New Pipeline" }),
+                /* @__PURE__ */ e("div", { className: "text-xs mt-0.5", style: { color: "var(--muted)" }, children: k ? g.includes("/") ? g.split("/")[1] : g : "Configure a pipeline for a repository or workspace" })
               ] }),
               /* @__PURE__ */ e("button", { onClick: A, className: "text-lg leading-none px-2", style: { color: "var(--muted)" }, children: "×" })
             ] }),
-            N && /* @__PURE__ */ e("div", { className: "px-5 pt-3 flex gap-1", style: { borderBottom: "1px solid var(--border)" }, children: ["settings", "danger"].map((a) => {
-              const i = l === a, O = a === "danger";
+            k && /* @__PURE__ */ e("div", { className: "px-5 pt-3 flex gap-1", style: { borderBottom: "1px solid var(--border)" }, children: ["settings", "danger"].map((a) => {
+              const d = le === a, z = a === "danger";
               return /* @__PURE__ */ e(
                 "button",
                 {
-                  onClick: () => d(a),
+                  onClick: () => ae(a),
                   className: "text-[12px] px-3 py-2 font-semibold transition-all",
                   style: {
-                    color: i ? O ? "var(--danger, #ef4444)" : "var(--accent)" : "var(--muted)",
-                    borderBottom: `2px solid ${i ? O ? "var(--danger, #ef4444)" : "var(--accent)" : "transparent"}`,
+                    color: d ? z ? "var(--danger, #ef4444)" : "var(--accent)" : "var(--muted)",
+                    borderBottom: `2px solid ${d ? z ? "var(--danger, #ef4444)" : "var(--accent)" : "transparent"}`,
                     marginBottom: "-1px"
                   },
                   children: a === "settings" ? "Settings" : "Danger Zone"
@@ -922,57 +922,57 @@ function Ee({ candidates: s, existingRepos: f, defaults: v, knownAgents: x, crew
               "div",
               {
                 className: "px-5 py-4 flex flex-col gap-4 overflow-y-auto flex-1",
-                style: { display: N && l === "danger" ? "none" : "flex" },
+                style: { display: k && le === "danger" ? "none" : "flex" },
                 children: [
                   /* @__PURE__ */ o("div", { children: [
                     /* @__PURE__ */ e("label", { className: "text-[11px] uppercase tracking-wider", style: { color: "var(--muted)" }, children: "Repository — paste a GitHub URL or owner/name" }),
                     /* @__PURE__ */ e(
                       "input",
                       {
-                        value: m,
-                        onChange: (a) => Z(a.target.value),
+                        value: g,
+                        onChange: (a) => H(a.target.value),
                         onPaste: (a) => {
-                          const i = a.clipboardData.getData("text");
-                          /github\.com|gitlab\.com/i.test(i) && (a.preventDefault(), Z(i));
+                          const d = a.clipboardData.getData("text");
+                          /github\.com|gitlab\.com/i.test(d) && (a.preventDefault(), H(d));
                         },
                         placeholder: "https://github.com/owner/name  ·  or  owner/name",
-                        disabled: N,
+                        disabled: k,
                         className: "mt-1 w-full px-3 py-2 rounded-md text-sm outline-none disabled:opacity-60",
-                        style: { background: "var(--bg-elevated, var(--bg))", border: `1px solid ${se ? "var(--danger)" : "var(--border)"}`, color: "var(--text)" }
+                        style: { background: "var(--bg-elevated, var(--bg))", border: `1px solid ${J ? "var(--danger)" : "var(--border)"}`, color: "var(--text)" }
                       }
                     ),
-                    !N && m && re(m) !== m && /* @__PURE__ */ o("div", { className: "text-[11px] mt-1", style: { color: "var(--muted)" }, children: [
+                    !k && g && T(g) !== g && /* @__PURE__ */ o("div", { className: "text-[11px] mt-1", style: { color: "var(--muted)" }, children: [
                       "→ ",
-                      /* @__PURE__ */ e("code", { style: { color: "var(--accent)" }, children: re(m) })
+                      /* @__PURE__ */ e("code", { style: { color: "var(--accent)" }, children: T(g) })
                     ] }),
-                    se && /* @__PURE__ */ e("div", { className: "text-[11px] mt-1", style: { color: "var(--danger)" }, children: "A pipeline for this repo already exists." }),
-                    /* @__PURE__ */ e("div", { className: "mt-2 flex flex-col gap-2", children: ["issue-radar", "workspace"].map((a) => G[a].length > 0 && /* @__PURE__ */ o("div", { children: [
-                      /* @__PURE__ */ e("div", { className: "text-[10px] uppercase tracking-wider mb-1", style: { color: "var(--muted)" }, children: T[a] }),
-                      /* @__PURE__ */ e("div", { className: "flex flex-wrap gap-1.5", children: G[a].map((i) => /* @__PURE__ */ e(
+                    J && /* @__PURE__ */ e("div", { className: "text-[11px] mt-1", style: { color: "var(--danger)" }, children: "A pipeline for this repo already exists." }),
+                    /* @__PURE__ */ e("div", { className: "mt-2 flex flex-col gap-2", children: ["issue-radar", "workspace"].map((a) => Q[a].length > 0 && /* @__PURE__ */ o("div", { children: [
+                      /* @__PURE__ */ e("div", { className: "text-[10px] uppercase tracking-wider mb-1", style: { color: "var(--muted)" }, children: je[a] }),
+                      /* @__PURE__ */ e("div", { className: "flex flex-wrap gap-1.5", children: Q[a].map((d) => /* @__PURE__ */ e(
                         "button",
                         {
-                          onClick: () => le(i),
-                          disabled: f.has(i.repo),
-                          title: i.detail || i.repo,
+                          onClick: () => me(d),
+                          disabled: f.has(d.repo),
+                          title: d.detail || d.repo,
                           className: "text-[11px] px-2 py-1 rounded-md font-medium transition-all disabled:opacity-40",
                           style: {
-                            background: m === i.repo ? "color-mix(in srgb, var(--accent) 16%, transparent)" : "var(--bg-hover, var(--border))",
-                            color: m === i.repo ? "var(--accent)" : "var(--muted-strong, var(--muted))",
-                            boxShadow: m === i.repo ? "inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent)" : "none"
+                            background: g === d.repo ? "color-mix(in srgb, var(--accent) 16%, transparent)" : "var(--bg-hover, var(--border))",
+                            color: g === d.repo ? "var(--accent)" : "var(--muted-strong, var(--muted))",
+                            boxShadow: g === d.repo ? "inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent)" : "none"
                           },
-                          children: i.repo.includes("/") ? i.repo.split("/")[1] : i.repo
+                          children: d.repo.includes("/") ? d.repo.split("/")[1] : d.repo
                         },
-                        i.repo
+                        d.repo
                       )) })
                     ] }, a)) })
                   ] }),
                   /* @__PURE__ */ o("div", { className: "flex items-center justify-between", children: [
                     /* @__PURE__ */ e("span", { className: "text-[11px] uppercase tracking-wider", style: { color: "var(--muted)" }, children: "Default Trust" }),
-                    /* @__PURE__ */ e(M, { value: F, options: me, tokens: Re, onPick: P })
+                    /* @__PURE__ */ e(ie, { value: B, options: ve, tokens: Ee, onPick: V })
                   ] }),
                   /* @__PURE__ */ o("div", { className: "flex items-center justify-between", children: [
                     /* @__PURE__ */ e("span", { className: "text-[11px] uppercase tracking-wider", style: { color: "var(--muted)" }, children: "Default Depth" }),
-                    /* @__PURE__ */ e(M, { value: S, options: ve, tokens: $e, onPick: E })
+                    /* @__PURE__ */ e(ie, { value: N, options: fe, tokens: Ae, onPick: j })
                   ] }),
                   /* @__PURE__ */ o("label", { className: "flex items-center justify-between cursor-pointer", children: [
                     /* @__PURE__ */ o("div", { children: [
@@ -986,14 +986,14 @@ function Ee({ candidates: s, existingRepos: f, defaults: v, knownAgents: x, crew
                     /* @__PURE__ */ e(
                       "button",
                       {
-                        onClick: () => k((a) => !a),
+                        onClick: () => w((a) => !a),
                         className: "w-10 h-5.5 rounded-full transition-all relative flex-shrink-0",
-                        style: { background: h ? "var(--accent)" : "var(--border-strong, var(--border))", height: 22, width: 40 },
+                        style: { background: v ? "var(--accent)" : "var(--border-strong, var(--border))", height: 22, width: 40 },
                         children: /* @__PURE__ */ e(
                           "span",
                           {
                             className: "absolute top-0.5 rounded-full transition-all",
-                            style: { height: 18, width: 18, background: "var(--bg)", left: h ? 20 : 2 }
+                            style: { height: 18, width: 18, background: "var(--bg)", left: v ? 20 : 2 }
                           }
                         )
                       }
@@ -1011,18 +1011,59 @@ function Ee({ candidates: s, existingRepos: f, defaults: v, knownAgents: x, crew
                     /* @__PURE__ */ e(
                       "button",
                       {
-                        onClick: () => X((a) => !a),
+                        onClick: () => P((a) => !a),
                         className: "w-10 h-5.5 rounded-full transition-all relative flex-shrink-0",
-                        style: { background: U ? "var(--accent)" : "var(--border-strong, var(--border))", height: 22, width: 40 },
+                        style: { background: W ? "var(--accent)" : "var(--border-strong, var(--border))", height: 22, width: 40 },
                         children: /* @__PURE__ */ e(
                           "span",
                           {
                             className: "absolute top-0.5 rounded-full transition-all",
-                            style: { height: 18, width: 18, background: "var(--bg)", left: U ? 20 : 2 }
+                            style: { height: 18, width: 18, background: "var(--bg)", left: W ? 20 : 2 }
                           }
                         )
                       }
                     )
+                  ] }),
+                  /* @__PURE__ */ o("label", { className: "flex items-center justify-between cursor-pointer", children: [
+                    /* @__PURE__ */ o("div", { children: [
+                      /* @__PURE__ */ e("div", { className: "text-sm", style: { color: "var(--text)" }, children: "Self-enabling pipeline" }),
+                      /* @__PURE__ */ e("div", { className: "text-[11px]", style: { color: "var(--muted)" }, children: "Orchestrator resolves intent & auto-configures crews/steps (setup → intent → per-step)" })
+                    ] }),
+                    /* @__PURE__ */ e(
+                      "button",
+                      {
+                        onClick: () => G((a) => !a),
+                        className: "w-10 h-5.5 rounded-full transition-all relative flex-shrink-0",
+                        style: { background: $ ? "var(--accent)" : "var(--border-strong, var(--border))", height: 22, width: 40 },
+                        children: /* @__PURE__ */ e(
+                          "span",
+                          {
+                            className: "absolute top-0.5 rounded-full transition-all",
+                            style: { height: 18, width: 18, background: "var(--bg)", left: $ ? 20 : 2 }
+                          }
+                        )
+                      }
+                    )
+                  ] }),
+                  $ && /* @__PURE__ */ o("div", { className: "flex items-center justify-between", children: [
+                    /* @__PURE__ */ o("div", { children: [
+                      /* @__PURE__ */ e("div", { className: "text-sm", style: { color: "var(--text)" }, children: "Setup approach" }),
+                      /* @__PURE__ */ e("div", { className: "text-[11px]", style: { color: "var(--muted)" }, children: "Simplified = lean ladder · Enhanced = research gate + addendum crews + deeper" })
+                    ] }),
+                    /* @__PURE__ */ e("div", { className: "flex gap-1", children: ["simplified", "enhanced"].map((a) => /* @__PURE__ */ e(
+                      "button",
+                      {
+                        onClick: () => K(a),
+                        className: "text-[11px] px-2 py-1 rounded-md font-semibold transition-all capitalize",
+                        style: {
+                          background: q === a ? "var(--accent)" : "transparent",
+                          color: q === a ? "var(--bg)" : "var(--muted)",
+                          border: `1px solid ${q === a ? "var(--accent)" : "var(--border)"}`
+                        },
+                        children: a
+                      },
+                      a
+                    )) })
                   ] }),
                   /* @__PURE__ */ o("div", { children: [
                     /* @__PURE__ */ o("div", { className: "flex items-center justify-between mb-1.5", children: [
@@ -1031,7 +1072,7 @@ function Ee({ candidates: s, existingRepos: f, defaults: v, knownAgents: x, crew
                         /* @__PURE__ */ e(
                           "button",
                           {
-                            onClick: () => te("agent"),
+                            onClick: () => ce("agent"),
                             className: "text-[10px] px-1.5 py-0.5 rounded font-semibold",
                             style: { color: "var(--accent)", border: "1px solid color-mix(in srgb, var(--accent) 40%, var(--border))" },
                             children: "+ agent"
@@ -1040,7 +1081,7 @@ function Ee({ candidates: s, existingRepos: f, defaults: v, knownAgents: x, crew
                         /* @__PURE__ */ e(
                           "button",
                           {
-                            onClick: () => te("gate"),
+                            onClick: () => ce("gate"),
                             className: "text-[10px] px-1.5 py-0.5 rounded font-semibold",
                             style: { color: "var(--warn)", border: "1px solid color-mix(in srgb, var(--warn) 40%, var(--border))" },
                             children: "+ gate"
@@ -1048,8 +1089,8 @@ function Ee({ candidates: s, existingRepos: f, defaults: v, knownAgents: x, crew
                         )
                       ] })
                     ] }),
-                    /* @__PURE__ */ e("div", { className: "flex flex-col gap-1.5", children: b.map((a, i) => {
-                      var O, z;
+                    /* @__PURE__ */ e("div", { className: "flex flex-col gap-1.5", children: I.map((a, d) => {
+                      var z, X;
                       return /* @__PURE__ */ o(
                         "div",
                         {
@@ -1058,14 +1099,14 @@ function Ee({ candidates: s, existingRepos: f, defaults: v, knownAgents: x, crew
                           children: [
                             /* @__PURE__ */ o("div", { className: "flex items-center gap-1.5", children: [
                               /* @__PURE__ */ o("div", { className: "flex flex-col", children: [
-                                /* @__PURE__ */ e("button", { onClick: () => ee(i, -1), disabled: i === 0, className: "text-[8px] leading-none disabled:opacity-30", style: { color: "var(--muted)" }, children: "▲" }),
-                                /* @__PURE__ */ e("button", { onClick: () => ee(i, 1), disabled: i === b.length - 1, className: "text-[8px] leading-none disabled:opacity-30", style: { color: "var(--muted)" }, children: "▼" })
+                                /* @__PURE__ */ e("button", { onClick: () => ee(d, -1), disabled: d === 0, className: "text-[8px] leading-none disabled:opacity-30", style: { color: "var(--muted)" }, children: "▲" }),
+                                /* @__PURE__ */ e("button", { onClick: () => ee(d, 1), disabled: d === I.length - 1, className: "text-[8px] leading-none disabled:opacity-30", style: { color: "var(--muted)" }, children: "▼" })
                               ] }),
                               /* @__PURE__ */ e(
                                 "input",
                                 {
                                   value: a.name,
-                                  onChange: (D) => C(i, { name: D.target.value, id: g(D.target.value) }),
+                                  onChange: (D) => re(d, { name: D.target.value, id: ne(D.target.value) }),
                                   className: "flex-1 min-w-0 px-2 py-1 rounded text-[12px] outline-none",
                                   style: { background: "var(--card)", border: "1px solid var(--border)", color: "var(--text)" }
                                 }
@@ -1078,18 +1119,18 @@ function Ee({ candidates: s, existingRepos: f, defaults: v, knownAgents: x, crew
                                   children: a.type
                                 }
                               ),
-                              /* @__PURE__ */ e("button", { onClick: () => ge(i), className: "text-[13px] leading-none px-1", style: { color: "var(--muted)" }, children: "×" })
+                              /* @__PURE__ */ e("button", { onClick: () => xe(d), className: "text-[13px] leading-none px-1", style: { color: "var(--muted)" }, children: "×" })
                             ] }),
                             a.type === "agent" && /* @__PURE__ */ o("div", { className: "mt-1.5 pl-5 flex items-center gap-2 flex-wrap", children: [
                               /* @__PURE__ */ o(
                                 "button",
                                 {
-                                  onClick: () => V(i),
+                                  onClick: () => i(d),
                                   className: "text-[11px] px-2 py-1 rounded-md font-medium flex items-center gap-1.5",
                                   style: { background: "var(--bg-hover, var(--border))", color: "var(--accent)" },
                                   children: [
                                     "⚙ ",
-                                    (O = a.agent) != null && O.name ? `Agent: ${a.agent.name}` : "Configure agent"
+                                    (z = a.agent) != null && z.name ? `Agent: ${a.agent.name}` : "Configure agent"
                                   ]
                                 }
                               ),
@@ -1098,7 +1139,7 @@ function Ee({ candidates: s, existingRepos: f, defaults: v, knownAgents: x, crew
                                 "select",
                                 {
                                   value: a.trigger || "ask",
-                                  onChange: (D) => C(i, { trigger: D.target.value === "ask" ? void 0 : D.target.value }),
+                                  onChange: (D) => re(d, { trigger: D.target.value === "ask" ? void 0 : D.target.value }),
                                   title: "Which engine runs this phase (ask = prompt at runtime)",
                                   className: "text-[10px] px-1 py-0.5 rounded outline-none",
                                   style: { background: "var(--card)", border: "1px solid var(--border)", color: "var(--text)" },
@@ -1118,7 +1159,7 @@ function Ee({ candidates: s, existingRepos: f, defaults: v, knownAgents: x, crew
                                 " addendum",
                                 a.addenda.length === 1 ? "" : "s"
                               ] }),
-                              ((z = a.agent) == null ? void 0 : z.role) && /* @__PURE__ */ e("span", { className: "text-[10px] truncate", style: { color: "var(--muted)" }, children: a.agent.role })
+                              ((X = a.agent) == null ? void 0 : X.role) && /* @__PURE__ */ e("span", { className: "text-[10px] truncate", style: { color: "var(--muted)" }, children: a.agent.role })
                             ] }),
                             a.type === "gate" && /* @__PURE__ */ o("div", { className: "mt-1.5 pl-5 flex items-center gap-1", children: [
                               /* @__PURE__ */ e("span", { className: "text-[9px] uppercase", style: { color: "var(--muted)" }, children: "trust" }),
@@ -1126,12 +1167,12 @@ function Ee({ candidates: s, existingRepos: f, defaults: v, knownAgents: x, crew
                                 "select",
                                 {
                                   value: a.trust || "",
-                                  onChange: (D) => C(i, { trust: D.target.value || void 0 }),
+                                  onChange: (D) => re(d, { trust: D.target.value || void 0 }),
                                   className: "text-[10px] px-1 py-0.5 rounded outline-none",
                                   style: { background: "var(--card)", border: "1px solid var(--border)", color: "var(--text)" },
                                   children: [
                                     /* @__PURE__ */ e("option", { value: "", children: "inherit" }),
-                                    me.map((D) => /* @__PURE__ */ e("option", { value: D, children: D }, D))
+                                    ve.map((D) => /* @__PURE__ */ e("option", { value: D, children: D }, D))
                                   ]
                                 }
                               )
@@ -1145,8 +1186,8 @@ function Ee({ candidates: s, existingRepos: f, defaults: v, knownAgents: x, crew
                 ]
               }
             ),
-            N && l === "danger" && u && (() => {
-              const a = m.includes("/") ? m.split("/")[1] : m, i = Y.trim() === a;
+            k && le === "danger" && m && (() => {
+              const a = g.includes("/") ? g.split("/")[1] : g, d = u.trim() === a;
               return /* @__PURE__ */ e("div", { className: "px-5 pb-4 pt-4", children: y ? /* @__PURE__ */ o(
                 "div",
                 {
@@ -1166,7 +1207,7 @@ function Ee({ candidates: s, existingRepos: f, defaults: v, knownAgents: x, crew
                       "button",
                       {
                         onClick: () => {
-                          u(m), A();
+                          m(g), A();
                         },
                         className: "w-full px-3 py-2 rounded-md text-[13px] font-semibold transition-all",
                         style: { background: "var(--accent)", color: "var(--bg)" },
@@ -1199,8 +1240,8 @@ function Ee({ candidates: s, existingRepos: f, defaults: v, knownAgents: x, crew
                     /* @__PURE__ */ e(
                       "input",
                       {
-                        value: Y,
-                        onChange: (O) => ae(O.target.value),
+                        value: u,
+                        onChange: (z) => C(z.target.value),
                         placeholder: a,
                         className: "w-full px-3 py-2 rounded-md text-[13px] outline-none",
                         style: { background: "var(--bg-elevated, var(--bg))", border: "1px solid var(--border-strong, var(--border))", color: "var(--text-strong, var(--text))" }
@@ -1209,15 +1250,15 @@ function Ee({ candidates: s, existingRepos: f, defaults: v, knownAgents: x, crew
                     /* @__PURE__ */ e(
                       "button",
                       {
-                        disabled: !i,
+                        disabled: !d,
                         onClick: () => {
-                          u(m), A();
+                          m(g), A();
                         },
                         className: "w-full px-3 py-2 rounded-md text-[13px] font-semibold transition-all",
                         style: {
-                          background: i ? "var(--danger, #ef4444)" : "color-mix(in srgb, var(--danger, #ef4444) 20%, transparent)",
-                          color: i ? "#fff" : "var(--muted)",
-                          cursor: i ? "pointer" : "not-allowed"
+                          background: d ? "var(--danger, #ef4444)" : "color-mix(in srgb, var(--danger, #ef4444) 20%, transparent)",
+                          color: d ? "#fff" : "var(--muted)",
+                          cursor: d ? "pointer" : "not-allowed"
                         },
                         children: "Delete pipeline"
                       }
@@ -1228,22 +1269,24 @@ function Ee({ candidates: s, existingRepos: f, defaults: v, knownAgents: x, crew
             })(),
             /* @__PURE__ */ o("div", { className: "px-5 py-3 flex justify-end gap-2", style: { borderTop: "1px solid var(--border)", background: "var(--bg-elevated, var(--card))" }, children: [
               /* @__PURE__ */ e("button", { onClick: A, className: "text-xs px-3 py-1.5 rounded-md font-medium", style: { color: "var(--muted)" }, children: "Cancel" }),
-              !(N && l === "danger") && /* @__PURE__ */ e(
+              !(k && le === "danger") && /* @__PURE__ */ e(
                 "button",
                 {
-                  disabled: !pe || !N && se,
-                  onClick: () => I({
-                    repo: re(m),
-                    source: j,
-                    trust: F,
-                    depth: S,
-                    backlog_intake: h,
-                    results_in_repo: U,
-                    steps: b.map((a) => ({ ...a, label: `dlc:${a.id}` }))
+                  disabled: !E || !k && J,
+                  onClick: () => M({
+                    repo: T(g),
+                    source: O,
+                    trust: B,
+                    depth: N,
+                    backlog_intake: v,
+                    results_in_repo: W,
+                    self_enabling: $,
+                    approach: q,
+                    steps: I.map((a) => ({ ...a, label: `dlc:${a.id}` }))
                   }),
                   className: "text-xs px-3 py-1.5 rounded-md font-semibold transition-opacity disabled:opacity-40",
                   style: { background: "var(--accent)", color: "var(--bg)" },
-                  children: N ? "Save Pipeline" : "Create Pipeline"
+                  children: k ? "Save Pipeline" : "Create Pipeline"
                 }
               )
             ] })
@@ -1253,137 +1296,137 @@ function Ee({ candidates: s, existingRepos: f, defaults: v, knownAgents: x, crew
     }
   );
 }
-function Je() {
-  const s = De(), [f, v] = $([]), [x, L] = $([]), [I, A] = $(be), [w, R] = $(!0), [y, u] = $("pipeline"), [N, m] = $(/* @__PURE__ */ new Set()), [q, j] = $(!1), [H, F] = $(null), [P, S] = $([]), [E, h] = $([]), k = de(null), U = K(async () => {
+function et() {
+  const s = Be(), [f, x] = _([]), [b, L] = _([]), [M, A] = _(ke), [h, R] = _(!0), [y, m] = _("pipeline"), [k, g] = _(/* @__PURE__ */ new Set()), [U, O] = _(!1), [F, B] = _(null), [V, N] = _([]), [j, v] = _([]), w = ue(null), W = Y(async () => {
     try {
       let t;
       try {
-        t = await s.get("/api/file-read?path=" + encodeURIComponent(oe));
+        t = await s.get("/api/file-read?path=" + encodeURIComponent(se));
       } catch (r) {
-        if (oe !== Ae)
-          oe = Ae, t = await s.get("/api/file-read?path=" + encodeURIComponent(oe));
+        if (se !== De)
+          se = De, t = await s.get("/api/file-read?path=" + encodeURIComponent(se));
         else
           throw r;
       }
-      v(t.cards || []), L(t.pipelines || []), A({ ...be, ...t.config || {} });
+      x(t.cards || []), L(t.pipelines || []), A({ ...ke, ...t.config || {} });
     } catch (t) {
       console.error("Failed to fetch cards:", t);
     } finally {
       R(!1);
     }
-  }, [s]), X = ie(() => {
+  }, [s]), P = pe(() => {
     const t = /* @__PURE__ */ new Map();
-    return x.forEach((r) => {
+    return b.forEach((r) => {
       t.has(r.repo) || t.set(r.repo, 0);
     }), f.forEach((r) => {
       var c;
       const n = ((c = r.source) == null ? void 0 : c.repo) || "unlinked";
       t.set(n, (t.get(n) || 0) + 1);
     }), [...t.entries()].map(([r, n]) => ({ name: r, count: n })).sort((r, n) => n.count - r.count);
-  }, [f, x]), b = ie(
-    () => N.size === 0 ? f : f.filter((t) => {
+  }, [f, b]), $ = pe(
+    () => k.size === 0 ? f : f.filter((t) => {
       var r;
-      return N.has(((r = t.source) == null ? void 0 : r.repo) || "unlinked");
+      return k.has(((r = t.source) == null ? void 0 : r.repo) || "unlinked");
     }),
-    [f, N]
-  ), B = ie(() => {
+    [f, k]
+  ), G = pe(() => {
     var p;
     let t;
-    if (N.size === 1) {
-      const _ = [...N][0];
-      t = (p = x.find((Q) => Q.repo === _)) == null ? void 0 : p.steps;
-    } else x.length === 1 && (t = x[0].steps);
-    const r = (t && t.length ? t : fe).map((_) => ({ ..._ })), n = new Set(r.map((_) => _.id)), c = [];
+    if (k.size === 1) {
+      const S = [...k][0];
+      t = (p = b.find((te) => te.repo === S)) == null ? void 0 : p.steps;
+    } else b.length === 1 && (t = b[0].steps);
+    const r = (t && t.length ? t : Ne).map((S) => ({ ...S })), n = new Set(r.map((S) => S.id)), c = [];
     return n.has("intake") || c.push({ id: "intake", name: "Intake", type: "agent", agent: { name: "orchestrator" } }), c.push(...r), n.has("done") || c.push({ id: "done", name: "Done", type: "agent" }), c;
-  }, [N, x]), W = ie(() => B.map((t) => t.id), [B]), V = K((t) => {
+  }, [k, b]), q = pe(() => G.map((t) => t.id), [G]), K = Y((t) => {
     var r;
-    return ((r = B.find((n) => n.id === t)) == null ? void 0 : r.type) === "gate" || t.startsWith("gate-");
-  }, [B]), Y = K((t) => {
+    return ((r = G.find((n) => n.id === t)) == null ? void 0 : r.type) === "gate" || t.startsWith("gate-");
+  }, [G]), I = Y((t) => {
     var r, n;
-    return ((n = (r = B.find((c) => c.id === t)) == null ? void 0 : r.agent) == null ? void 0 : n.name) || Be[t] || "unknown";
-  }, [B]);
-  _e(() => {
-    U();
-    const t = setInterval(U, 1e4);
+    return ((n = (r = G.find((c) => c.id === t)) == null ? void 0 : r.agent) == null ? void 0 : n.name) || Fe[t] || "unknown";
+  }, [G]);
+  Te(() => {
+    W();
+    const t = setInterval(W, 1e4);
     return () => clearInterval(t);
-  }, [U]), _e(() => {
+  }, [W]), Te(() => {
     (async () => {
       try {
         const t = await s.get("/api/file-read?path=~/.kiro/crew/config.json"), r = (t == null ? void 0 : t.agents) || {}, n = Object.entries(r).map(([c, p]) => ({
           name: c,
           description: (p == null ? void 0 : p.description) || void 0
         }));
-        h(n);
+        v(n);
       } catch (t) {
         console.warn("crew roster (config.json) unreadable:", t);
       }
     })();
   }, [s]);
-  const ae = (t, r) => {
-    const n = (t.pipelines || []).find((_) => _.id === r.pipeline_id) || (t.pipelines || []).find((_) => {
-      var Q;
-      return _.repo === ((Q = r.source) == null ? void 0 : Q.repo);
-    }), p = ["intake", ...(n != null && n.steps && n.steps.length ? n.steps : fe).map((_) => _.id).filter((_) => _ !== "intake" && _ !== "done"), "done"];
+  const Z = (t, r) => {
+    const n = (t.pipelines || []).find((S) => S.id === r.pipeline_id) || (t.pipelines || []).find((S) => {
+      var te;
+      return S.repo === ((te = r.source) == null ? void 0 : te.repo);
+    }), p = ["intake", ...(n != null && n.steps && n.steps.length ? n.steps : Ne).map((S) => S.id).filter((S) => S !== "intake" && S !== "done"), "done"];
     return [...new Set(p)];
-  }, l = K(async (t) => {
+  }, l = Y(async (t) => {
     var r;
     try {
-      const n = await s.get("/api/file-read?path=" + encodeURIComponent(oe)), c = (r = n.cards) == null ? void 0 : r.find((a) => a.id === t);
+      const n = await s.get("/api/file-read?path=" + encodeURIComponent(se)), c = (r = n.cards) == null ? void 0 : r.find((he) => he.id === t);
       if (!c) return;
-      const p = ae(n, c), _ = p.indexOf(c.stage);
-      if (_ < 0 || _ >= p.length - 1) return;
-      const Q = c.stage;
-      c.stage = p[_ + 1], c.updated_at = (/* @__PURE__ */ new Date()).toISOString(), c.gate_history = c.gate_history || [], c.gate_history.push({ gate: Q, decision: "approved", at: c.updated_at, notes: "" }), c.history = c.history || [], c.history.push({ from: Q, to: c.stage, at: c.updated_at, agent: "human" }), await s.post("/api/file-write", { path: oe, content: JSON.stringify(n, null, 2) }), U();
+      const p = Z(n, c), S = p.indexOf(c.stage);
+      if (S < 0 || S >= p.length - 1) return;
+      const te = c.stage;
+      c.stage = p[S + 1], c.updated_at = (/* @__PURE__ */ new Date()).toISOString(), c.gate_history = c.gate_history || [], c.gate_history.push({ gate: te, decision: "approved", at: c.updated_at, notes: "" }), c.history = c.history || [], c.history.push({ from: te, to: c.stage, at: c.updated_at, agent: "human" }), await s.post("/api/file-write", { path: se, content: JSON.stringify(n, null, 2) }), W();
     } catch (n) {
       console.error("Failed to advance card:", n);
     }
-  }, [s, U]), d = K(async (t) => {
+  }, [s, W]), i = Y(async (t) => {
     var r, n;
     try {
-      const c = await s.get("/api/file-read?path=" + encodeURIComponent(oe)), p = (r = c.cards) == null ? void 0 : r.find((z) => z.id === t);
+      const c = await s.get("/api/file-read?path=" + encodeURIComponent(se)), p = (r = c.cards) == null ? void 0 : r.find((oe) => oe.id === t);
       if (!p) return;
-      const _ = ae(c, p), Q = new Set((((n = (c.pipelines || []).find((z) => z.id === p.pipeline_id)) == null ? void 0 : n.steps) || fe).filter((z) => z.type === "gate").map((z) => z.id)), a = _.indexOf(p.stage);
-      if (a <= 0) return;
-      const i = p.stage;
-      let O = a - 1;
-      for (; O > 0 && (Q.has(_[O]) || _[O].startsWith("gate-")); ) O--;
-      p.stage = _[O], p.updated_at = (/* @__PURE__ */ new Date()).toISOString(), p.gate_history = p.gate_history || [], p.gate_history.push({ gate: i, decision: "rejected", at: p.updated_at, notes: "" }), p.history = p.history || [], p.history.push({ from: i, to: p.stage, at: p.updated_at, agent: "human" }), await s.post("/api/file-write", { path: oe, content: JSON.stringify(c, null, 2) }), U();
+      const S = Z(c, p), te = new Set((((n = (c.pipelines || []).find((oe) => oe.id === p.pipeline_id)) == null ? void 0 : n.steps) || Ne).filter((oe) => oe.type === "gate").map((oe) => oe.id)), he = S.indexOf(p.stage);
+      if (he <= 0) return;
+      const we = p.stage;
+      let de = he - 1;
+      for (; de > 0 && (te.has(S[de]) || S[de].startsWith("gate-")); ) de--;
+      p.stage = S[de], p.updated_at = (/* @__PURE__ */ new Date()).toISOString(), p.gate_history = p.gate_history || [], p.gate_history.push({ gate: we, decision: "rejected", at: p.updated_at, notes: "" }), p.history = p.history || [], p.history.push({ from: we, to: p.stage, at: p.updated_at, agent: "human" }), await s.post("/api/file-write", { path: se, content: JSON.stringify(c, null, 2) }), W();
     } catch (c) {
       console.error("Failed to reject card:", c);
     }
-  }, [s, U]), g = K(async (t) => {
+  }, [s, W]), u = Y(async (t) => {
     try {
-      const r = await s.get("/api/file-read?path=" + encodeURIComponent(oe));
-      r.cards = r.cards || [], t(r), await s.post("/api/file-write", { path: oe, content: JSON.stringify(r, null, 2) }), U();
+      const r = await s.get("/api/file-read?path=" + encodeURIComponent(se));
+      r.cards = r.cards || [], t(r), await s.post("/api/file-write", { path: se, content: JSON.stringify(r, null, 2) }), W();
     } catch (r) {
       console.error("Failed to mutate state:", r);
     }
-  }, [s, U]), C = K((t) => {
-    A((r) => ({ ...r, ...t })), g((r) => {
-      r.config = { ...be, ...r.config || {}, ...t };
+  }, [s, W]), C = Y((t) => {
+    A((r) => ({ ...r, ...t })), u((r) => {
+      r.config = { ...ke, ...r.config || {}, ...t };
     });
-  }, [g]), ge = K((t) => {
-    g((r) => {
+  }, [u]), le = Y((t) => {
+    u((r) => {
       var p;
-      const n = r.cards.find((_) => _.id === t);
+      const n = r.cards.find((S) => S.id === t);
       if (!n) return;
-      const c = n.trust || ((p = r.config) == null ? void 0 : p.trust) || be.trust;
-      n.trust = me[(me.indexOf(c) + 1) % me.length], n.updated_at = (/* @__PURE__ */ new Date()).toISOString();
+      const c = n.trust || ((p = r.config) == null ? void 0 : p.trust) || ke.trust;
+      n.trust = ve[(ve.indexOf(c) + 1) % ve.length], n.updated_at = (/* @__PURE__ */ new Date()).toISOString();
     });
-  }, [g]), ee = K((t) => {
-    g((r) => {
+  }, [u]), ae = Y((t) => {
+    u((r) => {
       var p;
-      const n = r.cards.find((_) => _.id === t);
+      const n = r.cards.find((S) => S.id === t);
       if (!n) return;
-      const c = n.depth || ((p = r.config) == null ? void 0 : p.depth) || be.depth;
-      n.depth = ve[(ve.indexOf(c) + 1) % ve.length], n.updated_at = (/* @__PURE__ */ new Date()).toISOString();
+      const c = n.depth || ((p = r.config) == null ? void 0 : p.depth) || ke.depth;
+      n.depth = fe[(fe.indexOf(c) + 1) % fe.length], n.updated_at = (/* @__PURE__ */ new Date()).toISOString();
     });
-  }, [g]), te = K((t) => {
-    m((r) => {
+  }, [u]), ne = Y((t) => {
+    g((r) => {
       const n = new Set(r);
       return n.has(t) ? n.delete(t) : n.add(t), n;
     });
-  }, []), le = K(() => m(/* @__PURE__ */ new Set()), []), re = K(async () => {
+  }, []), re = Y(() => g(/* @__PURE__ */ new Set()), []), xe = Y(async () => {
     const t = [];
     try {
       const r = await s.get("/api/file-read?path=~/.kiro/crew/config.json"), n = (r == null ? void 0 : r.workspaces) || {};
@@ -1399,13 +1442,13 @@ function Je() {
     } catch (r) {
       console.warn("issue-radar config unreadable (app may not be installed):", r);
     }
-    S(t), j(!0);
-  }, [s]), Z = K(async (t) => {
+    N(t), O(!0);
+  }, [s]), ee = Y(async (t) => {
     const r = (/* @__PURE__ */ new Date()).toISOString(), n = "pl-" + Math.random().toString(36).slice(2, 10);
-    await g((c) => {
+    await u((c) => {
       c.pipelines = c.pipelines || [];
-      const p = c.pipelines.find((_) => _.repo === t.repo);
-      p ? (p.source = t.source, p.trust = t.trust, p.depth = t.depth, p.backlog_intake = t.backlog_intake, p.results_in_repo = t.results_in_repo, p.steps = t.steps) : c.pipelines.push({
+      const p = c.pipelines.find((S) => S.repo === t.repo);
+      p ? (p.source = t.source, p.trust = t.trust, p.depth = t.depth, p.backlog_intake = t.backlog_intake, p.results_in_repo = t.results_in_repo, p.self_enabling = t.self_enabling, p.approach = t.approach, p.steps = t.steps) : c.pipelines.push({
         id: n,
         repo: t.repo,
         source: t.source,
@@ -1413,135 +1456,137 @@ function Je() {
         depth: t.depth,
         backlog_intake: t.backlog_intake,
         results_in_repo: t.results_in_repo,
+        self_enabling: t.self_enabling,
+        approach: t.approach,
         sot: "github",
         steps: t.steps,
         created_at: r
       });
-    }), j(!1), F(null), m(/* @__PURE__ */ new Set([t.repo]));
-  }, [g]), pe = K(async (t) => {
-    await g((r) => {
+    }), O(!1), B(null), g(/* @__PURE__ */ new Set([t.repo]));
+  }, [u]), ce = Y(async (t) => {
+    await u((r) => {
       r.pipelines = (r.pipelines || []).filter((n) => n.repo !== t), r.cards = (r.cards || []).filter((n) => {
         var c;
         return (((c = n.source) == null ? void 0 : c.repo) || "unlinked") !== t;
       });
-    }), m((r) => {
+    }), g((r) => {
       const n = new Set(r);
       return n.delete(t), n;
     });
-  }, [g]), se = ie(() => W.reduce((t, r) => (t[r] = b.filter((n) => n.stage === r), t), {}), [b, W]), M = K((t) => {
+  }, [u]), me = pe(() => q.reduce((t, r) => (t[r] = $.filter((n) => n.stage === r), t), {}), [$, q]), T = Y((t) => {
     var r;
     (r = document.getElementById(`stage-col-${t}`)) == null || r.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
-  }, []), G = ie(() => {
+  }, []), H = pe(() => {
     const t = {};
-    return b.forEach((r) => {
+    return $.forEach((r) => {
       var c;
       const n = ((c = r.source) == null ? void 0 : c.repo) || "unlinked";
       (t[n] || (t[n] = [])).push(r);
     }), t;
-  }, [b]), T = ie(() => {
+  }, [$]), E = pe(() => {
     const t = {};
-    return b.forEach((r) => {
-      const n = Y(r.stage);
+    return $.forEach((r) => {
+      const n = I(r.stage);
       (t[n] || (t[n] = [])).push(r);
     }), t;
-  }, [b, Y]), J = ie(() => {
+  }, [$, I]), J = pe(() => {
     const t = [], r = [], n = [];
-    return b.forEach((c) => {
-      c.stage === "done" ? n.push(c) : V(c.stage) ? t.push(c) : r.push(c);
+    return $.forEach((c) => {
+      c.stage === "done" ? n.push(c) : K(c.stage) ? t.push(c) : r.push(c);
     }), { "Blocked at Gate": t, "In-Flight (Auto)": r, Done: n };
-  }, [b, V]), ce = b.filter((t) => t.stage !== "done").length, ne = b.filter((t) => V(t.stage)).length, ye = b.filter((t) => t.stage === "done").length, xe = b.reduce((t, r) => {
+  }, [$, K]), ie = $.filter((t) => t.stage !== "done").length, Q = $.filter((t) => K(t.stage)).length, je = $.filter((t) => t.stage === "done").length, ye = $.reduce((t, r) => {
     var n;
     return t + (((n = r.parked) == null ? void 0 : n.length) || 0);
-  }, 0), we = {
-    pipeline: b.length,
-    workspace: Object.keys(G).length,
-    crew: Object.keys(T).length,
-    status: b.length,
-    backlog: xe
-  }, ue = (t) => ({
+  }, 0), Ce = {
+    pipeline: $.length,
+    workspace: Object.keys(H).length,
+    crew: Object.keys(E).length,
+    status: $.length,
+    backlog: ye
+  }, ge = (t) => ({
     card: t,
-    config: I,
-    onApprove: V(t.stage) ? () => l(t.id) : void 0,
-    onReject: V(t.stage) ? () => d(t.id) : void 0,
-    onCycleTrust: () => ge(t.id),
-    onCycleDepth: () => ee(t.id)
+    config: M,
+    onApprove: K(t.stage) ? () => l(t.id) : void 0,
+    onReject: K(t.stage) ? () => i(t.id) : void 0,
+    onCycleTrust: () => le(t.id),
+    onCycleDepth: () => ae(t.id)
   });
-  return /* @__PURE__ */ o(je, { children: [
-    /* @__PURE__ */ e(Me, { title: "DLC-YOLO", subtitle: "Autonomous SDLC pipeline with human gates" }),
-    q && /* @__PURE__ */ e(
-      Ee,
+  return /* @__PURE__ */ o(Me, { children: [
+    /* @__PURE__ */ e(Ge, { title: "DLC-YOLO", subtitle: "Autonomous SDLC pipeline with human gates" }),
+    U && /* @__PURE__ */ e(
+      Le,
       {
-        candidates: P,
-        existingRepos: new Set(x.map((t) => t.repo)),
-        defaults: I,
+        candidates: V,
+        existingRepos: new Set(b.map((t) => t.repo)),
+        defaults: M,
         knownAgents: ["spec-agent", "design-agent", "impl-agent", "review-agent", "orchestrator"],
-        crews: E,
-        onCreate: Z,
-        onClose: () => j(!1)
+        crews: j,
+        onCreate: ee,
+        onClose: () => O(!1)
       }
     ),
-    H && /* @__PURE__ */ e(
-      Ee,
+    F && /* @__PURE__ */ e(
+      Le,
       {
-        candidates: P,
-        existingRepos: new Set(x.map((t) => t.repo)),
-        defaults: I,
+        candidates: V,
+        existingRepos: new Set(b.map((t) => t.repo)),
+        defaults: M,
         knownAgents: ["spec-agent", "design-agent", "impl-agent", "review-agent", "orchestrator"],
-        crews: E,
-        editPipeline: x.find((t) => t.repo === H) || // demo repos have cards but no pipelines[] entry — synthesize a default to edit
-        { id: "pl-" + H, repo: H, source: "manual", trust: I.trust, depth: I.depth, backlog_intake: !0, sot: "github", steps: fe.map((t) => ({ ...t })), created_at: (/* @__PURE__ */ new Date()).toISOString() },
+        crews: j,
+        editPipeline: b.find((t) => t.repo === F) || // demo repos have cards but no pipelines[] entry — synthesize a default to edit
+        { id: "pl-" + F, repo: F, source: "manual", trust: M.trust, depth: M.depth, backlog_intake: !0, sot: "github", steps: Ne.map((t) => ({ ...t })), created_at: (/* @__PURE__ */ new Date()).toISOString() },
         cardCount: f.filter((t) => {
           var r;
-          return (((r = t.source) == null ? void 0 : r.repo) || "unlinked") === H;
+          return (((r = t.source) == null ? void 0 : r.repo) || "unlinked") === F;
         }).length,
-        isExample: Oe.has(H),
-        onCreate: Z,
-        onDelete: pe,
-        onClose: () => F(null)
+        isExample: Ie.has(F),
+        onCreate: ee,
+        onDelete: ce,
+        onClose: () => B(null)
       }
     ),
     /* @__PURE__ */ o("div", { className: "px-6 pb-8 overflow-y-auto flex-1 min-h-0", children: [
-      /* @__PURE__ */ e(We, { steps: B, cardsByStage: se, onNodeClick: M }),
+      /* @__PURE__ */ e(Ue, { steps: G, cardsByStage: me, onNodeClick: T }),
       /* @__PURE__ */ o("div", { className: "grid gap-3 grid-cols-[repeat(auto-fit,minmax(120px,1fr))] mb-5", children: [
-        /* @__PURE__ */ e(ke, { label: "Active", value: String(ce), accent: !0 }),
-        /* @__PURE__ */ e(ke, { label: "Gated", value: String(ne) }),
-        /* @__PURE__ */ e(ke, { label: "Done", value: String(ye) }),
-        /* @__PURE__ */ e(ke, { label: "Parked", value: String(xe) })
+        /* @__PURE__ */ e(Se, { label: "Active", value: String(ie), accent: !0 }),
+        /* @__PURE__ */ e(Se, { label: "Gated", value: String(Q) }),
+        /* @__PURE__ */ e(Se, { label: "Done", value: String(je) }),
+        /* @__PURE__ */ e(Se, { label: "Parked", value: String(ye) })
       ] }),
       /* @__PURE__ */ o("div", { className: "flex gap-4 items-start", children: [
         /* @__PURE__ */ e(
-          Ue,
+          Ke,
           {
-            repos: X,
-            selected: N,
-            onToggle: te,
-            onClear: le,
-            onAddWorkspace: re,
-            onEdit: F
+            repos: P,
+            selected: k,
+            onToggle: ne,
+            onClear: re,
+            onAddWorkspace: xe,
+            onEdit: B
           }
         ),
         /* @__PURE__ */ o("div", { className: "flex-1 min-w-0", children: [
           /* @__PURE__ */ o("div", { className: "flex items-center gap-3 mb-4 flex-wrap", children: [
-            /* @__PURE__ */ e(Ge, { active: y, onChange: u, counts: we }),
-            N.size > 0 && /* @__PURE__ */ o(
+            /* @__PURE__ */ e(He, { active: y, onChange: m, counts: Ce }),
+            k.size > 0 && /* @__PURE__ */ o(
               "span",
               {
                 className: "text-[11px] px-2 py-1 rounded-md font-medium",
                 style: { background: "color-mix(in srgb, var(--accent) 14%, transparent)", color: "var(--accent)" },
                 children: [
-                  N.size === 1 ? [...N][0] : `${N.size} workspaces`,
+                  k.size === 1 ? [...k][0] : `${k.size} workspaces`,
                   " · ",
-                  /* @__PURE__ */ e("button", { onClick: le, className: "underline hover:opacity-80", children: "clear" })
+                  /* @__PURE__ */ e("button", { onClick: re, className: "underline hover:opacity-80", children: "clear" })
                 ]
               }
             )
           ] }),
-          /* @__PURE__ */ e(ze, { config: I, onSet: C }),
-          w ? /* @__PURE__ */ e("div", { className: "text-sm p-3", style: { color: "var(--muted)" }, children: "Loading pipeline…" }) : y === "backlog" ? /* @__PURE__ */ e(Fe, { cards: b }) : /* @__PURE__ */ o("div", { ref: k, className: "flex gap-3 overflow-x-auto pb-4", children: [
-            y === "pipeline" && B.map((t) => /* @__PURE__ */ e(Se, { id: `stage-col-${t.id}`, title: t.name, count: (se[t.id] || []).length, children: (se[t.id] || []).map((r) => /* @__PURE__ */ e(Ce, { ...ue(r) }, r.id)) }, t.id)),
-            y === "workspace" && Object.entries(G).map(([t, r]) => /* @__PURE__ */ e(Se, { title: t, count: r.length, children: r.map((n) => /* @__PURE__ */ e(Ce, { ...ue(n) }, n.id)) }, t)),
-            y === "crew" && Object.entries(T).map(([t, r]) => /* @__PURE__ */ e(Se, { title: t, count: r.length, children: r.map((n) => /* @__PURE__ */ e(Ce, { ...ue(n) }, n.id)) }, t)),
-            y === "status" && Object.entries(J).map(([t, r]) => /* @__PURE__ */ e(Se, { title: t, count: r.length, children: r.map((n) => /* @__PURE__ */ e(Ce, { ...ue(n) }, n.id)) }, t))
+          /* @__PURE__ */ e(qe, { config: M, onSet: C }),
+          h ? /* @__PURE__ */ e("div", { className: "text-sm p-3", style: { color: "var(--muted)" }, children: "Loading pipeline…" }) : y === "backlog" ? /* @__PURE__ */ e(Ve, { cards: $ }) : /* @__PURE__ */ o("div", { ref: w, className: "flex gap-3 overflow-x-auto pb-4", children: [
+            y === "pipeline" && G.map((t) => /* @__PURE__ */ e($e, { id: `stage-col-${t.id}`, title: t.name, count: (me[t.id] || []).length, children: (me[t.id] || []).map((r) => /* @__PURE__ */ e(Re, { ...ge(r) }, r.id)) }, t.id)),
+            y === "workspace" && Object.entries(H).map(([t, r]) => /* @__PURE__ */ e($e, { title: t, count: r.length, children: r.map((n) => /* @__PURE__ */ e(Re, { ...ge(n) }, n.id)) }, t)),
+            y === "crew" && Object.entries(E).map(([t, r]) => /* @__PURE__ */ e($e, { title: t, count: r.length, children: r.map((n) => /* @__PURE__ */ e(Re, { ...ge(n) }, n.id)) }, t)),
+            y === "status" && Object.entries(J).map(([t, r]) => /* @__PURE__ */ e($e, { title: t, count: r.length, children: r.map((n) => /* @__PURE__ */ e(Re, { ...ge(n) }, n.id)) }, t))
           ] })
         ] })
       ] })
@@ -1549,5 +1594,5 @@ function Je() {
   ] });
 }
 export {
-  Je as default
+  et as default
 };

@@ -12,6 +12,33 @@ read via `/api/file-read`, write via `/api/file-write` (the cron bootstraps the 
 **GitHub is the source of truth for a card's stage**, expressed as a `dlc:<step-id>` label
 on the card's issue; `state.json` holds the rich data.
 
+## Conversation log (this command only — presentation feature)
+
+While you drive the pipeline in this session, keep a running transcript of the exchange so
+the run is reviewable after the fact. This is scoped to the `/dlc-yolo` command for the
+test — it is NOT the orchestrator/cron path.
+
+- **File:** `~/.dlc-yolo/workspaces/<workspace>/data/pipeline_conversation.md`, where
+  `<workspace>` is the current KiroCrew workspace name. Mirror the state resolver
+  durable-first: under `$DLC_YOLO_STATE`'s dir if set, else `~/.dlc-yolo/`, else
+  `/tmp/dlc-yolo/` as the last-resort fallback — then `/workspaces/<ws>/data/` beneath it.
+- **Use your native `read` + `write` tools, NOT `/api/file-write`.** The file API cannot
+  append and 404s on a missing file; the `write` tool creates parent dirs + the file and
+  lets you do read-modify-write. So: `read` the current markdown (empty string if it does
+  not exist yet), append the new turn, `write` the whole file back.
+- **What to log, one section per turn** (append, never truncate):
+  ```
+  ## <ISO8601> — <actor: user | dlc-yolo>
+  <the user's message, OR a concise summary of your action:
+   decision raised, crew created, issue filed (#n + url), stage moved, gate answered>
+  ```
+- **When:** on invoke write a `# DLC-YOLO pipeline conversation — <repo>` header if the
+  file is new, then append the user's seed prompt; after each of your substantive actions
+  (a decision, a crew create, an issue file, a stage move) append a section. Keep entries
+  short — this is a presentation trail, not a full dump.
+- Single writer: only this command writes the log, so no lock is needed. Presentation-only;
+  no cross-workspace aggregation or future-proofing.
+
 ## On invoke
 
 Ask the user (via `ask_question`) which mode / topic:
@@ -64,7 +91,9 @@ agent-setup panel's handoff). Do this conversationally:
 2. Propose a complete agent config: `name`, `role`/prompt (concrete system prompt),
    `tools[]` (least-privilege — only what the step needs), optional `model`, and a
    suggested per-step `trust`/`depth`. Show it, let the user refine.
-3. On approval, WRITE it into the pipeline's step in `/tmp/dlc-yolo/state.json`: find the
+3. On approval, WRITE it into the pipeline's step in the DLC-YOLO state file (resolved
+   durable-first: `$DLC_YOLO_STATE`, else `~/.dlc-yolo/state.json`, else
+   `/tmp/dlc-yolo/state.json`): find the
    pipeline by repo, find the step by name/id, set `step.agent = { name, role, tools }`
    and `step.trust`/`step.depth` if chosen. Persist via file-write. Keep GitHub the source
    of truth for stage (this only edits the step's agent config, not a card's stage).

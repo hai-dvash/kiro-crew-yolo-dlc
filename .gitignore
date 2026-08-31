@@ -4,3 +4,10 @@ dist/
 __pycache__/
 *.pyc
 /data/
+
+# Ship the built UI bundle so `kirocrew app install` works turnkey (manifest ui.entry
+# = dist/index.mjs, resolved under ui/). The rest of dist/ stays ignored.
+!ui/dist/
+!ui/dist/index.mjs
+
+docs/

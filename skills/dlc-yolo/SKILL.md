@@ -6,20 +6,54 @@ description: Drive the DLC-YOLO pipeline from chat — start a new pipeline conv
 # /dlc-yolo — pipeline driver
 
 You turn this chat session into a driver for the DLC-YOLO pipeline. Pipeline state lives at
-`/tmp/dlc-yolo/state.json` (read via `/api/file-read`, write via `/api/file-write`).
+the DLC-YOLO state file — resolved durable-first: `$DLC_YOLO_STATE` if set, else
+`~/.dlc-yolo/state.json` (durable), else `/tmp/dlc-yolo/state.json` (ephemeral fallback);
+read via `/api/file-read`, write via `/api/file-write` (the cron bootstraps the file).
 **GitHub is the source of truth for a card's stage**, expressed as a `dlc:<step-id>` label
 on the card's issue; `state.json` holds the rich data.
 
 ## On invoke
 
-Ask the user (via `ask_question`) which mode:
+Ask the user (via `ask_question`) which mode / topic:
 
 1. **Start a new pipeline conversation**
 2. **Maintain an existing pipeline**
 3. **Author an agent for a custom step** — if the seed prompt mentions designing a NEW
    agent for a step (the UI's "✨ Draft with /dlc-yolo" hands off here), go straight to it.
+4. **Create / assign a crew** — author a NEW globally-reusable crew (canon or addendum) and
+   register it, or assign an existing crew to a step. See "Crew creation & assignment".
 
 `$ARGUMENTS` may already name a repo/idea — if so, skip straight to that.
+
+## Crew creation & assignment
+
+DLC-YOLO steps can route to a **crew** (a `config.json` agents entry that `select_crew`
+binds). Crews created here are **GLOBAL** — usable across ALL of KiroCrew (Spec Builder
+routing, other apps, plain chat), not siloed in this app. There is ONE registry and ONE
+creation mechanism; reuse it, never build a parallel store.
+
+**Create a crew (global):** design it conversationally — ask for its purpose (canon phase
+worker vs cross-cutting addendum like `research` / `secure-design`), then propose a name,
+role/prompt, model, target workspace, and memory store. On approval, register it GLOBALLY
+by running the existing CLI (the app UI CANNOT write `config.json`, but you — an agent —
+can run the CLI):
+```
+kirocrew agent create --name <crew-name> --kiro-agent <kiro-agent> \
+  --workspace <workspace> --memory-store <memory-store>
+```
+This writes the global `~/.kiro/crew/config.json` `agents` entry that `select_crew` binds
+and every app/session sees. Confirm with `kirocrew agent list`. NOTE: only these sanctioned
+fields are set by the CLI; a richer role/prompt is carried by the underlying kiro-agent.
+For "canon vs addendum" and default `when` triggers, record those on the pipeline STEP
+(`step.agent.crew` / `step.addenda[]`) in `state.json`, not in the global registry.
+
+**Assign a crew to a step:** edit the pipeline's step in `state.json` — set
+`step.agent.crew = "<crew-name>"` (canon) or append `{crew, when, writes}` to
+`step.addenda[]` (addendum). The orchestrator resolves these via `select_crew` at run time.
+The UI's agent-setup panel does the same via its Crew dropdown + Addendum editor.
+
+**Starter canon/addendum library (offer to seed):** canon — `spec`, `design`, `implement`,
+`review`; addenda — `research`, `secure-design`, `a11y`, `perf`. Create any on request.
 
 ## Author an agent for a custom step
 
@@ -39,7 +73,13 @@ agent-setup panel's handoff). Do this conversationally:
 ## 1. Start a new pipeline conversation
 
 1. **Pick the target pipeline/repo.** List existing pipelines from `state.json.pipelines[]`.
-   If none fit, the user can name a repo (`owner/name`) or a KiroCrew workspace.
+   If none fit, the user can **paste a GitHub URL** (`https://github.com/owner/name`, with
+   or without `.git`/trailing path) OR type a bare `owner/name`, OR name a KiroCrew
+   workspace. Normalize a pasted URL to `owner/name` (strip scheme/host/`.git`/trailing
+   path). If no pipeline exists for that repo yet, **create one** in
+   `state.json.pipelines[]` (default steps, inheriting `config` trust/depth,
+   `source:"manual"`, `sot:"github"`) so the repo is added as a pipeline/workspace — this
+   is the command-side equivalent of the UI's paste-a-link → add-pipeline flow.
 2. **Spec the idea WITH the user.** Ask focused clarifying questions (1–3 at a time), state
    recommendations, keep it tight. You may spec anything — feature, bug, chore.
 3. **File it to GitHub as an issue** on the pipeline's repo — this is the invariant, because

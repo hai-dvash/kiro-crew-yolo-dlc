@@ -199,17 +199,27 @@ scheduled crons, `/api/file-read` + `/api/file-write`, the SDK chat launcher
 ## Installation
 
 ```bash
-cd ui && npm install --legacy-peer-deps && npx vite build   # outputs to ui/dist/ (served at /apps/dlc-yolo/ui/dist/index.mjs)
-cp crons/dlc_yolo_advance.py ~/.kiro/crew/crons/   # deploy the advance loop
+# 1. Install the app (the built UI bundle ui/dist/index.mjs ships in the repo, so no
+#    build is required for a plain install; rebuild only if you change the UI — see below).
 kirocrew app install /path/to/kiro-crew-yolo-dlc
 kirocrew app enable dlc-yolo
+
+# 2. Deploy the zero-token advance cron to its sandboxed runtime location (the manifest
+#    references this path; app install does not copy it for you).
+cp crons/dlc_yolo_advance.py ~/.kiro/crew/crons/
+
+# 3. If /dlc-yolo doesn't autocomplete in the command palette, link the skill into the
+#    palette's global scan dir (the installer registers it for the app; this makes the
+#    slash-command visible in autocomplete too):
+ln -s ~/.kiro/crew/apps/dlc-yolo/skills/dlc-yolo      ~/.kiro/skills/dlc-yolo
+ln -s ~/.kiro/crew/apps/dlc-yolo/skills/pipeline-workflow ~/.kiro/skills/pipeline-workflow
 ```
 
 ## Development
 
 ```bash
-kirocrew app dev dlc-yolo          # hot-reload the app
-cd ui && npx vite build            # rebuild the UI bundle
+kirocrew app dev dlc-yolo                                    # hot-reload the app
+cd ui && npm install --legacy-peer-deps && npx vite build    # rebuild ui/dist/index.mjs after UI edits
 ```
 
 ## Structure

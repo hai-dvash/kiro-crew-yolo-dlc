@@ -380,6 +380,25 @@ agent step, when it finishes its work, MUST:
 3. **Self-review** against the step's acceptance criteria; if the phase outgrew the prior
    phase beyond the depth factor, or a feature can't be spec'd now, either flag a back-step
    or park the feature to `dlc-backlog` (the agent decides — the loop does not).
+3a. **ASK-BEFORE-DONE — raise the human's blocking questions FIRST, before you build (canonical;
+   see `docs/ask-before-done-spec.md`).** Like the intent-agent already does, run the decision-gate
+   self-review (intent-fidelity / scope-drift / technical-fork / capability-gap) AT THE START of the
+   step, AGAINST THE STEP'S INPUTS — not its output. Ask: "is there a choice here only the human can
+   make, or a consequential fork with no safe default, that would change WHAT I build?" If yes:
+   - Under `manual`/`assisted`: call **`ask_question`** (blocking — pops the interactive card, waits
+     for the answer) with options phrased **in the user's voice**, AND record the fork in
+     `card.decisions[]` (durable audit + async path). Do NOT produce the artifact until it resolves;
+     a step whose question still awaits the human ends **`blocked`** (+`block_reason` = the pending
+     question), never `done`, never a dangling `pending`.
+   - Under `autonomous`: auto-pick the recommended option, record it in `decisions[]` with
+     confidence, and still escalate on a low-confidence / irreversible / high-impact fork (the same
+     safety catch the intent-agent has). No blocking wait.
+   **Ordering rule:** questions that change WHAT the step builds are asked BEFORE the build
+   (blocking); observations/notes that don't change the build are recorded after (§3b). The TIMING
+   is mandatory (ask before finalize) and the TOOL is explicit (`ask_question` for the blocking
+   case) — uniform across every canon/custom step-agent AND the orchestrator's inline-phase /
+   gate-deliberation path. The intent-agent is the reference implementation, not a special case.
+
 3b. **Raise the Decision Gate when needed (protects shallow/unseen intent).** Before marking
    done, self-check: does the artifact serve the card's INTENT (not just its literal text)?
    Did this step introduce entities the predecessor never sanctioned (unseen scope)? Was a

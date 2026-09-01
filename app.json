@@ -4,6 +4,9 @@
   "displayName": "DLC-YOLO",
   "description": "Automated software development lifecycle — intake issues, spec them, implement, review, and ship PRs with configurable human gates.",
   "author": "haid",
+  "homepage": "https://github.com/hai-dvash/kiro-crew-yolo-dlc",
+  "repository": "https://github.com/hai-dvash/kiro-crew-yolo-dlc",
+  "license": "Apache-2.0",
   "tags": ["sdlc", "automation", "pipeline", "developer-tools"],
   "defaultEnabled": true,
   "agents": [
@@ -12,11 +15,16 @@
     "agents/spec-agent.json",
     "agents/design-agent.json",
     "agents/impl-agent.json",
-    "agents/review-agent.json"
+    "agents/review-agent.json",
+    "agents/dlcyolo-readonly.json",
+    "agents/dlcyolo-authoring.json",
+    "agents/dlcyolo-builder.json",
+    "agents/dlcyolo-coordinator.json"
   ],
   "skills": [
     "skills/pipeline-workflow",
-    "skills/dlc-yolo"
+    "skills/dlc-yolo",
+    "skills/conversation-digest"
   ],
   "permissions": {
     "api": [
@@ -65,7 +73,7 @@
     },
     {
       "name": "dlc-yolo-backlog-intake",
-      "every": 900,
+      "every": 200,
       "agent": "pipeline-orchestrator",
       "message": "Backlog back-feed. Collect the distinct owned repos from state.json cards' source.repo. For each repo, list open issues labeled dlc-backlog (gh issue list --repo <repo> --label dlc-backlog --state open --json number,title,url). For any such issue that does NOT already have a card (match on source.issue/url), FIRST apply the OWNERSHIP GUARD — gh issue view <n> --repo <repo> --json author; only proceed if author.login is in trusted_authors (card->pipeline->config.trusted_authors, default the gh-authenticated user; empty never means allow-all; fail closed if unverifiable). Only for a guard-passing issue, create a new card at stage 'intake' inheriting config.trust/config.depth, linked to that issue. Only READ issues and CREATE intake cards — never advance or execute here. Persist state."
     }

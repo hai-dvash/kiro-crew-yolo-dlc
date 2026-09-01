@@ -179,9 +179,10 @@ governs *where an agent may act*, always.
 ## Architecture
 
 No backend process. The UI reads/writes pipeline state through the gateway's file API —
-`GET /api/file-read?path=…` and `POST /api/file-write` — against `/tmp/dlc-yolo/state.json`
-(using the SDK's `api.get()` / `api.post()`). Two crons drive agents; specialist work goes
-through `spawn_run` / `task_run`.
+`GET /api/file-read?path=…` and `POST /api/file-write` — against the durable-first state file
+(`$DLC_YOLO_STATE` → `~/.dlc-yolo/state.json` → `/tmp/dlc-yolo/state.json` fallback), using the
+SDK's `api.get()` / `api.post()`. Three crons drive/observe agents (advance · spawns ·
+backlog-intake); specialist work goes through `spawn_run` / `task_run`.
 
 Native KiroCrew APIs used: `ask_question`, `spawn_run`, `task_run`, `send_message`,
 scheduled crons, `/api/file-read` + `/api/file-write`, the SDK chat launcher
@@ -201,7 +202,7 @@ scheduled crons, `/api/file-read` + `/api/file-write`, the SDK chat launcher
       "steps": [
         { "id": "requirements", "name": "Requirements", "type": "agent",
           "agent": { "name": "spec-agent", "role": "…", "tools": ["ask_question"] },
-          "trust": "assisted", "depth": "standard", "label": "dlc:requirements" },
+          "trust": "assisted", "depth": "standard", "capability": "authoring", "label": "dlc:requirements" },
         { "id": "gate-spec", "name": "Gate: Spec", "type": "gate", "label": "dlc:gate-spec" }
       ]
     }
@@ -223,8 +224,9 @@ scheduled crons, `/api/file-read` + `/api/file-write`, the SDK chat launcher
 
 | Cron | Interval | Role |
 |------|----------|------|
-| `dlc-yolo-advance` | 120s | Walk each pipeline's own steps, honor per-step trust/depth, fire triggers, move `dlc:<step>` labels |
-| `dlc-yolo-backlog-intake` | 900s | Back-feed open `dlc-backlog` issues as new intake cards (read + create only) |
+| `dlc-yolo-advance` | 120s | Walk each pipeline's own steps, honor per-step trust/depth/**capability**, escalate each agent step as a **persistent capability-profiled step-agent** (`keep=true`, records `step_sessions`), move `dlc:<step>` labels, deterministically flip a parent's `child_tickets` to `consumed` + retire, notify (deduped) on new waiting gates |
+| `dlc-yolo-spawns` | 30s | Zero-token observability: poll `spawn_list`, write `live_spawns.json` so the UI subagents pane shows dead-vs-in-flight (read-only, never drives) |
+| `dlc-yolo-backlog-intake` | 200s | Back-feed open `dlc-backlog` issues as new intake cards (read + create only) |
 
 ---
 
@@ -304,14 +306,17 @@ kiro-crew-yolo-dlc/
 │   ├── spec-agent.json               ← requirements + effort attribution
 │   ├── design-agent.json             ← design
 │   ├── impl-agent.json               ← task breakdown + implementation
-│   └── review-agent.json             ← code review
+│   ├── review-agent.json             ← code review
+│   └── dlcyolo-{readonly,authoring,builder,coordinator}.json  ← the 4 capability-profile templates
 ├── skills/
-│   ├── pipeline-workflow/SKILL.md    ← pipelines, steps, modes, sandbox, backlog, SoT, effort
-│   └── dlc-yolo/SKILL.md             ← the /dlc-yolo command
+│   ├── pipeline-workflow/SKILL.md    ← pipelines, steps, modes, sandbox, backlog, SoT, effort, roles-&-lanes, step-sessions
+│   ├── dlc-yolo/SKILL.md             ← the /dlc-yolo command (thin console → hands off)
+│   └── conversation-digest/SKILL.md  ← distill a pipeline log into a review-sized digest
 ├── crons/
-│   └── dlc_yolo_advance.py           ← zero-token deterministic advance loop (deployed to ~/.kiro/crew/crons/)
+│   ├── dlc_yolo_advance.py           ← zero-token deterministic advance loop (deployed to ~/.kiro/crew/crons/)
+│   └── dlc_yolo_spawns.py            ← zero-token live-spawn snapshot for the UI subagents pane
 ├── scripts/
-│   └── setup-crons.py                ← idempotent post-sync: deploy the cron script + reconcile both cron jobs to the manifest
+│   └── setup-crons.py                ← idempotent post-sync: deploy the cron scripts + reconcile the cron jobs to the manifest
 ├── ui/
 │   ├── src/App.tsx                   ← kanban, graph, setup modal, agent panel (@kirocrew/app-sdk)
 │   └── vite.config.ts

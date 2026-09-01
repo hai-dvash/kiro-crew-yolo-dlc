@@ -5,6 +5,26 @@ always: true
 
 # SDLC Pipeline Workflow
 
+## Roles & lanes (single orchestrator — single-orchestrator-role-lanes-spec)
+
+Three non-overlapping lanes; nothing spans two:
+
+- **`/dlc-yolo` command = the human CONSOLE.** Captures/sharpens intent, presents the SETUP form,
+  files the issue + records the card, HANDS OFF to the orchestrator, and relays gates/questions ↔
+  human (writing answers/interjections to `state.json`). It does NOT run intent/bootstrap/
+  step-dispatch — it INVOKES the orchestrator, it does not BECOME it.
+- **`pipeline-orchestrator` = the SINGLE brain.** Owns SETUP-enactment, intent dispatch, bootstrap
+  (crew create), per-step dispatch, capability/trust/depth resolution, decision-gate deliberation,
+  back-step/fan-out, label moves, post-gate routing, ownership guard — in ONE place. Invoked by
+  BOTH the command and the advance cron (same agent, same logic, no duplicate implementation).
+- **step-agents (investigate/spec/design/impl/review/custom) = ONE narrow job each on their card**,
+  in their own persistent scoped session (fan out crews/addenda from within — see the step-agent
+  session section). A cross-step fork is RAISED to the orchestrator (decision gate), never decided
+  in the step. `investigate` is just the first step-agent, not a console peer or a setup actor.
+
+**Lane test:** reasoning about *the pipeline* (next step, which crew, back-step) → orchestrator;
+*one card's one phase* → a step-agent; *talking to the human* → the command.
+
 ## Pipeline Stages
 
 ```
@@ -72,12 +92,20 @@ A card can regress when:
     {"phase": "requirements", "trigger": "spec-builder", "at": "ISO8601"},
     {"phase": "implement", "trigger": "task-runner", "at": "ISO8601"}
   ],
+  "step_sessions": {
+    "design": {"agent_id": "…", "session_key": "…", "name": "dlc-yolo · gesture-engine · design", "at": "ISO8601"}
+  },
+  "orchestrator_session": {"agent_id": "…", "session_key": "…", "name": "dlc-yolo · <pipeline> · orchestrator", "at": "ISO8601", "warm": false},
+  "interjection": [
+    {"at": "ISO8601", "step": "design", "kind": "design", "text": "use a component store, not props drilling", "by": "hai-dvash", "status": "pending"}
+  ],
   "effort": {
     "features": [
       {"id": "f1", "note": "Rate-limit middleware", "size": "M", "points": 3},
       {"id": "f2", "note": "Redis token bucket store", "size": "L", "points": 5}
     ],
     "total": 8,
+    "spent": 5,
     "scope": {"requirements": 8, "design": 9, "tasks": 9}
   },
   "backstep_history": [
@@ -139,14 +167,21 @@ with zero cards, and holds the per-repo default modes that its cards inherit.
                                      //   NEVER allow-all. Card->pipeline->config resolution; fail closed.
   "approach": "simplified",          // "simplified" (lean ladder) | "enhanced" (research gate + addendum crews + deeper);
                                      //   the chosen side of the setup dual-proposal; sets each agent's simplified/enhanced mode
+  "budget": {                        // depth-derived at SETUP (depth-budget-spec): depth = the EFFORT SCALE
+                                     //   (in the existing S=1/M=3/L=5/XL=8 points), not arbitrary numbers
+    "max_child_cards": 3,            //   quick=0 (one card) · standard<=3 · deep<=8 · "unlimited" = no cap
+    "effort_ceiling": 15,            //   points cap (same S/M/L/XL currency): quick~3 · standard~15 · deep~40 · "unlimited" = no ceiling
+    "max_feature_size": "L",         //   per-feature size welcomed: quick=S · standard=M/L · deep=L/XL
+    "addenda": "obvious"             //   none (quick) | obvious (standard) | proactive (deep)
+  },
   "steps": [
     { "id": "requirements", "name": "Requirements", "type": "agent",
       "agent": { "name": "spec-agent", "role": "produce requirements.md", "tools": ["ask_question"] },
-      "trust": "assisted", "depth": "standard", "label": "dlc:requirements" },
+      "trust": "assisted", "depth": "standard", "capability": "authoring", "label": "dlc:requirements" },
     { "id": "gate-spec", "name": "Gate: Spec", "type": "gate", "label": "dlc:gate-spec" },
     { "id": "implement", "name": "Implement", "type": "agent",
-      "agent": { "name": "impl-agent", "role": "write code + tests" },
-      "trust": "autonomous", "depth": "deep", "label": "dlc:implement" }
+      "agent": { "name": "impl-agent", "role": "write code + tests", "crew": "dlcyolo-<pipeline>-impl" },
+      "trust": "autonomous", "depth": "deep", "capability": "builder", "label": "dlc:implement" }
   ],
   "created_at": "ISO8601"
 }
@@ -171,6 +206,28 @@ built-in 11-stage ladder is only the default the wizard offers. Each step is one
 Each step may set its OWN execution profile — `trust` (manual/assisted/autonomous) and
 `depth` (quick/standard/deep) — overriding the pipeline default for that step only. This
 is how "this step runs YOLO/autonomous+deep, that gate stays manual" is expressed.
+
+A step also carries a **`capability`** — the THIRD orthogonal axis (see
+`docs/capability-profile-spec.md`): **depth** = how MANY crews/cards, **trust** = WHEN to pause,
+**capability** = WHAT tool/scope the step's crew/agent gets. Values map 1:1 to four fixed base
+**kiro-agent profile templates** the orchestrator points a crew at via
+`kirocrew agent create --kiro-agent <profile>` (a crew's tools/trust come from its `kiro_agent`
+template, NOT the thin `config.json` crew record and NOT a CLI flag — so the profile IS how a
+crew stops raising spurious approvals):
+
+| `capability` | Profile template | Scope |
+|---|---|---|
+| `readonly` | `dlcyolo-readonly` | read + card artifacts + read-only `gh` (investigate/triage/research/review) |
+| `authoring` | `dlcyolo-authoring` | + scoped write to results + git-only shell + `ask_question` (requirements/design/spec/doc-addenda) |
+| `builder` | `dlcyolo-builder` | + `write`/`shell` + `spawn_run`, git shell (implement/code/tests) |
+| `coordinator` | `dlcyolo-coordinator` | + `select_crew` + `kirocrew agent create` + `gh` write verbs (dispatch crews/file tickets/bootstrap) |
+
+Resolution: `card.capability` → `step.capability` → **derived from the step's role + the prior
+step's produced scope**. A step DEFINING a new crew (bootstrap) is where the orchestrator picks
+the profile; a step USING an existing crew inherits the profile that crew was created against.
+The per-repo sandbox (cwd = owned repo) ALWAYS applies on top: capability = which tools, sandbox
+= which repo. A one-off `capability_template` (nearest base + a delta) is allowed when no base
+fits, but a scope-WIDENING one is a trust-gated decision, never silent.
 
 Every step has a `label` (`dlc:<step-id>`) used as the GitHub stage label (below).
 
@@ -369,6 +426,70 @@ This is the card-level analogue of the step-level staleness reclaim.
 
 Model B (distinct child tickets) — an elaborating step produces a real successor ticket, not
 just a relabel; the parent is retired only once that child is genuinely consumed.
+
+---
+
+## First-Class Sessions & Non-Blocking Orchestrator
+
+See `docs/first-class-sessions-spec.md`. Steps and the orchestrator are **visible, addressable,
+interjectable SESSIONS** — not opaque fire-and-forget spawns — while the advance loop **NEVER
+blocks waiting on a persistent orchestrator**.
+
+- **Session pointers.** When a step's work is spawned (by the advance cron's escalation or by the
+  orchestrator directly), a pointer is recorded on the card:
+  `step_sessions[<step>] = {agent_id, session_key?, name:"dlc-yolo · <card> · <step>", at}`.
+  The UI joins this against `live_spawns.json` (on `agent_id`) to turn a subagents-pane row into a
+  **link that opens the session**; a later interjection uses the pointer to `spawn_continue` the
+  SAME conversation (keeping accumulated context) instead of a cold re-spawn. Best-effort — a
+  missing id just means no deep-link, never a block.
+- **Orchestrator session + local trigger.** The orchestrator can be **triggered on demand**
+  (`/dlc-yolo` or a pane control) as a NAMED session (`dlc-yolo · <pipeline> · orchestrator`,
+  recorded in `card.orchestrator_session`) that a human can open to see its per-card reasoning,
+  capability/profile assignments, and fan-out/back-step decisions — and interject. It is
+  available + inspectable, NOT a standing daemon.
+- **Non-blocking invariant (load-bearing).** The advance loop escalates via a fire-and-forget
+  `spawn_run`, records `step_status='pending'` + `pending_at`, and **moves on in the same cycle**
+  — it never awaits completion. Completion is signalled by a TERMINAL status written to state
+  (done/blocked/error); the next tick reads it. A **warm** orchestrator session (kept open via
+  `monitor_start`/`register_hook`, `orchestrator_session.warm=true`) is an OPT-IN observer/driver
+  — the loop is correct whether it exists, is closed, or crashed, because the loop reads STATE,
+  never waits on a session. A `pending` step with no matching `live_spawns` entry past the
+  staleness window is a confirmed-dead spawn → reclaimed + re-escalated, so an abandoned session
+  never wedges the pipeline.
+- **Steer vs interject.** A running step session can be **live-steered** (`spawn_steer`) for an
+  in-flight correction; a finished/`blocked` one is resumed by **`spawn_continue`** from its
+  `step_sessions` pointer; OR write a durable **`card.interjection[]`** the next run honors. None
+  block the loop. `blocked` is the interjection hand-off (a step parks with a reason, a human
+  interjects, a later run resumes) — it is what makes "interjectable" real rather than a wedge.
+
+### Step agent = persistent scoped session that fans out from within (canon AND custom)
+
+**Invariant — STEP = SESSION, regardless of trigger:** if it's a step (canon OR custom
+`type:"agent"`), it is RUN by spawning a persistent step-agent (`keep=true` + record
+`card.step_sessions[step]`) — NEVER inline as the orchestrator itself. Crews + addenda are the
+opposite: ephemeral, spawned from WITHIN the step-agent's session, never persisted, never given a
+pointer. Persistence is a property of *being a step*, not of *which driver* (cron / `/dlc-yolo` /
+manual kick) spawned it — every driver runs a step the same persistent way.
+
+See `docs/persistent-step-agent-sessions-spec.md`. Each agent step — built-in OR a pipeline's own
+**custom** `type:"agent"` step — escalates as a **persistent, capability-scoped agent** so it is
+reachable (interject / gate / respond to orchestrator) AND holds the tools to **spawn its crews +
+addenda from WITHIN itself**:
+
+- **Escalate as the step's capability PROFILE** (`card.capability → step.capability → derived`),
+  targeting `dlcyolo-{readonly|authoring|builder|coordinator}`. A spawned agent inherits ITS OWN
+  `--agent` config's tools (verified: `kiro-cli --agent <name>`, MCP via per-session `mcpServers`),
+  so a `coordinator`-profiled step agent genuinely holds `select_crew`/`spawn_run` and dispatches
+  crews itself. **Custom steps resolve capability the SAME way** — no canon/custom distinction.
+- **`keep=true`** so the step agent persists → `spawn_continue` (resume/interject) / `spawn_steer`
+  (live); record `card.step_sessions[step]={agent_id,name,at,kept:true}`.
+- **Crews + addenda spawn from WITHIN the step agent** (it holds the tools): the canon
+  `step.agent.crew` pass, then each matching `step.addenda[]` pass — uncapped per call,
+  artifact-only, owned-repo cwd. NEVER from the script cron (a zero-token script that cannot route
+  crews — it only fires the `keep=true` profiled spawn and reads terminal status back).
+- **`coordinator` (crew-routing) only for steps that dispatch** (`step.agent.crew`/`addenda[]`
+  set); producing steps default `authoring`/`builder`. No silent over-grant. If a step needs a
+  wider capability it raises a `capability-gap` decision — it never fakes a crew run.
 
 ---
 

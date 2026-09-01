@@ -295,6 +295,14 @@ kirocrew app dev dlc-yolo                                    # hot-reload the ap
 cd ui && npm install --legacy-peer-deps && npx vite build    # rebuild ui/dist/index.mjs after UI edits
 ```
 
+### Testing
+
+DLC-YOLO is exercised end-to-end against a dedicated sandbox repository —
+[**hai-dvash/kiro-crew-yolo-dlc-test-repo**](https://github.com/hai-dvash/kiro-crew-yolo-dlc-test-repo) —
+so live `gh` issue/label/PR flows run against a throwaway project instead of this one. Pipelines
+created there drive real cards through the full spec → design → tasks → implement → review → PR
+ladder (the RPS-game fixtures live there), keeping this repo's own history clean.
+
 ## Structure
 
 ```

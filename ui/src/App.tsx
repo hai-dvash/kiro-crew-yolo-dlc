@@ -39,8 +39,8 @@ interface PipelineCard {
   artifacts: Record<string, unknown>
   step_status?: Record<string, string>
   pending_at?: Record<string, string>
-  step_sessions?: Record<string, { agent_id?: string; session_key?: string; name?: string; at?: string }>
-  orchestrator_session?: { agent_id?: string; session_key?: string; name?: string; at?: string; warm?: boolean }
+  step_sessions?: Record<string, { agent_id?: string; session_key?: string; slot_key?: string; cron_id?: string; agent?: string; name?: string; at?: string; kept?: boolean; retired_at?: string }>
+  orchestrator_session?: { agent_id?: string; session_key?: string; slot_key?: string; cron_id?: string; name?: string; at?: string; warm?: boolean }
   lifecycle?: string
   interjection?: Array<{ at: string; step?: string; kind: string; text: string; by?: string; status?: string }>
   gate_history: Array<{ gate: string; decision: string; at: string; notes: string }>
@@ -1743,7 +1743,7 @@ export default function SdlcPipeline() {
   // reflection of state; no polling of spawn_list needed for the at-a-glance pane.
   const PENDING_STALE_MS = 600_000
   const runStatus = useMemo(() => {
-    const running: { card: string; step: string; agent: string; stale: boolean; status: string; live: boolean; agentId?: string; sessionName?: string }[] = []
+    const running: { card: string; step: string; agent: string; stale: boolean; status: string; live: boolean; agentId?: string; slotKey?: string; sessionKey?: string; sessionName?: string }[] = []
     for (const c of cards) {
       const ss = c.step_status || {}
       const pl = pipelines.find(p => p.id === c.pipeline_id) || pipelines.find(p => p.repo === c.source?.repo)
@@ -1753,15 +1753,19 @@ export default function SdlcPipeline() {
           const stale = at ? (Date.now() - new Date(at).getTime()) > PENDING_STALE_MS : false
           const sdef = pl?.steps?.find(s => s.id === step)
           const agent = sdef?.agent?.crew || sdef?.agent?.name || 'orchestrator'
-          // Session pointer (first-class-sessions §3): the step's spawned session, recorded by
-          // the advance cron / orchestrator. Prefer a PRECISE live match on agent_id; fall back
-          // to the task-string heuristic when no pointer/id is present.
+          // Session pointer (first-class-sessions §3, session-as-slot): the step's escalated
+          // session, recorded by the advance cron. Steps are now launched as one-shot AGENT CRONS
+          // that materialize an OPENABLE dashboard slot `cron-<id>` (slot_key on the pointer) — so
+          // prefer the slot_key as the open handle. `live` for a cron-backed run can't use
+          // spawn_list (crons don't appear there); fall back to the task-string heuristic / pending.
           const sess = c.step_sessions?.[step]
           const agentId = sess?.agent_id
+          const slotKey = sess?.slot_key
+          const sessionKey = sess?.session_key
           const live = agentId
             ? liveSpawns.some(ls => ls.id === agentId)
             : liveSpawns.some(ls => (ls.task || '').includes(c.id) || (ls.task || '').includes(c.title))
-          running.push({ card: c.title || c.id, step, agent, stale, status: st, live, agentId, sessionName: sess?.name })
+          running.push({ card: c.title || c.id, step, agent, stale, status: st, live, agentId, slotKey, sessionKey, sessionName: sess?.name })
         }
       }
     }
@@ -2208,11 +2212,17 @@ export default function SdlcPipeline() {
                         <span className="inline-block animate-pulse flex-shrink-0" style={{ width: 6, height: 6, borderRadius: 999, background: r.stale ? 'var(--warn)' : 'var(--accent)' }} />
                         <span className="font-semibold" style={{ color: 'var(--accent)' }} title={r.sessionName || undefined}>{r.agent}</span>
                         <span style={{ color: 'var(--muted)' }}>· {r.step}</span>
-                        {r.agentId && (
-                          <span className="font-mono flex-shrink-0" style={{ color: 'var(--muted)', fontSize: 10 }}
-                            title={`session: ${r.sessionName || r.agentId} — open/steer via /dlc-yolo (spawn_continue ${r.agentId})`}>
-                            ⧉{r.agentId.slice(0, 6)}
-                          </span>
+                        {(r.slotKey || r.agentId) && (
+                          <button className="font-mono flex-shrink-0" style={{ color: 'var(--accent)', fontSize: 10, background: 'transparent', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
+                            title={r.slotKey
+                              ? `Openable session — slot "${r.slotKey}" (${r.sessionName || r.sessionKey}). Click to copy the slot handle, then open that session from your Chats list.`
+                              : `session ${r.sessionName || r.agentId} — click to copy the continue handle (spawn_continue ${r.agentId})`}
+                            onClick={() => {
+                              const handle = r.slotKey || `spawn_continue ${r.agentId}`
+                              try { navigator.clipboard?.writeText(handle) } catch { /* clipboard blocked — tooltip still shows the handle */ }
+                            }}>
+                            ⧉{(r.slotKey || r.agentId || '').slice(0, 10)}
+                          </button>
                         )}
                         <span className="ml-auto truncate max-w-[110px]" style={{ color: 'var(--text, var(--muted))' }} title={r.card}>{r.card}</span>
                         {r.live

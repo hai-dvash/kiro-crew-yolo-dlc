@@ -16,7 +16,8 @@
   ],
   "skills": [
     "skills/pipeline-workflow",
-    "skills/dlc-yolo"
+    "skills/dlc-yolo",
+    "skills/conversation-digest"
   ],
   "permissions": {
     "api": [

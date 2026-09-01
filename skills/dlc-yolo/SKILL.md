@@ -53,6 +53,10 @@ test — it is NOT the orchestrator/cron path.
   full dump.
 - Single writer: only this command writes the log, so no lock is needed. Presentation-only;
   no cross-workspace aggregation or future-proofing.
+- **Digest:** on user request ("digest this pipeline") or at session end, distill the log into a
+  review-sized digest via the **conversation-digest** skill (fixed sections; written to
+  `<base>/workspaces/<ws>/data/digests/`, or `docs/.sessions/` for a dev/session archive). The
+  digest is derived from the log, never replaces it; size-capped; no secrets.
 
 ## On invoke
 

@@ -78,6 +78,7 @@ A card can regress when:
       {"id": "f2", "note": "Redis token bucket store", "size": "L", "points": 5}
     ],
     "total": 8,
+    "spent": 5,
     "scope": {"requirements": 8, "design": 9, "tasks": 9}
   },
   "backstep_history": [
@@ -139,6 +140,13 @@ with zero cards, and holds the per-repo default modes that its cards inherit.
                                      //   NEVER allow-all. Card->pipeline->config resolution; fail closed.
   "approach": "simplified",          // "simplified" (lean ladder) | "enhanced" (research gate + addendum crews + deeper);
                                      //   the chosen side of the setup dual-proposal; sets each agent's simplified/enhanced mode
+  "budget": {                        // depth-derived at SETUP (depth-budget-spec): depth = the EFFORT SCALE
+                                     //   (in the existing S=1/M=3/L=5/XL=8 points), not arbitrary numbers
+    "max_child_cards": 3,            //   quick=0 (one card) · standard<=3 · deep<=8
+    "effort_ceiling": 15,            //   points cap (same S/M/L/XL currency): quick~3 · standard~15 · deep~40
+    "max_feature_size": "L",         //   per-feature size welcomed: quick=S · standard=M/L · deep=L/XL
+    "addenda": "obvious"             //   none (quick) | obvious (standard) | proactive (deep)
+  },
   "steps": [
     { "id": "requirements", "name": "Requirements", "type": "agent",
       "agent": { "name": "spec-agent", "role": "produce requirements.md", "tools": ["ask_question"] },

@@ -53,9 +53,12 @@ CRON_DST = CREW / "crons" / "dlc_yolo_advance.py"
 CRONS_JSON = CREW / "crons.json"
 APP_CRONS = CREW / "apps" / "dlc-yolo" / "app-crons.json"
 
-# The two jobs DLC-YOLO owns. Names are the reconcile key; anything else is left alone.
+# The jobs DLC-YOLO owns. Names are the reconcile key; anything else is left alone.
 ADVANCE_NAME = "dlc-yolo-advance"
 BACKLOG_NAME = "dlc-yolo-backlog-intake"
+SPAWNS_NAME = "dlc-yolo-spawns"
+SPAWNS_SRC = REPO / "crons" / "dlc_yolo_spawns.py"
+SPAWNS_DST = CREW / "crons" / "dlc_yolo_spawns.py"
 
 
 def _log(msg: str) -> None:
@@ -123,28 +126,34 @@ def _desired_jobs() -> list[dict]:
     backlog["schedule"]["every_secs"] = every_backlog
     backlog["message"] = backlog_msg
     backlog["agent_id"] = "pipeline-orchestrator"
-    return [advance, backlog]
+
+    spawns = _job_template(SPAWNS_NAME)
+    spawns["schedule"]["every_secs"] = 30
+    spawns["script"] = "~/.kiro/crew/crons/dlc_yolo_spawns.py:snapshot"
+    return [advance, backlog, spawns]
 
 
 def deploy_script(check: bool) -> bool:
-    """Copy the cron script to its runtime location if missing or stale. Returns True if changed."""
-    if not CRON_SRC.exists():
-        _log(f"WARN: repo cron script not found at {CRON_SRC}")
-        return False
-    need = (not CRON_DST.exists()) or (
-        CRON_DST.read_bytes() != CRON_SRC.read_bytes()
-    )
-    if not need:
-        _log("cron script already up to date")
-        return False
-    if check:
-        _log("DRIFT: cron script differs from repo (would redeploy)")
-        return True
-    CRON_DST.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(CRON_SRC, CRON_DST)
-    py_compile.compile(str(CRON_DST), doraise=True)
-    _log(f"deployed cron script → {CRON_DST} (compiles OK)")
-    return True
+    """Copy the cron script(s) to their runtime location if missing or stale. Returns True if changed."""
+    changed = False
+    for src, dst in [(CRON_SRC, CRON_DST), (SPAWNS_SRC, SPAWNS_DST)]:
+        if not src.exists():
+            _log(f"WARN: repo cron script not found at {src}")
+            continue
+        need = (not dst.exists()) or (dst.read_bytes() != src.read_bytes())
+        if not need:
+            _log(f"cron script already up to date: {dst.name}")
+            continue
+        if check:
+            _log(f"DRIFT: {dst.name} differs from repo (would redeploy)")
+            changed = True
+            continue
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+        py_compile.compile(str(dst), doraise=True)
+        _log(f"deployed cron script → {dst} (compiles OK)")
+        changed = True
+    return changed
 
 
 def reconcile_crons(check: bool) -> bool:

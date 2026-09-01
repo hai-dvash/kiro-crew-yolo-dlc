@@ -56,6 +56,15 @@ def _resolve_state_path() -> Path:
 
 STATE = _resolve_state_path()
 
+# A "pending" step whose spawn is older than this is treated as a DEAD spawn and reclaimed
+# (re-escalated once more). Sized to a few cron ticks so a genuinely in-flight spawn is never
+# re-stormed, but a killed/crashed one doesn't wedge the card forever. See event-driven spec §4.
+PENDING_STALE_SECS = 600
+
+# Max times the loop will re-escalate a step that ended in `error` (retriable failure) before
+# giving up and treating it as `blocked` (awaits a human). Bounds a crash-looping step.
+MAX_STEP_RETRIES = 3
+
 DEFAULT_STEP_IDS = [
     "intake", "requirements", "gate-spec", "design", "tasks",
     "gate-impl", "implement", "review", "gate-review", "pr", "done",
@@ -171,6 +180,70 @@ def _current_dlc_labels(repo: str, issue: int) -> list[str]:
         return []
 
 
+_AUTH_USER_CACHE: dict = {}
+_ISSUE_AUTHOR_CACHE: dict = {}  # (repo, issue) -> login|None ; avoids a gh call per card per cycle
+
+
+def _auth_user() -> str | None:
+    """The gh-authenticated login (cached). Default trusted author when none configured."""
+    if "u" in _AUTH_USER_CACHE:
+        return _AUTH_USER_CACHE["u"]
+    u = None
+    try:
+        out = subprocess.run(["gh", "api", "user", "--jq", ".login"],
+                             capture_output=True, timeout=20, text=True)
+        if out.returncode == 0:
+            u = (out.stdout or "").strip() or None
+    except (OSError, subprocess.SubprocessError):
+        u = None
+    _AUTH_USER_CACHE["u"] = u
+    return u
+
+
+def _trusted_authors(state: dict, card: dict, pl: dict | None) -> list[str]:
+    """Resolve trusted_authors: card -> pipeline -> global config -> [gh-auth user].
+    Empty/unset NEVER means allow-all — it means the authenticated user only."""
+    for src in (card, pl or {}, state.get("config") or {}):
+        ta = src.get("trusted_authors")
+        if ta:
+            return list(ta)
+    u = _auth_user()
+    return [u] if u else []
+
+
+def _owner_ok(state: dict, card: dict, pl: dict | None) -> bool:
+    """OWNERSHIP GUARD (ownership-guard-spec): a card may be acted on only if its source issue
+    was opened by a trusted author. Repo-owned is assumed (cards are created against owned repos);
+    the author check is the un-forgeable part. FAIL CLOSED — if the author can't be verified
+    (no gh / no issue), return False so write/terminal actions (escalate/advance/resolve) do NOT
+    proceed on an unverified issue. sot=local cards (no issue yet) are allowed to run locally."""
+    src = card.get("source") or {}
+    if card.get("sot") != "github":
+        return True  # local-only card, no GitHub issue to verify yet
+    repo, issue = src.get("repo"), src.get("issue")
+    if not (repo and issue):
+        return False
+    trusted = _trusted_authors(state, card, pl)
+    if not trusted:
+        return False  # cannot resolve a trusted set -> fail closed
+    key = (repo, str(issue))
+    if key in _ISSUE_AUTHOR_CACHE:
+        author = _ISSUE_AUTHOR_CACHE[key]
+        return author in trusted if author else False
+    try:
+        out = subprocess.run(
+            ["gh", "issue", "view", str(issue), "--repo", repo, "--json", "author"],
+            capture_output=True, timeout=20, text=True)
+        if out.returncode != 0:
+            _ISSUE_AUTHOR_CACHE[key] = None
+            return False  # unverifiable -> fail closed
+        author = ((json.loads(out.stdout or "{}") or {}).get("author") or {}).get("login")
+        _ISSUE_AUTHOR_CACHE[key] = author
+        return author in trusted
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
+        return False  # fail closed (do not cache — transient, retry next tick)
+
+
 def _move_label(card: dict, new_step: str) -> None:
     """Move the dlc:<step> label on the card's GitHub issue (best-effort, sot=github):
     remove any existing dlc:* labels, then add the single new one, so the issue's
@@ -226,9 +299,45 @@ def advance(ctx):
         stage = card.get("stage")
         if stage not in ladder:
             continue
+        # OWNERSHIP GUARD (ownership-guard-spec): never escalate/advance/resolve a card whose
+        # source issue is not authored by a trusted owner. Fail closed. A failing card is
+        # flagged guard-blocked (visible) and SKIPPED this cycle — but we do NOT overwrite an
+        # existing terminal/approved status (done/approved/advanced), so a transient gh outage
+        # can't wedge a card that already legitimately progressed; it just pauses further action.
+        if not _owner_ok(state, card, pl):
+            if (card.get("guard") or {}).get("passed") is not False:
+                card["guard"] = {"passed": False,
+                                 "reason": "ownership guard: issue author not trusted / unverifiable",
+                                 "at": now}
+                st = (card.get("step_status") or {}).get(stage)
+                if st not in ("done", "approved", "advanced"):
+                    card.setdefault("step_status", {})[stage] = "blocked"
+                    card.setdefault("block_reason", {})[stage] = "ownership guard failed"
+                changed = True
+            continue
+        elif (card.get("guard") or {}).get("passed") is False:
+            # previously blocked, now passes (e.g. author added to trusted_authors) — clear it,
+            # and clear a guard-set 'blocked' so the card can resume (leave other statuses alone).
+            card["guard"] = {"passed": True, "at": now}
+            if (card.get("block_reason") or {}).get(stage) == "ownership guard failed":
+                card.get("step_status", {}).pop(stage, None)
+                card.get("block_reason", {}).pop(stage, None)
+            changed = True
         idx = ladder.index(stage)
         if idx >= len(ladder) - 1:
-            continue  # done
+            # Terminal stage. NO-RETIRE-UNTIL-CONSUMED guard (card-lifecycle spec §2): a card
+            # is only 'retired' (removable) when every child ticket it handed off has been
+            # 'consumed' by its successor. Otherwise it stays live (handed-off) so no work is
+            # dropped if a successor never picked up. The loop only marks lifecycle here; it
+            # does not delete — retirement/removal is the UI's or a reaper's job, gated on this.
+            children = card.get("child_tickets") or []
+            all_consumed = all((c.get("status") == "consumed") for c in children) if children else True
+            new_lc = "retired" if all_consumed else "handed-off"
+            if card.get("lifecycle") != new_lc:
+                card["lifecycle"] = new_lc
+                card["updated_at"] = now
+                changed = True
+            continue  # done (terminal)
         step = _step_def(pl, stage)
         trust = _eff_trust(state, card, step, pl)
         status = (card.get("step_status") or {}).get(stage)
@@ -241,23 +350,77 @@ def advance(ctx):
                 waiting_gates.append(f"{card.get('title', card.get('id'))} @ {stage}")
                 continue
         else:
-            # agent step: advance only when its work is marked done by the step agent
+            # agent step: advance only when its work is marked "done" by the step run.
+            # TERMINAL-STATUS CONTRACT (event-driven spec §5): a step run must end in a
+            # terminal status — done | blocked | error — never a dangling "pending".
+            #   done     → advance (handled above by `status != "done"` being false)
+            #   pending  → a spawn is IN FLIGHT; leave it unless stale (dead spawn) → reclaim
+            #   blocked  → cannot proceed without a human (missing capability / needs a
+            #              decision); do NOT advance, do NOT re-escalate — it waits for an
+            #              interjection to clear it. Surface once.
+            #   error    → retriable failure; re-escalate after staleness, bounded by
+            #              MAX_STEP_RETRIES; over the cap → treat as blocked.
             if status != "done":
-                # escalate ON DEMAND: if the step hasn't started, ask the orchestrator to
-                # run THIS card+step (one spawn), then move on. No standing agent loop.
-                # Capped per cycle so a large pending board can't time out the run.
-                if (status in (None, "", "pending") and trust != "manual"
+                # blocked: hand to a human; the loop neither advances nor re-fires it.
+                if status == "blocked":
+                    waiting_gates.append(
+                        f"{card.get('title', card.get('id'))} @ {stage} (blocked: "
+                        f"{(card.get('block_reason') or {}).get(stage, 'needs attention')})")
+                    continue
+
+                pending_at = (card.get("pending_at") or {}).get(stage)
+                stale = False
+                if status in ("pending", "error") and pending_at:
+                    try:
+                        t = datetime.fromisoformat(str(pending_at).replace("Z", "+00:00"))
+                        stale = (datetime.now(timezone.utc) - t).total_seconds() >= PENDING_STALE_SECS
+                    except (ValueError, TypeError):
+                        stale = False
+
+                # error over the retry cap → escalate no more; mark blocked for a human.
+                retries = (card.get("retry_count") or {}).get(stage, 0)
+                if status == "error" and retries >= MAX_STEP_RETRIES:
+                    card.setdefault("step_status", {})[stage] = "blocked"
+                    card.setdefault("block_reason", {})[stage] = (
+                        f"exceeded {MAX_STEP_RETRIES} retries")
+                    changed = True
+                    continue
+
+                # eligible to (re-)escalate: never started, OR a stale dead pending, OR a
+                # retriable error within the cap that has aged past the staleness window.
+                eligible = status in (None, "") or (stale and status in ("pending", "error"))
+                if (eligible and trust != "manual"
                         and escalations < MAX_ESCALATIONS):
                     try:
+                        # Crews are spawned FROM WITHIN a proper agent session (which has
+                        # select_crew/spawn_run) — NOT nested inside this cron-spawned run,
+                        # which may lack those tools. So the escalated run PERFORMS the step
+                        # itself and, if a wired crew genuinely requires the MCP orchestration
+                        # layer it doesn't have, it writes a TERMINAL 'blocked' with the reason
+                        # rather than faking or hanging. (event-driven §5a/§5b)
+                        crew = (((step or {}).get("agent") or {}).get("crew"))
+                        crew_line = (f" This step is crew-assigned ('{crew}'): perform the step's"
+                                     f" work fulfilling that crew's role; if genuine crew routing"
+                                     f" (select_crew/spawn_run) is required and unavailable in your"
+                                     f" tools, set step_status['{stage}']='blocked' with a"
+                                     f" block_reason instead of faking it." if crew else "")
                         ctx.call_tool("kirocrew-core", "spawn_run", {
                             "task": (f"Run pipeline step '{stage}' for DLC-YOLO card "
-                                     f"{card.get('id')} in repo {(card.get('source') or {}).get('repo')}. "
-                                     f"Follow the pipeline-workflow skill; when the step's work is "
-                                     f"complete set card.step_status['{stage}']='done' in "
-                                     f"the DLC-YOLO state file at {STATE}. Stay within the card's owned repo."),
+                                     f"{card.get('id')} in repo {(card.get('source') or {}).get('repo')}.{crew_line} "
+                                     f"Follow the pipeline-workflow skill and PRODUCE the step's "
+                                     f"artifact (code where applicable). You MUST end by writing a "
+                                     f"TERMINAL status to card.step_status['{stage}'] in the DLC-YOLO "
+                                     f"state file at {STATE}: 'done' if the artifact was genuinely "
+                                     f"produced, 'blocked' (+ block_reason) if it needs a human/decision, "
+                                     f"or 'error' (+ error_reason) on a retriable failure — NEVER leave "
+                                     f"it 'pending'. Write state via the file API / native write tool, "
+                                     f"NOT inline shell. Stay within the card's owned repo."),
                             "agent": "pipeline-orchestrator",
                         })
                         card.setdefault("step_status", {})[stage] = "pending"
+                        card.setdefault("pending_at", {})[stage] = now
+                        if status == "error":
+                            card.setdefault("retry_count", {})[stage] = retries + 1
                         escalations += 1
                         changed = True
                     except Exception:

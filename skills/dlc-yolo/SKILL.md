@@ -9,6 +9,13 @@ You turn this chat session into a driver for the DLC-YOLO pipeline. Pipeline sta
 the DLC-YOLO state file — resolved durable-first: `$DLC_YOLO_STATE` if set, else
 `~/.dlc-yolo/state.json` (durable), else `/tmp/dlc-yolo/state.json` (ephemeral fallback);
 read via `/api/file-read`, write via `/api/file-write` (the cron bootstraps the file).
+**Read/write `state.json` ONLY through the file API (`/api/file-read` / `/api/file-write`) or
+your native `read`/`write` tools — NEVER via inline shell (`python3 -c`, `python3 - <<'PY'`
+heredocs, `jq`, redirects).** Shell state-manipulation both bypasses the app's write path AND
+trips a gateway safety guard (paths/args that look credential-adjacent are blocked), so a
+heredoc write to `~/.dlc-yolo/state.json` will fail with "Blocked by security policy". The file
+API overwrites the whole file, so to change one field: `read` the current JSON, mutate it in
+memory, `write` the whole object back.
 **GitHub is the source of truth for a card's stage**, expressed as a `dlc:<step-id>` label
 on the card's issue; `state.json` holds the rich data.
 
@@ -49,7 +56,32 @@ test — it is NOT the orchestrator/cron path.
 
 ## On invoke
 
-Ask the user (via `ask_question`) which mode / topic:
+**SETUP FIRST — before intent, before any crew/issue work (do NOT skip to intent).** The flow
+is **SETUP → INTENT (skippable) → per-step**; front-loading intent is a bug. On invoke:
+
+1. **Resolve the pipeline: exists-or-create.** Determine the target repo (from `$ARGUMENTS`, a
+   pasted URL, or by asking). Look it up in `state.json.pipelines[]`.
+   - **Exists →** offer **maintain** (§2): read the issue's `dlc:*` label, drive the next step.
+   - **Does NOT exist →** this is a NEW pipeline. Create it — but FIRST **ask the pipeline
+     basics** as an explicit setup step (one `ask_question`, present these as the primary
+     knobs, not footnotes):
+       · **trust** — manual / assisted / autonomous
+       · **depth** — quick / standard / deep
+       · **results in repo** — commit results AND the pipeline conversation into the repo's
+         root `.dlc-yolo/` (this is the knob that puts the conversation + phase results in the
+         workspace repo itself; ASK it every time — do not silently default it off)
+       · **backlog auto-intake** — on/off
+       · **self-enabling** + **approach** (simplified / enhanced)
+     Accept "defaults are fine" → assisted / standard / results-in-repo OFF / backlog ON /
+     self-enabling OFF. Write the pipeline to `state.json.pipelines[]` with the chosen values.
+2. **THEN, and only then, proceed to intent / the chosen mode.** Intent is the first WORK step
+   and is **skippable** (§ self-enablement); do not run it until the pipeline is set up.
+
+Do this pipeline-setup step EVEN WHEN `$ARGUMENTS` names a repo/idea — a named idea resolves
+step 1's repo, it does NOT license skipping setup and jumping into intent. Record the setup
+choices in the conversation log.
+
+After setup, pick the mode / topic (via `ask_question`):
 
 1. **Start a new pipeline conversation**
 2. **Maintain an existing pipeline**
@@ -57,8 +89,6 @@ Ask the user (via `ask_question`) which mode / topic:
    agent for a step (the UI's "✨ Draft with /dlc-yolo" hands off here), go straight to it.
 4. **Create / assign a crew** — author a NEW globally-reusable crew (canon or addendum) and
    register it, or assign an existing crew to a step. See "Crew creation & assignment".
-
-`$ARGUMENTS` may already name a repo/idea — if so, skip straight to that.
 
 ## Crew creation & assignment
 
@@ -148,6 +178,12 @@ agent-setup panel's handoff). Do this conversationally:
    `gh label create dlc:<step-id> --color 6366f1 --description "DLC-YOLO stage" 2>/dev/null || true`
 4. **Record the card** in `state.json`: `{ id, title, stage: "<first-step-id>",
    pipeline_id, source: { type:"github", repo, issue:<n>, url }, sot:"github", … }`.
+   **Ownership guard:** when recording a card from an EXISTING issue you did not just file
+   (e.g. maintain-mode picking up an issue), verify its author is trusted — `gh issue view <n>
+   --repo <repo> --json author`; the `author.login` must be in `trusted_authors` (card →
+   pipeline → config, default the gh-authenticated user; empty ≠ allow-all; fail closed if
+   unverifiable). Do NOT create/drive a card for an untrusted-authored issue. An issue you file
+   yourself in this flow is authored by you, so it passes.
 5. If `gh` or the repo is unavailable, create the card with `sot:"local"` and tell the user
    it will **re-sync to GitHub** when access returns. Never block on GitHub.
 

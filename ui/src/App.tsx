@@ -580,7 +580,7 @@ function ViewTabs({ active, onChange, counts }: {
 }
 
 // --- Card Component ---
-function PipelineCardItem({ card, config, onApprove, onReject, onCycleTrust, onCycleDepth }: {
+function PipelineCardItem({ card, config, onApprove, onReject, onCycleTrust, onCycleDepth, onInterject, onResolveDecision }: {
   card: PipelineCard
   config: PipelineConfig
   onApprove?: () => void
@@ -1691,6 +1691,7 @@ export default function SdlcPipeline() {
   const [runPaneOpen, setRunPaneOpen] = useState(false)
   const [liveSpawns, setLiveSpawns] = useState<{ id: string; task: string; status?: string }[]>([])
   const kanbanRef = useRef<HTMLDivElement>(null)
+  const liveSpawnsAbsent = useRef(false)  // suppress live_spawns polling once found absent (no cron yet)
 
   const fetchCards = useCallback(async () => {
     try {
@@ -1794,13 +1795,22 @@ export default function SdlcPipeline() {
         const dir = STATE_PATH.slice(0, STATE_PATH.lastIndexOf('/'))
         const livePath = (dir ? dir + '/' : '') + 'live_spawns.json'
         const snap = await api.get('/api/file-read?path=' + encodeURIComponent(livePath))
+        liveSpawnsAbsent.current = false
         // ignore a stale snapshot (cron may have frozen it on a tool-error window)
         const fresh = snap?.at ? (Date.now() - new Date(snap.at).getTime()) < 180_000 : true
         setLiveSpawns(fresh && Array.isArray(snap?.runs) ? snap.runs : [])
-      } catch { /* snapshot may not exist yet — leave empty */ }
+      } catch {
+        // Snapshot not created yet (the dlc-yolo-spawns cron hasn't run) — a NORMAL state,
+        // not an error. Suppress further polling so we don't 404 every interval; a page
+        // reload re-arms it (by then the cron will have created the file).
+        liveSpawnsAbsent.current = true
+        setLiveSpawns([])
+      }
     }
     fetchCards().then(fetchLive)
-    const interval = setInterval(() => { fetchCards().then(fetchLive) }, 10000)
+    const interval = setInterval(() => {
+      fetchCards().then(() => { if (!liveSpawnsAbsent.current) fetchLive() })
+    }, 10000)
     return () => clearInterval(interval)
   }, [fetchCards, api])
 

@@ -143,15 +143,23 @@ class TestAdvanceDone:
 
 
 class TestAdvanceEscalate:
-    def test_none_status_fires_one_spawn_and_sets_pending(self, advance_mod, mock_ctx,
-                                                          state_factory, card_factory,
-                                                          write_state, read_state):
+    def test_none_status_fires_one_escalation_and_sets_pending(self, advance_mod, mock_ctx,
+                                                              state_factory, card_factory,
+                                                              write_state, read_state):
+        # Session-as-slot: escalation registers a one-shot AGENT CRON (cron_add) bound to the
+        # step's capability profile — NOT a slot-less spawn_run — so the step gets an openable
+        # dashboard slot. The mock cron_add returns a MagicMock (no id), so step_sessions may be
+        # unrecorded; the contract asserted here is the CALL + the pending transition.
         card = card_factory(stage="requirements", step_status={})
         _run(advance_mod, mock_ctx, write_state, state_factory(cards=[card]))
         assert mock_ctx.call_tool.call_count == 1
         args = mock_ctx.call_tool.call_args
-        assert args.args[0] == "kirocrew-core"
-        assert args.args[1] == "spawn_run"
+        assert args.args[0] == "kirocrew-cron"
+        assert args.args[1] == "cron_add"
+        payload = args.args[2]
+        assert payload.get("agent", "").startswith("dlcyolo-")   # bound to a capability profile
+        assert payload.get("delay") == 0                          # one-shot, fires immediately
+        assert payload.get("hide_in_chat") is False               # so the slot actually appears
         out = read_state()["cards"][0]
         assert out["step_status"]["requirements"] == "pending"
         assert "requirements" in out["pending_at"]
@@ -401,3 +409,131 @@ class TestTerminalLifecycle:
         with pytest.raises(Skip):
             write_state(state_factory(cards=[card]))
             advance_mod.advance(mock_ctx)
+
+
+# =========================================================================== #
+# TIER 2b — BUDGET GUARD (depth-budget-spec §2/§4; system-model §5 #1)
+# =========================================================================== #
+class TestBudgetGuard:
+    def test_child_count_over_cap_blocks_parent(self, advance_mod, mock_ctx, state_factory,
+                                                card_factory, write_state, read_state):
+        # standard depth default cap = 3; 4 children -> breach -> non-destructive block.
+        card = card_factory(
+            stage="design", depth="standard",
+            child_tickets=[{"issue": i, "status": "open"} for i in range(4)],
+        )
+        _run(advance_mod, mock_ctx, write_state, state_factory(cards=[card]))
+        out = read_state()["cards"][0]
+        assert out["step_status"]["design"] == "blocked"
+        assert out["block_reason"]["design"].startswith("budget:")
+        # children are NEVER deleted
+        assert len(out["child_tickets"]) == 4
+
+    def test_unlimited_budget_never_blocks(self, advance_mod, mock_ctx, state_factory,
+                                           card_factory, write_state, read_state):
+        card = card_factory(
+            stage="design", depth="deep",
+            budget={"max_child_cards": "unlimited", "effort_ceiling": "unlimited"},
+            child_tickets=[{"issue": i, "status": "open"} for i in range(20)],
+        )
+        _run(advance_mod, mock_ctx, write_state, state_factory(cards=[card]))
+        out = read_state()["cards"][0]
+        assert out["step_status"].get("design") != "blocked"
+
+    def test_under_cap_no_block(self, advance_mod, mock_ctx, state_factory, card_factory,
+                                write_state, read_state):
+        card = card_factory(
+            stage="design", depth="standard",
+            child_tickets=[{"issue": 1, "status": "open"}, {"issue": 2, "status": "open"}],
+        )
+        _run(advance_mod, mock_ctx, write_state, state_factory(cards=[card]))
+        out = read_state()["cards"][0]
+        assert out["step_status"].get("design") != "blocked"
+
+    def test_effort_ceiling_from_computed_scope_blocks(self, advance_mod, mock_ctx, state_factory,
+                                                       card_factory, write_state, read_state):
+        # deep ceiling = 40; scope sums to 50 -> breach (computed spent, no effort.spent needed).
+        card = card_factory(
+            stage="design", depth="deep",
+            child_tickets=[{"issue": 1, "status": "open"}],
+            effort={"scope": {"requirements": 20, "design": 30}},
+        )
+        _run(advance_mod, mock_ctx, write_state, state_factory(cards=[card]))
+        out = read_state()["cards"][0]
+        assert out["step_status"]["design"] == "blocked"
+        assert "effort" in out["block_reason"]["design"]
+
+    def test_no_children_not_evaluated(self, advance_mod, mock_ctx, state_factory, card_factory,
+                                       write_state, read_state):
+        # a childless card can't breach a FAN-OUT budget — it is skipped, not blocked.
+        card = card_factory(stage="design", depth="quick",
+                            step_status={"design": "done"})
+        _run(advance_mod, mock_ctx, write_state, state_factory(cards=[card]))
+        out = read_state()["cards"][0]
+        assert out["step_status"].get("design") != "blocked"
+
+
+# =========================================================================== #
+# TIER 2c — STEP-CRON CLEANUP (session-as-slot bookkeeping)
+# =========================================================================== #
+class TestStepCronCleanup:
+    def test_terminal_step_removes_cron_and_clears_id(self, advance_mod, mock_ctx, state_factory,
+                                                      card_factory, write_state, read_state):
+        card = card_factory(
+            stage="design",
+            step_status={"requirements": "advanced", "design": "done"},
+            step_sessions={"requirements": {"cron_id": "abc123", "slot_key": "cron-abc123",
+                                            "kept": True}},
+        )
+        _run(advance_mod, mock_ctx, write_state, state_factory(cards=[card]))
+        # cron_remove was called for the finished step's one-shot job
+        calls = [c for c in mock_ctx.call_tool.call_args_list
+                 if c.args[:2] == ("kirocrew-cron", "cron_remove")]
+        assert len(calls) == 1
+        assert calls[0].args[2] == {"job_id": "abc123"}
+        ptr = read_state()["cards"][0]["step_sessions"]["requirements"]
+        assert "cron_id" not in ptr           # cleared
+        assert ptr["slot_key"] == "cron-abc123"  # slot_key retained for UI/history
+        assert "retired_at" in ptr
+
+    def test_pending_step_cron_not_removed(self, advance_mod, mock_ctx, state_factory,
+                                           card_factory, write_state, read_state):
+        # a still-pending step keeps its cron (not terminal) — no cleanup.
+        card = card_factory(
+            stage="requirements",
+            step_status={"requirements": "pending"},
+            pending_at={"requirements": _iso(_now())},
+            step_sessions={"requirements": {"cron_id": "live99", "kept": True}},
+        )
+        _run(advance_mod, mock_ctx, write_state, state_factory(cards=[card]))
+        removes = [c for c in mock_ctx.call_tool.call_args_list
+                   if c.args[:2] == ("kirocrew-cron", "cron_remove")]
+        assert len(removes) == 0
+        assert read_state()["cards"][0]["step_sessions"]["requirements"]["cron_id"] == "live99"
+
+
+# =========================================================================== #
+# TIER 2d — OWNERSHIP GUARD @ RESOLVE (ownership-guard-spec §3/§6)
+# =========================================================================== #
+class TestResolveGuard:
+    def test_guarded_card_not_retired_when_author_untrusted(self, advance_mod, mock_ctx,
+                                                            state_factory, card_factory,
+                                                            write_state, read_state, monkeypatch):
+        # SECURITY OUTCOME (ownership-guard §6): a github-sot card whose author fails the guard
+        # is NEVER resolved/retired. In practice the TOP-OF-LOOP guard catches it first — it
+        # guard-blocks the card and skips before the terminal/retire block — so the card is not
+        # retired (lifecycle never flips to 'retired'). The resolve-boundary re-check is
+        # defense-in-depth behind that. Assert the outcome that matters: not retired + guarded.
+        monkeypatch.setattr(advance_mod, "_owner_ok", lambda *a, **k: False)
+        card = card_factory(stage="done", sot="github")
+        _run(advance_mod, mock_ctx, write_state, state_factory(cards=[card]))
+        out = read_state()["cards"][0]
+        assert out.get("lifecycle") != "retired"          # never resolved
+        assert out.get("guard", {}).get("passed") is False  # guard-blocked, visible
+
+    def test_trusted_card_retires_at_terminal(self, advance_mod, mock_ctx, state_factory,
+                                              card_factory, write_state, read_state, monkeypatch):
+        monkeypatch.setattr(advance_mod, "_owner_ok", lambda *a, **k: True)
+        card = card_factory(stage="done", sot="github")
+        _run(advance_mod, mock_ctx, write_state, state_factory(cards=[card]))
+        assert read_state()["cards"][0]["lifecycle"] == "retired"

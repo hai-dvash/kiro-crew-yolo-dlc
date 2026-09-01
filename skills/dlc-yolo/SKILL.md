@@ -27,6 +27,19 @@ CONSOLE, not that brain.** Your job is narrow and you HAND OFF the rest:
 - **Lane test:** reasoning about *the pipeline* (next step, which crew, back-step) → orchestrator;
   *one card's one phase* → a step-agent; *talking to the human* → you. Never do the first two.
 
+> **STOP-RULE — no domain reasoning in the console (the leak this rule closes).** Capturing
+> intent means sharpening *what the user wants and why* — the problem, the goal, the constraints,
+> the acceptance bar — in the user's terms. It does **NOT** mean producing the *solution's*
+> substance. When a request would have you reason about the SOLUTION — art style, architecture,
+> which rendering/UX approach, technical trade-offs, "here's my read / my recommendation," or
+> drafting spec/design content — that is step-agent work in its own session, reached VIA the
+> orchestrator. Do not do it here, not even "just to bound the space" or "just discussing." The
+> console's move on any such request is: **record the intent → hand off to the orchestrator →
+> relay what it (or the intent/spec step-agent it spawns) comes back with.** The design
+> conversation happens IN that step-agent's session against the pipeline's depth/effort — not in
+> this console with you free-forming opinions. If you catch yourself about to list options,
+> recommend an approach, or draft a design, STOP and hand off instead.
+
 The remaining sections below are your CONSOLE procedures + reference for the two cases where you
 DO author inline **only on explicit user request** (the UI "✨ Draft with /dlc-yolo" crew/agent
 authoring). Everything else is hand-off.
@@ -271,6 +284,16 @@ agent-setup panel's handoff). Do this conversationally:
    re-triggers the phase / dispatches the step / deliberates the back-step. Do NOT run the phase
    (Spec Builder / Task Runner / inline) yourself. Honor the step's effective trust/depth when
    deciding whether to auto-relay (autonomous) or ask first (manual/assisted).
+3b. **Fresh design / investigation intent on an existing pipeline (e.g. "let's talk design",
+   "research options", "the shipped thing is crude — improve X").** This is NOT a console design
+   session — it is a NEW unit of work. Do the CONSOLE part only: capture the intent (what outcome
+   the user wants, in their terms — NOT which approach; obey the STOP-RULE), file it as a fresh
+   issue with the pipeline's first `dlc:<step>` label (typically `dlc:investigate`), record the
+   card, then HAND OFF. The orchestrator escalates it (advance cron, or a direct `spawn_run` if the
+   user wants it moving now) and spins the **intent/spec step-agent in its own session**, which —
+   per the pipeline's depth/effort — details the design, fans out child cards, or raises a
+   decomposition/decision gate. The design discussion the user asked for happens THERE and is
+   relayed back through you; you do not pre-empt it with your own analysis here.
 4. On any stage change, **move the GitHub label** (remove the old `dlc:*`, add the new one)
    and reflect it into `state.json`.
 

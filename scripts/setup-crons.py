@@ -38,9 +38,11 @@ Run it after editing the cron script or the manifest crons, or after a UI/skill 
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import py_compile
+import re
 import shutil
 import sys
 import time
@@ -65,11 +67,24 @@ def _log(msg: str) -> None:
     print(f"[dlc-yolo sync] {msg}")
 
 
+def _job_id(name: str) -> str:
+    """A DETERMINISTIC 12-char lowercase-hex id for a job name.
+
+    The gateway's cron-trigger/remove CLI validates ids against ^[a-f0-9]{6,12}$
+    (see kiro_crew/cron_trigger.py _JOB_ID_RE). The old scheme —
+    name.replace("dlc-yolo-", "dlc")[:12] — produced ids like 'dlcadvance' /
+    'dlcspawns' that contain non-hex letters, so `kirocrew cron trigger`/`remove`
+    REJECTED them as "Invalid job ID format". Derive a stable hex id from the name
+    instead: deterministic (re-runs reconcile the SAME job, no duplicates) AND
+    format-valid (so the job is manually triggerable/removable)."""
+    return hashlib.sha1(name.encode("utf-8")).hexdigest()[:12]
+
+
 def _job_template(name: str) -> dict:
     """A full crons.json v2 job record with safe defaults (matches the live schema)."""
     now = time.time()
     return {
-        "id": name.replace("dlc-yolo-", "dlc")[:12],
+        "id": _job_id(name),
         "name": name,
         "message": "",
         "schedule": {"kind": "every", "every_secs": 120, "at_ts": None, "cron_expr": None},
@@ -184,7 +199,13 @@ def reconcile_crons(check: bool) -> bool:
         drift = any(cur.get(f, "") != want.get(f, "") for f in fields)
         sched_drift = (cur.get("schedule", {}).get("every_secs")
                        != want["schedule"]["every_secs"])
-        if drift or sched_drift:
+        # ID REPAIR: the gateway's cron trigger/remove CLI validates ids against
+        # ^[a-f0-9]{6,12}$ (cron_trigger._JOB_ID_RE). An older setup wrote non-hex ids
+        # (e.g. 'dlcadvance') that the CLI rejects as "Invalid job ID format". If the
+        # current id is non-conformant, rewrite it to the deterministic hex id so the
+        # job becomes manually triggerable/removable. Leave a valid id untouched.
+        id_drift = not re.fullmatch(r"[a-f0-9]{6,12}", str(cur.get("id", "")))
+        if drift or sched_drift or id_drift:
             if check:
                 _log(f"DRIFT: cron '{name}' fields differ (would update)")
             else:
@@ -196,6 +217,9 @@ def reconcile_crons(check: bool) -> bool:
                 cur["approval_mode"] = "auto"
                 cur["silent"] = True
                 cur["hide_in_chat"] = True
+                if id_drift:
+                    cur["id"] = want["id"]
+                    _log(f"repaired non-hex id for cron '{name}' → {want['id']}")
                 _log(f"updated cron '{name}'")
             changed = True
         else:

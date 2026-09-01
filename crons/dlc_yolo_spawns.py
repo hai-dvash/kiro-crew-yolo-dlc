@@ -18,10 +18,32 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from pathlib import Path
 
 from kiro_crew.cron_script import Report, Skip
+
+
+# spawn_list's live text listing: "<hexid>  [<status>] (<uptime>, ...) <task text>".
+# Capture id, status, and the trailing task so the snapshot can match dlc-yolo runs and
+# join on agent_id. Tolerant of extra spacing; the task is whatever follows the (...) group.
+# NOTE: spawn_list takes NO args and returns a plain string ("\n".join lines) with NO
+# structuredContent (verified in kiro_crew/mcp_core.py: inputSchema properties={}, handler
+# emits f"{id}  [{status}]{err}{progress}{scope}  {task[:60]}"). Text parsing is the ONLY
+# contract the tool offers — there is no JSON/structured mode to prefer.
+_LINE_RE = re.compile(r"^\s*([0-9a-f]{6,})\s+\[([^\]]+)\]\s*(?:\([^)]*\))?\s*(.*)$")
+
+
+def _parse_lines(text: str) -> list[dict]:
+    """Parse spawn_list's human-readable listing into run dicts. Empty on no match."""
+    out: list[dict] = []
+    for line in (text or "").splitlines():
+        m = _LINE_RE.match(line)
+        if not m:
+            continue
+        out.append({"id": m.group(1), "status": m.group(2).strip(), "task": m.group(3).strip()})
+    return out
 
 
 def _base() -> Path:
@@ -62,14 +84,22 @@ def snapshot(ctx):
             if isinstance(content, list):
                 for part in content:
                     if isinstance(part, dict) and part.get("type") == "text":
+                        text = part.get("text") or ""
+                        # spawn_list returns a JSON list/dict OR (the live format) a
+                        # human-readable listing: one run per line as
+                        #   "<hexid>  [<status>] (<uptime>, ...) <task text>".
+                        # Try JSON first; fall back to line parsing so we don't silently
+                        # see 0 runs (the bug that froze live_spawns.json at runs=0 while a
+                        # dlc-yolo subagent was demonstrably running).
                         try:
-                            parsed = json.loads(part.get("text") or "")
+                            parsed = json.loads(text)
+                            if isinstance(parsed, list):
+                                return parsed
+                            if isinstance(parsed, dict):
+                                return parsed.get("runs") or parsed.get("subagents") or []
                         except (json.JSONDecodeError, TypeError):
-                            continue
-                        if isinstance(parsed, list):
-                            return parsed
-                        if isinstance(parsed, dict):
-                            return parsed.get("runs") or parsed.get("subagents") or []
+                            pass
+                        return _parse_lines(text)
         return []
 
     runs = []

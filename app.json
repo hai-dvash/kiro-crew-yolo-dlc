@@ -4,6 +4,9 @@
   "displayName": "DLC-YOLO",
   "description": "Automated software development lifecycle — intake issues, spec them, implement, review, and ship PRs with configurable human gates.",
   "author": "haid",
+  "homepage": "https://github.com/hai-dvash/kiro-crew-yolo-dlc",
+  "repository": "https://github.com/hai-dvash/kiro-crew-yolo-dlc",
+  "license": "Apache-2.0",
   "tags": ["sdlc", "automation", "pipeline", "developer-tools"],
   "defaultEnabled": true,
   "agents": [

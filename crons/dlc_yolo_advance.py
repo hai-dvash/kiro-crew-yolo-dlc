@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -187,14 +188,23 @@ def _spawn_agent_id(res) -> str | None:
             if isinstance(content, list):
                 for part in content:
                     if isinstance(part, dict) and part.get("type") == "text":
+                        text = part.get("text") or ""
+                        # spawn_run's result may be JSON with an id/agent_id, OR (the live
+                        # format) a human-readable confirmation line that LEADS WITH the new
+                        # agent's hex id — same listing shape as spawn_list. Try JSON first,
+                        # then fall back to the first hex token so step_sessions actually gets
+                        # a pointer (the bug that left step_sessions empty on every escalation).
                         try:
-                            parsed = json.loads(part.get("text") or "")
+                            parsed = json.loads(text)
+                            if isinstance(parsed, dict):
+                                hit = _from_dict(parsed)
+                                if hit:
+                                    return hit
                         except (json.JSONDecodeError, TypeError):
-                            continue
-                        if isinstance(parsed, dict):
-                            hit = _from_dict(parsed)
-                            if hit:
-                                return hit
+                            pass
+                        m = re.search(r"\b([0-9a-f]{6,12})\b", text)
+                        if m:
+                            return m.group(1)
     except Exception:
         return None
     return None

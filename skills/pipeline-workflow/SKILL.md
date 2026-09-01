@@ -442,6 +442,28 @@ blocks waiting on a persistent orchestrator**.
   block the loop. `blocked` is the interjection hand-off (a step parks with a reason, a human
   interjects, a later run resumes) — it is what makes "interjectable" real rather than a wedge.
 
+### Step agent = persistent scoped session that fans out from within (canon AND custom)
+
+See `docs/persistent-step-agent-sessions-spec.md`. Each agent step — built-in OR a pipeline's own
+**custom** `type:"agent"` step — escalates as a **persistent, capability-scoped agent** so it is
+reachable (interject / gate / respond to orchestrator) AND holds the tools to **spawn its crews +
+addenda from WITHIN itself**:
+
+- **Escalate as the step's capability PROFILE** (`card.capability → step.capability → derived`),
+  targeting `dlcyolo-{readonly|authoring|builder|coordinator}`. A spawned agent inherits ITS OWN
+  `--agent` config's tools (verified: `kiro-cli --agent <name>`, MCP via per-session `mcpServers`),
+  so a `coordinator`-profiled step agent genuinely holds `select_crew`/`spawn_run` and dispatches
+  crews itself. **Custom steps resolve capability the SAME way** — no canon/custom distinction.
+- **`keep=true`** so the step agent persists → `spawn_continue` (resume/interject) / `spawn_steer`
+  (live); record `card.step_sessions[step]={agent_id,name,at,kept:true}`.
+- **Crews + addenda spawn from WITHIN the step agent** (it holds the tools): the canon
+  `step.agent.crew` pass, then each matching `step.addenda[]` pass — uncapped per call,
+  artifact-only, owned-repo cwd. NEVER from the script cron (a zero-token script that cannot route
+  crews — it only fires the `keep=true` profiled spawn and reads terminal status back).
+- **`coordinator` (crew-routing) only for steps that dispatch** (`step.agent.crew`/`addenda[]`
+  set); producing steps default `authoring`/`builder`. No silent over-grant. If a step needs a
+  wider capability it raises a `capability-gap` decision — it never fakes a crew run.
+
 ---
 
 ## Phase Triggers

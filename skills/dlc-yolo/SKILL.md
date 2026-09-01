@@ -5,7 +5,35 @@ description: Drive the DLC-YOLO pipeline from chat — start a new pipeline conv
 
 # /dlc-yolo — pipeline driver
 
-You turn this chat session into a driver for the DLC-YOLO pipeline. Pipeline state lives at
+You turn this chat session into a driver for the DLC-YOLO pipeline.
+
+## Your lane: thin CONSOLE, not the orchestrator (single-orchestrator-role-lanes-spec)
+
+There is ONE orchestrator brain — the `pipeline-orchestrator` agent. **You are the human's
+CONSOLE, not that brain.** Your job is narrow and you HAND OFF the rest:
+
+- **You DO:** (a) capture/sharpen the idea WITH the human, (b) present the SETUP form + collect
+  the config, (c) file the issue + record the card, (d) **HAND OFF to the orchestrator**, (e)
+  relay the orchestrator's gates/questions to the human and write their answers/interjections
+  back to `state.json`.
+- **You do NOT** run intent-resolution logic yourself, spawn step-agents, create/bootstrap crews,
+  wire `step.agent.crew`/`addenda[]`, deliberate back-step/fan-out, or dispatch phases. Those are
+  the ORCHESTRATOR's — you INVOKE it, you don't BECOME it.
+- **Hand-off, two paths (both land on the SAME orchestrator):** (async, default) file the issue
+  with its `dlc:<first-step>` label + record the card, then let the **advance cron escalate** it
+  to the orchestrator — you need spawn nothing. (direct, when the human wants it moving now)
+  `spawn_run` the `pipeline-orchestrator` (keep=true) as this pipeline's orchestrator session,
+  record `card.orchestrator_session`, and relay its questions.
+- **Lane test:** reasoning about *the pipeline* (next step, which crew, back-step) → orchestrator;
+  *one card's one phase* → a step-agent; *talking to the human* → you. Never do the first two.
+
+The remaining sections below are your CONSOLE procedures + reference for the two cases where you
+DO author inline **only on explicit user request** (the UI "✨ Draft with /dlc-yolo" crew/agent
+authoring). Everything else is hand-off.
+
+### State + SoT (unchanged)
+
+Pipeline state lives at
 the DLC-YOLO state file — resolved durable-first: `$DLC_YOLO_STATE` if set, else
 `~/.dlc-yolo/state.json` (durable), else `/tmp/dlc-yolo/state.json` (ephemeral fallback);
 read via `/api/file-read`, write via `/api/file-write` (the cron bootstraps the file).
@@ -95,6 +123,13 @@ After setup, pick the mode / topic (via `ask_question`):
    register it, or assign an existing crew to a step. See "Crew creation & assignment".
 
 ## Crew creation & assignment
+
+> **Lane note (single-orchestrator-role-lanes-spec):** this section is CONSOLE authoring you run
+> ONLY on an EXPLICIT user request — the UI "✨ Draft with /dlc-yolo" button, or the user asking
+> you to design/assign a crew. It is NOT the autonomous bootstrap path: when a *pipeline*
+> self-enables, the ORCHESTRATOR infers the crew lineup and runs `kirocrew agent create` during
+> bootstrap — you do not. Here you are helping a human hand-author one crew; there the orchestrator
+> does it as part of driving the pipeline. Same CLI + registry, different caller.
 
 DLC-YOLO steps can route to a **crew** (a `config.json` agents entry that `select_crew`
 binds). Crews created here are **GLOBAL** — usable across ALL of KiroCrew (Spec Builder
@@ -193,14 +228,14 @@ agent-setup panel's handoff). Do this conversationally:
    `pipeline.results_in_repo` in `state.json` (a card may override it). This is the same knob
    the UI Pipeline Setup modal exposes as the "Save results into repo" toggle.
 
-   **Self-enablement (setup → intent → per-step).** After the pipeline exists, offer the
-   self-enabling flow (design: pipeline-workflow skill / `docs/self-enablement-spec.md`):
-   (a) **Setup** — propose **simplified vs enhanced** (trust/depth-gated; if the user doesn't
-   choose, default mid + simplified). (b) **Intent** — run the `intent-agent` to sharpen the
-   idea (it RAISES needs-info/needs-research into the one decision gate; autonomous elaboration
-   yields an intent card with optional research addenda), OR let the user **skip** intent. (c)
-   **Per-step elaboration** — if skipped, the user can elaborate spec or any step on demand.
-   Each agent then runs simplified or enhanced per the chosen approach.
+   **Self-enablement → HAND OFF (do NOT run it here).** Setup → intent → per-step → bootstrap is
+   ORCHESTRATOR work (design: pipeline-workflow skill / `docs/self-enablement-spec.md`). Your part
+   is ONLY the **Setup form**: present **simplified vs enhanced** + trust/depth/results/backlog
+   (trust/depth-gated; if the user doesn't choose, default mid + simplified) and WRITE the chosen
+   config onto the pipeline in `state.json`. Then HAND OFF — do NOT run the intent-agent, do NOT
+   bootstrap crews, do NOT elaborate steps yourself. The orchestrator (escalated by the advance
+   cron, or spawned directly if the user wants it moving now) runs intent (skippable), per-step
+   elaboration, and bootstrap, relaying its gates back through you.
 2. **Spec the idea WITH the user.** Ask focused clarifying questions (1–3 at a time), state
    recommendations, keep it tight. You may spec anything — feature, bug, chore.
 3. **File it to GitHub as an issue** on the pipeline's repo — this is the invariant, because
@@ -229,9 +264,13 @@ agent-setup panel's handoff). Do this conversationally:
 1. List pipelines/cards; let the user pick one.
 2. Read the card's current stage from its issue's `dlc:*` label (GitHub is SoT). If it
    drifts from `state.json`, trust the label and reconcile.
-3. Offer the next action for where it sits: answer a gate (approve/reject), re-spec,
-   re-trigger a phase (Spec Builder / Task Runner / inline), park an over-scoped feature to
-   the backlog, or propose a back-step. Honor the step's effective trust/depth.
+3. Offer the next action for where it sits, then HAND OFF the *doing* to the orchestrator: answer
+   a gate (approve/reject — you relay the human's choice into `state.json`), request a re-spec or a
+   back-step, or park an over-scoped feature to the backlog. You COLLECT the human's intent and
+   write it to the card (gate decision, `card.interjection[]`, park note); the ORCHESTRATOR
+   re-triggers the phase / dispatches the step / deliberates the back-step. Do NOT run the phase
+   (Spec Builder / Task Runner / inline) yourself. Honor the step's effective trust/depth when
+   deciding whether to auto-relay (autonomous) or ask first (manual/assisted).
 4. On any stage change, **move the GitHub label** (remove the old `dlc:*`, add the new one)
    and reflect it into `state.json`.
 

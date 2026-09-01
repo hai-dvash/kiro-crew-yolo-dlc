@@ -182,9 +182,52 @@ def reconcile_crons(check: bool) -> bool:
     desired = {j["name"]: j for j in _desired_jobs()}
 
     changed = False
-    by_name = {j.get("name"): j for j in jobs}
+
+    def _match(nm: str) -> dict | None:
+        """Find the existing job for a desired BARE name, matching EITHER the bare name OR the
+        app-NAMESPACED form 'dlc-yolo/<name>'. A gateway restart / `kirocrew app enable` re-scans
+        the manifest and registers these crons app-namespaced (dlc-yolo/dlc-yolo-advance), while
+        setup-crons.py's desired names are bare (dlc-yolo-advance). Matching only the bare name made
+        each mechanism think the other's job was missing → it re-added its own → DUPLICATE crons
+        (6 where 3 belong, racing). Prefer the NAMESPACED record when both exist: the gateway
+        re-creates it on every restart, so it is the durable one to keep — reconcile it in place and
+        let the bare duplicate be pruned below."""
+        ns = None
+        bare = None
+        for j in jobs:
+            jn = j.get("name") or ""
+            if jn == nm:
+                bare = j
+            elif jn.endswith("/" + nm) or jn.split("/")[-1] == nm:
+                ns = j
+        return ns or bare
+
+    # Prune exact-duplicate bare records when a namespaced twin exists for the same desired job
+    # (the residue of the historic bare-vs-namespaced split) so we converge on ONE per job.
+    desired_bare = set(desired.keys())
+    kept: list[dict] = []
+    seen_leaf: set[str] = set()
+    for j in jobs:
+        jn = j.get("name") or ""
+        leaf = jn.split("/")[-1]
+        if leaf in desired_bare:
+            namespaced = "/" in jn
+            key = leaf + ("|ns" if namespaced else "|bare")
+            # if a namespaced twin for this leaf exists anywhere, drop the bare one
+            has_ns_twin = any((oj.get("name") or "").endswith("/" + leaf) for oj in jobs)
+            if not namespaced and has_ns_twin:
+                if not check:
+                    _log(f"pruned duplicate bare cron '{jn}' (namespaced twin kept)")
+                changed = True
+                continue
+            if key in seen_leaf:
+                continue  # collapse accidental same-form dupes
+            seen_leaf.add(key)
+        kept.append(j)
+    jobs = kept
+
     for name, want in desired.items():
-        cur = by_name.get(name)
+        cur = _match(name)
         if cur is None:
             if check:
                 _log(f"DRIFT: cron '{name}' missing (would add)")

@@ -154,6 +154,42 @@ def _eff_trust(state: dict, card: dict, step: dict, pl: dict | None) -> str:
             or (state.get("config") or {}).get("trust") or "assisted")
 
 
+def _eff_depth(state: dict, card: dict, step: dict, pl: dict | None) -> str:
+    """Effective depth for a step: card -> step -> pipeline -> config (mirror of _eff_trust).
+    The cron only PASSES depth into the escalation seed; the fan-out BUDGET (crew/child-card cap)
+    is enforced prompt-side by the orchestrator (depth-budget-spec), not by this script."""
+    return (card.get("depth") or step.get("depth") or (pl or {}).get("depth")
+            or (state.get("config") or {}).get("depth") or "standard")
+
+
+def _resolve_capability(card: dict, step: dict) -> str:
+    """Resolve the step's capability PROFILE agent name (persistent-step-agent-sessions-spec §5).
+
+    Order: explicit card.capability -> step.capability -> a deterministic role default. A one-off
+    step.capability_template (or card) wins outright if set. Maps a bare capability keyword to its
+    dlcyolo-<profile> kiro-agent. GUARD: 'coordinator' (crew-routing) is granted ONLY to a step that
+    actually dispatches (step.agent.crew or step.addenda[] set); a producing step defaults to
+    'authoring' — never silently over-grant coordinator. The rich derive-from-prior-scope / compose
+    / gate-a-widening decision stays the ORCHESTRATOR's; the script only needs a safe default so the
+    spawned agent has enough tools (the agent can raise a capability-gap decision if it needs more)."""
+    tmpl = card.get("capability_template") or step.get("capability_template")
+    if tmpl:
+        return str(tmpl)
+    cap = card.get("capability") or step.get("capability")
+    agent = step.get("agent") or {}
+    dispatches = bool(agent.get("crew") or step.get("addenda"))
+    if not cap:
+        # role default: dispatching step -> coordinator; a plain producing step -> authoring.
+        cap = "coordinator" if dispatches else "authoring"
+    # guard: never grant coordinator to a step that doesn't dispatch.
+    if cap == "coordinator" and not dispatches:
+        cap = "authoring"
+    valid = {"readonly", "authoring", "builder", "coordinator"}
+    if cap not in valid:
+        cap = "authoring"
+    return f"dlcyolo-{cap}"
+
+
 def _is_gate(step: dict) -> bool:
     return step.get("type") == "gate" or str(step.get("id", "")).startswith("gate-")
 
@@ -437,43 +473,87 @@ def advance(ctx):
                 if (eligible and trust != "manual"
                         and escalations < MAX_ESCALATIONS):
                     try:
-                        # Crews are spawned FROM WITHIN a proper agent session (which has
-                        # select_crew/spawn_run) — NOT nested inside this cron-spawned run,
-                        # which may lack those tools. So the escalated run PERFORMS the step
-                        # itself and, if a wired crew genuinely requires the MCP orchestration
-                        # layer it doesn't have, it writes a TERMINAL 'blocked' with the reason
-                        # rather than faking or hanging. (event-driven §5a/§5b)
+                        # RECLAIM (persistent-step-agent-sessions-spec §4/§9-4): if this is a STALE
+                        # re-escalation and the step has a KEPT session pointer, prefer resuming that
+                        # same conversation (spawn_continue) over a cold re-spawn — it keeps the
+                        # agent's accumulated context. Fall through to a fresh profiled spawn if there
+                        # is no kept pointer or the continue is unavailable.
+                        prior = (card.get("step_sessions") or {}).get(stage) or {}
+                        prior_aid = prior.get("agent_id") if prior.get("kept") else None
+                        if stale and status in ("pending", "error") and prior_aid:
+                            try:
+                                ctx.call_tool("kirocrew-core", "spawn_continue", {
+                                    "agent_id": prior_aid,
+                                    "task": (f"Resume pipeline step '{stage}' for DLC-YOLO card "
+                                             f"{card.get('id')}: your prior run went stale without a "
+                                             f"terminal status. Re-check state, incorporate any "
+                                             f"card.interjection[]/decisions[], finish the step, and "
+                                             f"write a TERMINAL step_status (done/blocked/error) — "
+                                             f"never leave it pending."),
+                                })
+                                card.setdefault("step_status", {})[stage] = "pending"
+                                card.setdefault("pending_at", {})[stage] = now
+                                if status == "error":
+                                    card.setdefault("retry_count", {})[stage] = retries + 1
+                                escalations += 1
+                                changed = True
+                                continue  # resumed the kept session; no fresh spawn this cycle
+                            except Exception:
+                                pass  # continue unavailable → fall through to a fresh profiled spawn
+                        # PERSISTENT SCOPED STEP-AGENT (persistent-step-agent-sessions-spec §5):
+                        # escalate the step as its resolved CAPABILITY PROFILE (so the spawned
+                        # agent inherits that profile's tools — a coordinator-profiled agent HOLDS
+                        # select_crew/spawn_run and dispatches crews/addenda FROM WITHIN itself),
+                        # with keep=true so it persists (spawn_continue/spawn_steer → interjectable),
+                        # carrying the card's effective trust + depth in the seed.
+                        profile = _resolve_capability(card, step)
+                        depth = _eff_depth(state, card, step, pl)
                         crew = (((step or {}).get("agent") or {}).get("crew"))
-                        crew_line = (f" This step is crew-assigned ('{crew}'): perform the step's"
-                                     f" work fulfilling that crew's role; if genuine crew routing"
-                                     f" (select_crew/spawn_run) is required and unavailable in your"
-                                     f" tools, set step_status['{stage}']='blocked' with a"
-                                     f" block_reason instead of faking it." if crew else "")
+                        # SEAM 1 (spec §10): the step agent WAS spawned as its profile and HOLDS the
+                        # routing tools for a dispatching step — instruct it to route from within,
+                        # NOT the old "you probably can't, so blocked" premise. Only a genuine
+                        # profile/tool gap raises a capability-gap decision (never fake, never
+                        # silently downgrade).
+                        crew_line = (
+                            f" This step is crew-assigned ('{crew}'): you were spawned as '{profile}'"
+                            f" and HOLD select_crew/spawn_run — run that crew (and any matching"
+                            f" step.addenda[]) FROM WITHIN this session, bounded by the depth budget."
+                            f" Only if your resolved profile genuinely lacks a needed tool, raise a"
+                            f" capability-gap decision — never fake a crew run or silently downgrade."
+                            if crew else "")
                         spawn_res = ctx.call_tool("kirocrew-core", "spawn_run", {
                             "task": (f"Run pipeline step '{stage}' for DLC-YOLO card "
-                                     f"{card.get('id')} in repo {(card.get('source') or {}).get('repo')}.{crew_line} "
+                                     f"{card.get('id')} in repo {(card.get('source') or {}).get('repo')}. "
+                                     f"Effective modes — trust={trust}, depth={depth}, capability={profile}."
+                                     f"{crew_line} "
                                      f"Follow the pipeline-workflow skill and PRODUCE the step's "
-                                     f"artifact (code where applicable). You MUST end by writing a "
+                                     f"artifact (code where applicable), spawning crews/addenda from "
+                                     f"WITHIN this session bounded by depth's fan-out budget. Honor "
+                                     f"trust for the phase trigger and your end-of-step GATE "
+                                     f"(autonomous → auto-approve; assisted/manual → park the gate "
+                                     f"for a human, don't force it). You MUST end by writing a "
                                      f"TERMINAL status to card.step_status['{stage}'] in the DLC-YOLO "
                                      f"state file at {STATE}: 'done' if the artifact was genuinely "
                                      f"produced, 'blocked' (+ block_reason) if it needs a human/decision, "
                                      f"or 'error' (+ error_reason) on a retriable failure — NEVER leave "
                                      f"it 'pending'. Write state via the file API / native write tool, "
                                      f"NOT inline shell. Stay within the card's owned repo."),
-                            "agent": "pipeline-orchestrator",
+                            "agent": profile,
+                            "keep": True,
                         })
                         card.setdefault("step_status", {})[stage] = "pending"
                         card.setdefault("pending_at", {})[stage] = now
                         # FIRST-CLASS SESSIONS (first-class-sessions-spec §3): record a pointer to
                         # the step's spawned session so the UI can link to it (join on agent_id
                         # against live_spawns.json) and a later interjection can spawn_continue the
-                        # SAME conversation instead of a cold re-spawn. Best-effort — a missing id
-                        # just means no deep-link this run; it never blocks the escalation.
+                        # SAME conversation instead of a cold re-spawn. kept:true marks it
+                        # continuable. Best-effort — a missing id just means no deep-link this run;
+                        # it never blocks the escalation.
                         _aid = _spawn_agent_id(spawn_res)
                         if _aid:
                             card.setdefault("step_sessions", {})[stage] = {
                                 "agent_id": _aid, "name": f"dlc-yolo · {card.get('title', card.get('id'))} · {stage}",
-                                "at": now}
+                                "at": now, "kept": True}
                         if status == "error":
                             card.setdefault("retry_count", {})[stage] = retries + 1
                         escalations += 1

@@ -5,6 +5,26 @@ always: true
 
 # SDLC Pipeline Workflow
 
+## Roles & lanes (single orchestrator — single-orchestrator-role-lanes-spec)
+
+Three non-overlapping lanes; nothing spans two:
+
+- **`/dlc-yolo` command = the human CONSOLE.** Captures/sharpens intent, presents the SETUP form,
+  files the issue + records the card, HANDS OFF to the orchestrator, and relays gates/questions ↔
+  human (writing answers/interjections to `state.json`). It does NOT run intent/bootstrap/
+  step-dispatch — it INVOKES the orchestrator, it does not BECOME it.
+- **`pipeline-orchestrator` = the SINGLE brain.** Owns SETUP-enactment, intent dispatch, bootstrap
+  (crew create), per-step dispatch, capability/trust/depth resolution, decision-gate deliberation,
+  back-step/fan-out, label moves, post-gate routing, ownership guard — in ONE place. Invoked by
+  BOTH the command and the advance cron (same agent, same logic, no duplicate implementation).
+- **step-agents (investigate/spec/design/impl/review/custom) = ONE narrow job each on their card**,
+  in their own persistent scoped session (fan out crews/addenda from within — see the step-agent
+  session section). A cross-step fork is RAISED to the orchestrator (decision gate), never decided
+  in the step. `investigate` is just the first step-agent, not a console peer or a setup actor.
+
+**Lane test:** reasoning about *the pipeline* (next step, which crew, back-step) → orchestrator;
+*one card's one phase* → a step-agent; *talking to the human* → the command.
+
 ## Pipeline Stages
 
 ```

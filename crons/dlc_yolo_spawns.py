@@ -25,24 +25,38 @@ from pathlib import Path
 from kiro_crew.cron_script import Report, Skip
 
 
-# spawn_list's live text listing: "<hexid>  [<status>] (<uptime>, ...) <task text>".
-# Capture id, status, and the trailing task so the snapshot can match dlc-yolo runs and
-# join on agent_id. Tolerant of extra spacing; the task is whatever follows the (...) group.
-# NOTE: spawn_list takes NO args and returns a plain string ("\n".join lines) with NO
-# structuredContent (verified in kiro_crew/mcp_core.py: inputSchema properties={}, handler
-# emits f"{id}  [{status}]{err}{progress}{scope}  {task[:60]}"). Text parsing is the ONLY
-# contract the tool offers — there is no JSON/structured mode to prefer.
-_LINE_RE = re.compile(r"^\s*([0-9a-f]{6,})\s+\[([^\]]+)\]\s*(?:\([^)]*\))?\s*(.*)$")
+# spawn_list's live text listing: "<hexid>  [<status>] (<uptime>, ...) <task text>", one record
+# per run — BUT the progress "(... Running: <cmd> ...)" field can contain EMBEDDED NEWLINES when
+# the run is executing a multi-line shell command / heredoc (verified live: a running step whose
+# command was a `python3 - <<'PY'` heredoc split the record across several physical lines). So we
+# must NOT split-then-match line-by-line (that shreds such a record and drops the running row —
+# the root cause of live_spawns.json freezing at runs=0 while a subagent was demonstrably
+# running). Instead: find each RECORD START ("<hexid>  [status]") and take everything up to the
+# next record start (or the trailing "Available agents:" footer) as ONE record, collapsing
+# embedded newlines, then pull id/status/task from it. NOTE: spawn_list takes NO args and returns
+# a plain string with NO structuredContent (kiro_crew/mcp_core.py). Text parsing is the only
+# contract.
+_REC_START_RE = re.compile(r"(?m)^\s*([0-9a-f]{6,})\s+\[([^\]]+)\]")
+_REC_RE = re.compile(r"^\s*[0-9a-f]{6,}\s+\[[^\]]+\]\s*(?:\([^)]*\)\s*)?(.*)$", re.DOTALL)
 
 
 def _parse_lines(text: str) -> list[dict]:
-    """Parse spawn_list's human-readable listing into run dicts. Empty on no match."""
+    """Parse spawn_list's human-readable listing into run dicts, ROBUST to a progress field that
+    contains embedded newlines (a running multi-line command). Empty on no match."""
+    text = text or ""
+    # Drop the trailing "Available agents: ..." footer so it can't leak into the last record.
+    foot = text.find("\nAvailable agents:")
+    if foot != -1:
+        text = text[:foot]
+    starts = list(_REC_START_RE.finditer(text))
     out: list[dict] = []
-    for line in (text or "").splitlines():
-        m = _LINE_RE.match(line)
-        if not m:
-            continue
-        out.append({"id": m.group(1), "status": m.group(2).strip(), "task": m.group(3).strip()})
+    for i, m in enumerate(starts):
+        seg = text[m.start(): (starts[i + 1].start() if i + 1 < len(starts) else len(text))]
+        rid, status = m.group(1), m.group(2).strip()
+        rm = _REC_RE.match(seg)
+        # task = the tail after the (progress) group, with embedded newlines/whitespace collapsed
+        task = " ".join((rm.group(1) if rm else "").split())
+        out.append({"id": rid, "status": status, "task": task})
     return out
 
 
@@ -73,6 +87,21 @@ def snapshot(ctx):
     # list or {runs:[]} — so unwrap defensively before the shape checks (C1: without this the
     # cron always saw 0 runs and the live pane never showed anything).
     def _extract(r):
+        # call_tool may hand back the tool's text DIRECTLY as a bare str (verified live:
+        # ScriptContext.call_tool returns type=str for spawn_list) — NOT only the MCP envelope.
+        # Handle the string case FIRST (parse the human-readable listing), else the older
+        # list/dict/{content:[...]} shapes. Missing this branch made _extract return [] without
+        # ever reaching _parse_lines — the true cause of live_spawns.json frozen at runs=0.
+        if isinstance(r, str):
+            try:
+                parsed = json.loads(r)
+                if isinstance(parsed, list):
+                    return parsed
+                if isinstance(parsed, dict):
+                    return parsed.get("runs") or parsed.get("subagents") or []
+            except (json.JSONDecodeError, TypeError):
+                pass
+            return _parse_lines(r)
         if isinstance(r, list):
             return r
         if isinstance(r, dict):

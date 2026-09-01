@@ -240,6 +240,14 @@ def reconcile_crons(check: bool) -> bool:
         # Reconcile only the fields we own; preserve runtime stats (last_run_ts etc.).
         fields = ["script", "message", "agent_id"]
         drift = any(cur.get(f, "") != want.get(f, "") for f in fields)
+        # The mute flags (silent/hide_in_chat) must be part of drift detection too:
+        # the update branch below is the ONLY writer of these flags, so if they were
+        # excluded here a job that matches on script/message/agent/schedule/id but has
+        # silent:false in the live store would report "already in sync" and NEVER get
+        # muted — exactly why backlog-intake's silent:true stayed manifest-only across
+        # sessions. Compare against the desired template's boolean defaults.
+        flag_drift = any(bool(cur.get(f, False)) != bool(want.get(f, False))
+                         for f in ("silent", "hide_in_chat"))
         sched_drift = (cur.get("schedule", {}).get("every_secs")
                        != want["schedule"]["every_secs"])
         # ID REPAIR: the gateway's cron trigger/remove CLI validates ids against
@@ -248,7 +256,7 @@ def reconcile_crons(check: bool) -> bool:
         # current id is non-conformant, rewrite it to the deterministic hex id so the
         # job becomes manually triggerable/removable. Leave a valid id untouched.
         id_drift = not re.fullmatch(r"[a-f0-9]{6,12}", str(cur.get("id", "")))
-        if drift or sched_drift or id_drift:
+        if drift or sched_drift or id_drift or flag_drift:
             if check:
                 _log(f"DRIFT: cron '{name}' fields differ (would update)")
             else:

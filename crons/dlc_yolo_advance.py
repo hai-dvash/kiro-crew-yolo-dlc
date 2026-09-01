@@ -470,6 +470,43 @@ def _move_label(card: dict, new_step: str) -> None:
         pass  # local-only fall-through; re-sync happens when gh returns
 
 
+def _child_stage_from_issue(repo: str, issue: int) -> str:
+    """Read a child issue's current dlc:<step> label → the stage its ingested card starts at.
+    Best-effort: defaults to 'investigate' (the first ladder step) when gh is unavailable or no
+    dlc:* label is present (a freshly-filed child normally carries dlc:investigate)."""
+    try:
+        for l in _current_dlc_labels(repo, issue):
+            if l.startswith("dlc:") and not l.startswith("dlc:gate-"):
+                return l.split("dlc:", 1)[1]
+    except Exception:
+        pass
+    return "investigate"
+
+
+def _gh_link_and_close_parent(parent: dict, child_refs: list) -> None:
+    """A decomposed parent's issue is ELABORATED INTO its children — link the children on the
+    parent issue, then CLOSE it (the work now lives in the child issues/cards). Best-effort +
+    idempotent-ish: `gh issue close` on an already-closed issue is a harmless no-op. sot=github
+    only; skips when gh/repo unavailable (the local→github re-sync path re-closes later)."""
+    if parent.get("sot") != "github":
+        return
+    src = parent.get("source") or {}
+    repo, issue = src.get("repo"), src.get("issue")
+    if not (repo and issue) or not child_refs:
+        return
+    links = ", ".join(f"#{c}" for c in child_refs if c)
+    body = (f"Elaborated into {links}. This parent is decomposed — its features are built by the "
+            f"child issues above, each running its own DLC-YOLO ladder. Closing the parent; it is "
+            f"retired only when every child is consumed.")
+    try:
+        subprocess.run(["gh", "issue", "comment", str(issue), "--repo", repo, "--body", body],
+                       capture_output=True, timeout=20)
+        subprocess.run(["gh", "issue", "close", str(issue), "--repo", repo,
+                        "--reason", "completed"], capture_output=True, timeout=20)
+    except (OSError, subprocess.SubprocessError):
+        pass  # best-effort; re-attempted next tick if it didn't take
+
+
 def advance(ctx):
     from datetime import datetime, timezone
 
@@ -537,9 +574,139 @@ def advance(ctx):
                 entry["status"] = "consumed"
                 changed = True
 
+    # PARENT_TICKET SELF-HEAL (§5 gap #4 — harden the WRITERS, not just the reader). Writers have
+    # been inconsistent: some record `parent_ticket` as the canonical dict {card_id,issue,url},
+    # others as a bare int issue number (which once crashed the consumed-flip pass — now the reader
+    # tolerates it, but the STORE stays malformed). This pass rewrites a bare-int (or bare-str
+    # numeric) parent_ticket to the canonical dict shape ONCE, so the store self-heals over time and
+    # every downstream reader sees one shape. Idempotent (skips dicts). Resolves card_id/url from the
+    # matching parent card when findable; leaves them absent otherwise (issue alone is enough).
+    for card in cards:
+        pt = card.get("parent_ticket")
+        norm = None
+        if isinstance(pt, int):
+            norm = {"issue": pt}
+        elif isinstance(pt, str) and pt.isdigit():
+            norm = {"issue": int(pt)}
+        if norm is not None:
+            parent = next((c for c in cards
+                           if (c.get("source") or {}).get("issue") == norm["issue"]), None)
+            if parent:
+                norm["card_id"] = parent.get("id")
+                purl = (parent.get("source") or {}).get("url")
+                if purl:
+                    norm["url"] = purl
+            card["parent_ticket"] = norm
+            changed = True
+
+    # CHILD INGESTION (fan-out completeness — makes decomposition ACTUALLY fan out). A decomposing
+    # step files child ISSUES and records them in parent.child_tickets[] with card_id:null — but
+    # NOTHING turned those issues into driven CARDS, so they sat inert at dlc:<step> forever, never
+    # got a step_status, so the consumed-flip could never fire and the parent could never retire.
+    # This deterministic pass closes that: for every parent child_tickets[] entry with card_id:null
+    # whose child issue exists, CREATE a child card (stage from the child issue's live dlc:* label,
+    # inheriting the parent's pipeline_id + source.repo + effective trust/depth, with parent_ticket
+    # set), back-fill the entry's card_id, and mark the parent as decomposed. Idempotent: skips
+    # entries already carrying a card_id, and skips if a card for that issue already exists.
+    _issue_to_card = {(c.get("source") or {}).get("issue"): c for c in cards
+                      if (c.get("source") or {}).get("issue")}
+    _decomposed_parents = []  # (parent, [child issue numbers just linked]) for the close pass
+    for parent in list(cards):
+        kids = parent.get("child_tickets")
+        if not isinstance(kids, list) or not kids:
+            continue
+        # Only a parent still RUNNING its ladder can be freshly decomposed. A parent already at the
+        # terminal stage (done) / retired is the retire-gate's business, not ingestion's — do not
+        # retroactively re-decompose it (that would strip its lifecycle handling). Ingestion fires
+        # for a parent mid-ladder whose decomposing step filed child issues that never became cards.
+        _pl0 = _pipeline_for(state, parent)
+        _ladder0 = _ladder(_pl0)
+        _pstage = parent.get("stage")
+        if _pstage not in _ladder0 or _ladder0.index(_pstage) >= len(_ladder0) - 1:
+            continue  # terminal/unknown stage — leave to the retire gate
+        prepo = (parent.get("source") or {}).get("repo")
+        pl = _pl0
+        newly = []
+        for entry in kids:
+            if not isinstance(entry, dict) or entry.get("card_id"):
+                continue  # already carded
+            if entry.get("status") in ("consumed", "advanced"):
+                continue  # child already picked up / done — no card needed (don't re-decompose a retired parent)
+            ciss = entry.get("issue")
+            if not ciss:
+                continue
+            existing = _issue_to_card.get(ciss)
+            if existing:  # a card already exists for this issue — just link it, don't duplicate
+                entry["card_id"] = existing.get("id")
+                changed = True
+                continue
+            # create the driven child card
+            child_id = f"card-{prepo.split('/')[-1] if prepo else 'x'}-{ciss}"
+            stage = _child_stage_from_issue(prepo, ciss) if prepo else "investigate"
+            child = {
+                "id": child_id,
+                "title": f"[{entry.get('feature','child')}] child of #{(parent.get('source') or {}).get('issue')}: {parent.get('title','')}",
+                "pipeline_id": parent.get("pipeline_id"),
+                "stage": stage,
+                "trust": parent.get("trust"),
+                "depth": parent.get("depth"),
+                "sot": parent.get("sot", "github"),
+                "source": {"type": "github", "repo": prepo, "issue": ciss, "url": entry.get("url")},
+                "lifecycle": "ingested",
+                "step_status": {},
+                "parent_ticket": {"card_id": parent.get("id"),
+                                  "issue": (parent.get("source") or {}).get("issue"),
+                                  "url": (parent.get("source") or {}).get("url")},
+                "guard": parent.get("guard"),  # inherit the parent's verified ownership (same repo/author)
+                "created_at": now, "updated_at": now, "history": [],
+            }
+            cards.append(child)
+            _issue_to_card[ciss] = child
+            entry["card_id"] = child_id
+            newly.append(ciss)
+            changed = True
+        if newly:
+            newly_and_existing = [e.get("issue") for e in kids if isinstance(e, dict) and e.get("issue")]
+            _decomposed_parents.append((parent, newly_and_existing))
+
+    # DECOMPOSE FORM-CHANGE GUARD (your directive): a parent that has been ELABORATED INTO children
+    # has CHANGED FORM — it must NOT keep running its own ladder (the card-backlog-14 bug: it marched
+    # to stage 'done' while its children never ran), and its now-stale step chats must be neutralized
+    # so no live turn attaches to a decomposed card. Deterministic here: (1) mark parent.decomposed;
+    # (2) link the children on GitHub + CLOSE the parent issue (elaborated-into); (3) drop the parent's
+    # step_sessions pointers (clear cron_id so the cleanup pass reaps the one-shot crons; stamp
+    # superseded) so the card no longer runs and nothing re-opens a live turn — the chat becomes an
+    # inert transcript, not a live stale-card chat. TRUE slot REMOVAL (DELETE /api/chat/slots) is a
+    # platform gap the script cron cannot reach (see the orchestrator/MCP-tool follow-up); this makes
+    # the chat FUNCTIONALLY unavailable (no live card behind it). The no-retire-until-consumed guard
+    # already keeps the parent alive until children are consumed — decomposed just stops it ADVANCING.
+    for parent, child_issues in _decomposed_parents:
+        if not parent.get("decomposed"):
+            parent["decomposed"] = {"at": now, "children": child_issues}
+            changed = True
+        _gh_link_and_close_parent(parent, child_issues)
+        # neutralize stale step chats: drop cron_id (cleanup pass reaps the one-shot job) + stamp
+        sess = parent.get("step_sessions")
+        if isinstance(sess, dict):
+            for step, ptr in sess.items():
+                if isinstance(ptr, dict) and (ptr.get("cron_id") or not ptr.get("superseded")):
+                    ptr.pop("cron_id", None)
+                    ptr["superseded"] = now
+                    changed = True
+
+    # LOCAL→GITHUB RE-SYNC (§5 gap #4 — the "local card outside the ownership guard" hole) is
+    # DELIBERATELY NOT enforced here. The re-sync (file/flip the issue, apply the label, set
+    # sot:github, re-verify author) requires gh WRITE + reachability probing, which is an
+    # ORCHESTRATOR action, not this zero-token loop's — and a blanket cron flag on every local
+    # card fires even when gh is down (where staying local is CORRECT) and churns state every
+    # cycle. So the loop leaves local cards to the orchestrator's re-sync path (prompt) and does
+    # NOT trust-as-local-forever silently only because `_owner_ok` already fails-closed at the
+    # moment gh becomes reachable for a github-sot card. Documented as remaining orchestrator-side.
+
     # STEP-CRON CLEANUP (session-as-slot bookkeeping — sibling of the consumed-flip pass). Each
     # agent step is now escalated as a one-shot AGENT CRON (see the escalation block) so it gets an
-    # OPENABLE dashboard slot `cron-<id>`. Those `dlc-step-*` jobs must not accumulate in crons.json
+    # OPENABLE dashboard slot `cron-<id>`. Those one-shot step jobs (named "<step> :: <card-id>")
+    # must not accumulate in crons.json
     # once their work is finished. This zero-reasoning pass removes the cron for any step whose
     # step_status has reached a TERMINAL/at-rest value (done | advanced | blocked) while its pointer
     # still carries a live cron_id, then clears cron_id (retaining slot_key/session_key on the
@@ -615,6 +782,12 @@ def advance(ctx):
         ladder = _ladder(pl)
         stage = card.get("stage")
         if stage not in ladder:
+            continue
+        # DECOMPOSED FORM-CHANGE: a parent elaborated into children has CHANGED FORM — it must NOT
+        # run its own ladder (escalate steps / advance stages). It stays LIVE only for the
+        # no-retire-until-consumed gate (retires when all children are consumed). Skip all
+        # step-running here; the child-ingestion + close pass above already neutralized its chats.
+        if card.get("decomposed"):
             continue
         # OWNERSHIP GUARD (ownership-guard-spec): never escalate/advance/resolve a card whose
         # source issue is not authored by a trusted owner. Fail closed. A failing card is
@@ -833,13 +1006,30 @@ def advance(ctx):
                         # the escalated step isn't wedged on tool prompts (same intent as spawn_run keep).
                         # A deterministic cleanup pass retires the one-shot job once the step is terminal.
                         spawn_res = ctx.call_tool("kirocrew-cron", "cron_add", {
-                            "name": f"dlc-step-{card.get('id')}-{stage}",
+                            # Session title format: the dashboard prepends a fixed "Cron: " to the
+                            # job name (gateway dashboard/cron_inject.py: slot.title = f"Cron: {name}"),
+                            # which we do NOT control. So the job NAME carries the meaningful, readable
+                            # part in the requested "<step> :: <card-id>" shape → the sidebar shows
+                            # "Cron: <step> :: <card-id>". Still uniquely identifies the card+step (the
+                            # card-id encodes the pipeline); cleanup/reclaim key on cron_id, not the name.
+                            "name": f"{stage} :: {card.get('id')}",
                             "message": _seed,
                             "agent": profile,
-                            "delay": 0,
+                            "delay": 1,   # one-shot, fires ~immediately. MUST be >=1: cron_add rejects
+                                          # delay=0 with "delay: must be >= 1" — a delay:0 here threw
+                                          # inside the try/except, silently registered NO job (no slot,
+                                          # no step_sessions pointer), and left the step pending forever.
                             "persistent_session": True,
                             "hide_in_chat": False,
-                            "silent": True,
+                            "silent": False,   # MUST be False: silent=True routes the run into the
+                                               # gateway branch (slack/gateway.py:2615) whose inject is
+                                               # guarded by has_slot() — it only RE-injects into an
+                                               # already-existing slot and NEVER creates one. The sole
+                                               # slot-CREATOR site is the non-silent branch
+                                               # (gateway.py:2648 get_or_create_slot). So silent=True
+                                               # meant the step-agent NEVER surfaced an openable chat
+                                               # session — the whole point of session-as-slot. Keep it
+                                               # False so the first run mints the openable `cron-<id>` slot.
                             "approval_mode": "auto",
                         })
                         card.setdefault("step_status", {})[stage] = "pending"

@@ -162,6 +162,11 @@ with zero cards, and holds the per-repo default modes that its cards inherit.
                                      //   (.dlc-yolo/<card-id>/ results + .dlc-yolo/workspaces/<ws>/data/pipeline_conversation.md)
                                      //   committed there, so results are present in the workspace repo itself. Card may override.
   "self_enabling": false,            // true: orchestrator runs the setup->intent->per-step self-enabling flow
+  "conversation_log": false,         // OFF BY DEFAULT (self-enablement §8 decommission). false: the /dlc-yolo
+                                     //   FIRST-STEP log creation + the orchestrator's per-turn append are SKIPPED
+                                     //   entirely — no pipeline_conversation.md is created, zero behavior for a
+                                     //   normal user. true: opt-in presentation log (workspace-partitioned; repo
+                                     //   mirror when results_in_repo). Surfaced in the setup modal like results_in_repo.
   "trusted_authors": ["hai-dvash"],  // OWNERSHIP GUARD: only issues whose author.login is here may
                                      //   create/advance/RESOLVE a card. Unset/empty = [gh-auth user] only,
                                      //   NEVER allow-all. Card->pipeline->config resolution; fail closed.
@@ -171,7 +176,9 @@ with zero cards, and holds the per-repo default modes that its cards inherit.
                                      //   (in the existing S=1/M=3/L=5/XL=8 points), not arbitrary numbers
     "max_child_cards": 3,            //   quick=0 (one card) · standard<=3 · deep<=8 · "unlimited" = no cap
     "effort_ceiling": 15,            //   points cap (same S/M/L/XL currency): quick~3 · standard~15 · deep~40 · "unlimited" = no ceiling
-    "max_feature_size": "L",         //   per-feature size welcomed: quick=S · standard=M/L · deep=L/XL
+    "max_feature_size": "L",         //   ADVISORY ONLY (no code consumer): informs the spec-agent's per-feature
+                                     //   sizing (quick=S · standard=M/L · deep=L/XL); NOT a hard gate — the
+                                     //   enforced caps are max_child_cards + effort_ceiling (advance-cron budget guard)
     "addenda": "obvious"             //   none (quick) | obvious (standard) | proactive (deep)
   },
   "steps": [

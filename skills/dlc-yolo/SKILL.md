@@ -39,6 +39,26 @@ CONSOLE, not that brain.** Your job is narrow and you HAND OFF the rest:
 > conversation happens IN that step-agent's session against the pipeline's depth/effort — not in
 > this console with you free-forming opinions. If you catch yourself about to list options,
 > recommend an approach, or draft a design, STOP and hand off instead.
+>
+> **ONE QUESTION, NOT A FORK-STACK (step-control — the double-prompt this closes).** If capturing
+> intent genuinely needs a clarification, ask **at most ONE** `ask_question` call, and only for a
+> *capture* question the user alone can answer (which repo, which idea, go-now-vs-wait). You MUST
+> NOT stack multiple design/scope cards — e.g. an INTENT card ("what tone?") AND a SCOPE card
+> ("just the copy, or also the cues?") for the same request. A SCOPE/approach fork is NOT a console
+> question: it is raised LATER, ONE-AT-A-TIME, by the step-agent that owns that phase (the intent/
+> spec step-agent) through the decision gate (`card.decisions[]`), when it actually reaches the
+> fork — never pre-asked here alongside intent. Rule of thumb: if answering the question requires
+> reasoning about the SOLUTION or the SCOPE boundary, it is a step-agent's per-step gate, not a
+> console prompt. When in doubt, ask NOTHING, capture the raw intent, and hand off — the step-agent
+> asks the right question at the right time. (Being "prompted twice" for one request is this bug.)
+>
+> **NEVER write `step_status: pending` from the console.** `pending` means "a spawn is IN FLIGHT" —
+> the console spawns nothing, so it must NOT write it (and must never write `pending` without a
+> matching `pending_at` + an actual escalation — that malformed state breaks the advance cron's
+> staleness/escalation logic). On hand-off, record the card with its first step **UNSTARTED**
+> (omit `step_status[<first-step>]`, or set it to `""`) so the advance cron ESCALATES it (fires the
+> step-agent, sets `pending` + `pending_at` itself). The console files the issue + card and stops;
+> the cron/orchestrator owns every `step_status` transition from there.
 
 The remaining sections below are your CONSOLE procedures + reference for the two cases where you
 DO author inline **only on explicit user request** (the UI "✨ Draft with /dlc-yolo" crew/agent
@@ -66,6 +86,14 @@ While you drive the pipeline in this session, keep a running transcript of the e
 the run is reviewable after the fact. This is scoped to the `/dlc-yolo` command for the
 test — it is NOT the orchestrator/cron path.
 
+> **OFF BY DEFAULT (self-enablement §8 decommission).** This whole section is gated on the
+> pipeline's `conversation_log` flag, which defaults to **`false`**. When it is unset/false,
+> **skip log creation and every append entirely** — create no `pipeline_conversation.md`, write
+> nothing; a normal pipeline run has zero conversation-log behavior. Only when
+> `pipeline.conversation_log === true` (opt-in, surfaced in the setup modal like
+> `results_in_repo`) do the FIRST-STEP creation + per-turn appends below apply. Check the flag
+> before the FIRST STEP; if off, do nothing here.
+
 - **File:** `~/.dlc-yolo/workspaces/<workspace>/data/pipeline_conversation.md`, where
   `<workspace>` is the current KiroCrew workspace name. Mirror the state resolver
   durable-first: under `$DLC_YOLO_STATE`'s dir if set, else `~/.dlc-yolo/`, else
@@ -74,7 +102,8 @@ test — it is NOT the orchestrator/cron path.
   append and 404s on a missing file; the `write` tool creates parent dirs + the file and
   lets you do read-modify-write. So: `read` the current markdown (empty string if it does
   not exist yet), append the new turn, `write` the whole file back.
-- **FIRST STEP on invoke (do this before mode selection):** ensure the log exists. Resolve
+- **FIRST STEP on invoke (do this before mode selection):** ONLY when `pipeline.conversation_log`
+  is `true` — otherwise skip this entirely. Ensure the log exists. Resolve
   `<workspace>` + the durable-first base, then use `write` to create
   `~/.dlc-yolo/workspaces/<workspace>/data/pipeline_conversation.md` if it does not already
   exist — write a `# DLC-YOLO pipeline conversation — <workspace>` header (and a `_started

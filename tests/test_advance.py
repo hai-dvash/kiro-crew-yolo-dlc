@@ -163,6 +163,9 @@ class TestAdvanceEscalate:
         assert payload.get("silent") is False                     # MUST be False — silent routes to the
         #                                                           non-creator gateway branch; the openable
         #                                                           slot is only minted on the non-silent path
+        assert "RESPONSE LINKAGE" in payload["message"]
+        assert "last_response_handled_at" in payload["message"]
+        assert "cron cleanup as chat disablement" in payload["message"]
         out = read_state()["cards"][0]
         assert out["step_status"]["requirements"] == "pending"
         assert "requirements" in out["pending_at"]
@@ -477,7 +480,87 @@ class TestBudgetGuard:
 
 
 # =========================================================================== #
-# TIER 2c — STEP-CRON CLEANUP (session-as-slot bookkeeping)
+# TIER 2c — ENABLED CHAT RESPONSE -> CARD REACTION (Order 6)
+# =========================================================================== #
+class TestChatResponseLinkage:
+    def test_same_step_response_reactivates_without_second_model_call(
+            self, advance_mod, mock_ctx, state_factory, card_factory, write_state, read_state):
+        responded = _iso(_now())
+        card = card_factory(
+            stage="requirements",
+            step_status={"requirements": "done"},
+            step_sessions={"requirements": {
+                "slot_key": "cron-abc123", "session_key": "cron:abc123",
+                "last_response_at": responded,
+            }},
+        )
+        _run(advance_mod, mock_ctx, write_state, state_factory(cards=[card]))
+        out = read_state()["cards"][0]
+        assert out["stage"] == "requirements"
+        assert out["step_status"]["requirements"] == "pending"
+        assert out["pending_at"]["requirements"] == responded
+        ptr = out["step_sessions"]["requirements"]
+        assert ptr["response_routed_at"] == responded
+        assert "last_response_handled_at" not in ptr
+        # The human prompt already started the linked session; the cron must not duplicate it.
+        assert not any(c.args[1] in ("cron_add", "cron_trigger")
+                       for c in mock_ctx.call_tool.call_args_list if len(c.args) > 1)
+
+    def test_explicitly_disabled_chat_does_not_reactivate(
+            self, advance_mod, mock_ctx, state_factory, card_factory, write_state, read_state):
+        responded = _iso(_now())
+        card = card_factory(
+            stage="requirements",
+            step_status={"requirements": "blocked"},
+            step_sessions={"requirements": {
+                "slot_key": "cron-disabled", "last_response_at": responded,
+                "chat_disabled_at": responded,
+            }},
+        )
+        _run(advance_mod, mock_ctx, write_state, state_factory(cards=[card]))
+        out = read_state()["cards"][0]
+        assert out["step_status"]["requirements"] == "blocked"
+        assert "response_routed_at" not in out["step_sessions"]["requirements"]
+
+    def test_response_to_advanced_step_routes_to_current_stage_without_backstep(
+            self, advance_mod, mock_ctx, state_factory, card_factory, write_state, read_state):
+        responded = _iso(_now())
+        card = card_factory(
+            stage="design",
+            step_status={"requirements": "advanced", "design": "pending"},
+            pending_at={"design": responded},
+            step_sessions={"requirements": {
+                "slot_key": "cron-oldstep", "last_response_at": responded,
+            }},
+        )
+        _run(advance_mod, mock_ctx, write_state, state_factory(cards=[card]))
+        out = read_state()["cards"][0]
+        assert out["stage"] == "design"
+        routed = [i for i in out["interjection"] if i["kind"] == "chat-response"]
+        assert len(routed) == 1
+        assert routed[0]["step"] == "design"
+        assert routed[0]["response_at"] == responded
+        assert out["step_sessions"]["requirements"]["response_routed_to_step"] == "design"
+
+    def test_handled_response_is_idempotent(
+            self, advance_mod, mock_ctx, state_factory, card_factory, write_state, read_state):
+        responded = _iso(_now())
+        card = card_factory(
+            stage="requirements",
+            step_status={"requirements": "blocked"},
+            step_sessions={"requirements": {
+                "slot_key": "cron-handled", "last_response_at": responded,
+                "last_response_handled_at": responded,
+            }},
+        )
+        _run(advance_mod, mock_ctx, write_state, state_factory(cards=[card]))
+        out = read_state()["cards"][0]
+        assert out["step_status"]["requirements"] == "blocked"
+        assert "response_routed_at" not in out["step_sessions"]["requirements"]
+
+
+# =========================================================================== #
+# TIER 2d — STEP-CRON CLEANUP (session-as-slot bookkeeping)
 # =========================================================================== #
 class TestStepCronCleanup:
     def test_terminal_step_removes_cron_and_clears_id(self, advance_mod, mock_ctx, state_factory,

@@ -141,13 +141,20 @@ is **SETUP → INTENT (skippable) → per-step**; front-loading intent is a bug.
      knobs, not footnotes):
        · **trust** — manual / assisted / autonomous
        · **depth** — quick / standard / deep
+       · **budget mode** — **follow depth** (omit `budget`, use the depth-derived defaults),
+         **custom** (collect `max_child_cards`, `effort_ceiling`, `max_feature_size`, `addenda`),
+         or **unlimited** (`max_child_cards:"unlimited"`, `effort_ceiling:"unlimited"`,
+         `max_feature_size:"XL"`, `addenda:"proactive"`)
        · **results in repo** — commit results AND the pipeline conversation into the repo's
          root `.dlc-yolo/` (this is the knob that puts the conversation + phase results in the
          workspace repo itself; ASK it every time — do not silently default it off)
        · **backlog auto-intake** — on/off
        · **self-enabling** + **approach** (simplified / enhanced)
-     Accept "defaults are fine" → assisted / standard / results-in-repo OFF / backlog ON /
-     self-enabling OFF. Write the pipeline to `state.json.pipelines[]` with the chosen values.
+     Accept "defaults are fine" → assisted / standard / **budget follows depth** /
+     results-in-repo OFF / backlog ON / self-enabling OFF. Write the pipeline to
+     `state.json.pipelines[]` with the chosen values. Budget is an independent control: changing
+     depth does not overwrite an explicit custom/unlimited budget; choosing follow-depth REMOVES
+     the pipeline's explicit `budget` object so the resolver derives it from depth.
 2. **THEN, and only then, proceed to intent / the chosen mode.** Intent is the first WORK step
    and is **skippable** (§ self-enablement); do not run it until the pipeline is set up.
 
@@ -270,6 +277,15 @@ agent-setup panel's handoff). Do this conversationally:
    `pipeline.results_in_repo` in `state.json` (a card may override it). This is the same knob
    the UI Pipeline Setup modal exposes as the "Save results into repo" toggle.
 
+   **Budget (same control as the UI).** During setup/edit, collect one compact budget mode:
+   `follow depth | custom | unlimited`. `follow depth` omits `pipeline.budget`; `custom` writes
+   all four fields (`max_child_cards`: non-negative integer, `effort_ceiling`: non-negative
+   integer, `max_feature_size`: S|M|L|XL, `addenda`: none|obvious|proactive); `unlimited` writes
+   literal string `"unlimited"` for both caps plus XL/proactive. When the user explicitly gives
+   a budget while creating a card (for example "deep, unlimited"), write the same object to
+   `card.budget` as a card-level override; when omitted, inherit pipeline budget/depth. Never
+   silently collapse `unlimited` to the depth preset.
+
    **Self-enablement → HAND OFF (do NOT run it here).** Setup → intent → per-step → bootstrap is
    ORCHESTRATOR work (design: pipeline-workflow skill / `docs/self-enablement-spec.md`). Your part
    is ONLY the **Setup form**: present **simplified vs enhanced** + trust/depth/results/backlog
@@ -292,6 +308,8 @@ agent-setup panel's handoff). Do this conversationally:
    `gh label create dlc:<step-id> --color 6366f1 --description "DLC-YOLO stage" 2>/dev/null || true`
 4. **Record the card** in `state.json`: `{ id, title, stage: "<first-step-id>",
    pipeline_id, source: { type:"github", repo, issue:<n>, url }, sot:"github", … }`.
+   If the user specified card-level depth/budget, record `card.depth` and `card.budget` explicitly
+   now; do not merely narrate the requested mode and then let pipeline defaults overwrite it.
    **Ownership guard:** when recording a card from an EXISTING issue you did not just file
    (e.g. maintain-mode picking up an issue), verify its author is trusted — `gh issue view <n>
    --repo <repo> --json author`; the `author.login` must be in `trusted_authors` (card →
@@ -309,7 +327,8 @@ agent-setup panel's handoff). Do this conversationally:
 3. Offer the next action for where it sits, then HAND OFF the *doing* to the orchestrator: answer
    a gate (approve/reject — you relay the human's choice into `state.json`), request a re-spec or a
    back-step, or park an over-scoped feature to the backlog. You COLLECT the human's intent and
-   write it to the card (gate decision, `card.interjection[]`, park note); the ORCHESTRATOR
+   write it to the card (gate decision, `card.interjection[]`, park note, or an explicit
+   `card.budget` override using `follow depth | custom | unlimited`); the ORCHESTRATOR
    re-triggers the phase / dispatches the step / deliberates the back-step. Do NOT run the phase
    (Spec Builder / Task Runner / inline) yourself. Honor the step's effective trust/depth when
    deciding whether to auto-relay (autonomous) or ask first (manual/assisted).

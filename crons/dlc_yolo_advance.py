@@ -507,6 +507,79 @@ def _gh_link_and_close_parent(parent: dict, child_refs: list) -> None:
         pass  # best-effort; re-attempted next tick if it didn't take
 
 
+def _handle_chat_response_markers(state: dict, now: str) -> bool:
+    """Project enabled linked-chat responses back into deterministic card state.
+
+    The linked agent session writes ``last_response_at`` as soon as a later human prompt
+    arrives. This zero-token pass makes that marker visible to the pipeline even if the
+    response turn is still running: same-step responses reactivate the step; responses to
+    an older step are routed as a current-stage interjection without back-stepping. The
+    session that processes the response owns ``last_response_handled_at`` and may stamp it
+    only after a fresh terminal status is persisted.
+
+    A completed turn, terminal step status, or reaped one-shot cron does not disable a chat.
+    Only ``chat_disabled_at`` (or a superseded/decomposed pointer) severs the linkage.
+    """
+    changed = False
+    for card in state.get("cards") or []:
+        sessions = card.get("step_sessions")
+        if not isinstance(sessions, dict):
+            continue
+        current = card.get("stage")
+        for source_step, ptr in sessions.items():
+            if not isinstance(ptr, dict) or ptr.get("chat_disabled_at") or ptr.get("superseded"):
+                continue
+            responded = ptr.get("last_response_at")
+            handled = ptr.get("last_response_handled_at")
+            if not responded or (handled and str(handled) >= str(responded)):
+                continue
+            # Idempotency: one deterministic routing reaction per response timestamp.
+            if ptr.get("response_routed_at") == responded:
+                continue
+
+            ptr["response_routed_at"] = responded
+            ptr["response_routed_to_step"] = current
+            card["updated_at"] = now
+            statuses = card.setdefault("step_status", {})
+
+            if source_step == current:
+                # The human prompt already started the linked session's model turn; only
+                # project that fact into state. Never trigger a second model call here.
+                statuses[current] = "pending"
+                card.setdefault("pending_at", {})[current] = responded
+            else:
+                # The originating chat belongs to an older step. Preserve the current card
+                # position and route a durable current-stage interjection (no auto back-step).
+                interjections = card.setdefault("interjection", [])
+                already = any(
+                    isinstance(item, dict)
+                    and item.get("kind") == "chat-response"
+                    and item.get("response_at") == responded
+                    for item in interjections
+                )
+                if not already:
+                    interjections.append({
+                        "at": now,
+                        "step": current,
+                        "kind": "chat-response",
+                        "text": (f"Human responded in the linked {source_step} session; "
+                                 f"reconcile that response at the current {current} stage."),
+                        "status": "pending",
+                        "source_step": source_step,
+                        "source_slot": ptr.get("slot_key"),
+                        "response_at": responded,
+                    })
+                pl = _pipeline_for(state, card)
+                current_def = _step_def(pl, current)
+                if current and not _is_gate(current_def) and statuses.get(current) != "pending":
+                    # Make the current agent stage eligible on this same cron cycle. This is
+                    # intentional current-stage processing, not a second call for the old chat.
+                    statuses[current] = ""
+                    card.setdefault("pending_at", {}).pop(current, None)
+            changed = True
+    return changed
+
+
 def advance(ctx):
     from datetime import datetime, timezone
 
@@ -529,6 +602,11 @@ def advance(ctx):
     MAX_MOVES = 3
     escalations = 0
     moves = 0
+
+    # ORDER 6 — enabled linked-chat responses are card events. The chat session writes the
+    # marker at prompt arrival; this deterministic pass projects it into the card immediately.
+    if _handle_chat_response_markers(state, now):
+        changed = True
 
     # RC#2 — deterministic CONSUMED-flip (card-lifecycle-spec: no-retire-until-consumed). The
     # `consumed` transition on a parent's child_tickets[] was previously assigned to "the
@@ -985,7 +1063,18 @@ def advance(ctx):
                                  f"state file at {STATE}: 'done' if the artifact was genuinely "
                                  f"produced, 'blocked' (+ block_reason) if it needs a human/decision, "
                                  f"or 'error' (+ error_reason) on a retriable failure — NEVER leave "
-                                 f"it 'pending'. Write state via the file API / native write tool, "
+                                 f"it 'pending'. RESPONSE LINKAGE: this chat remains enabled after "
+                                 f"a terminal turn. On EVERY later human prompt, before answering, "
+                                 f"read card.step_sessions['{stage}']; unless chat_disabled_at is set, "
+                                 f"stamp last_response_at, persist the exact prompt as a pending card "
+                                 f"interjection, and set this same current step pending (or route the "
+                                 f"interjection to the card's current stage without back-stepping if "
+                                 f"the card advanced). Then process the prompt in THIS session and "
+                                 f"write a fresh terminal status. Set last_response_handled_at only "
+                                 f"after that terminal status is persisted; a current-stage agent also "
+                                 f"marks routed response pointers handled after consuming their "
+                                 f"interjections. Never treat turn completion or cron cleanup as chat "
+                                 f"disablement. Write state via the file API / native write tool, "
                                  f"NOT inline shell. Stay within the card's owned repo.")
                         # STEP = SESSION-AS-SLOT (first-class-sessions §3, revised). We escalate the
                         # step by registering a ONE-SHOT AGENT CRON (delay=0) bound to the step's

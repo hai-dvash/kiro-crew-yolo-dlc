@@ -1,6 +1,7 @@
 import { useAppApi, useChatLauncher } from '@kirocrew/app-sdk'
 import { Card, CardTitle, PageHeader, StatCard } from '@kirocrew/app-sdk/ui'
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { appendLiveTail, beginLiveThinking, finishLiveTail } from './liveTail.js'
 
 // --- State file location ---------------------------------------------------
 // Persistence-authoritative, mirroring crons/dlc_yolo_advance.py:_resolve_state_path().
@@ -17,6 +18,22 @@ let STATE_PATH = DURABLE_STATE   // persistence-authoritative; only demoted to /
 // --- Types ---
 type Trust = 'manual' | 'assisted' | 'autonomous'
 type Depth = 'quick' | 'standard' | 'deep'
+type BudgetMode = 'depth' | 'custom' | 'unlimited'
+type FeatureSize = 'S' | 'M' | 'L' | 'XL'
+type AddendaBudget = 'none' | 'obvious' | 'proactive'
+
+interface Budget {
+  max_child_cards: number | 'unlimited'
+  effort_ceiling: number | 'unlimited'
+  max_feature_size: FeatureSize
+  addenda: AddendaBudget
+}
+
+const budgetForDepth = (depth: Depth): Budget => ({
+  quick: { max_child_cards: 0, effort_ceiling: 3, max_feature_size: 'S', addenda: 'none' },
+  standard: { max_child_cards: 3, effort_ceiling: 15, max_feature_size: 'L', addenda: 'obvious' },
+  deep: { max_child_cards: 8, effort_ceiling: 40, max_feature_size: 'XL', addenda: 'proactive' },
+}[depth])
 
 interface ParkedIdea {
   id: string
@@ -32,6 +49,7 @@ interface PipelineCard {
   stage: string
   trust?: Trust
   depth?: Depth
+  budget?: Budget
   pipeline_id?: string
   source: { type?: string; repo?: string; issue?: number; url?: string }
   created_at: string
@@ -39,7 +57,7 @@ interface PipelineCard {
   artifacts: Record<string, unknown>
   step_status?: Record<string, string>
   pending_at?: Record<string, string>
-  step_sessions?: Record<string, { agent_id?: string; session_key?: string; slot_key?: string; cron_id?: string; agent?: string; name?: string; at?: string; kept?: boolean; retired_at?: string }>
+  step_sessions?: Record<string, { agent_id?: string; session_key?: string; slot_key?: string; cron_id?: string; agent?: string; name?: string; at?: string; kept?: boolean; retired_at?: string; superseded?: string; chat_disabled_at?: string; last_response_at?: string; last_response_handled_at?: string; response_routed_at?: string; response_routed_to_step?: string }>
   orchestrator_session?: { agent_id?: string; session_key?: string; slot_key?: string; cron_id?: string; name?: string; at?: string; warm?: boolean }
   lifecycle?: string
   interjection?: Array<{ at: string; step?: string; kind: string; text: string; by?: string; status?: string }>
@@ -99,6 +117,7 @@ interface Pipeline {
   source?: 'issue-radar' | 'workspace' | 'manual'
   trust?: Trust
   depth?: Depth
+  budget?: Budget
   backlog_intake?: boolean
   results_in_repo?: boolean
   self_enabling?: boolean
@@ -597,6 +616,10 @@ function PipelineCardItem({ card, config, onApprove, onReject, onCycleTrust, onC
   const effTrust = (card.trust || config.trust) as Trust
   const effDepth = (card.depth || config.depth) as Depth
   const parkedCount = card.parked?.length || 0
+  const hasPendingChatResponse = Object.values(card.step_sessions || {}).some(ptr =>
+    !!ptr.last_response_at && !ptr.chat_disabled_at && !ptr.superseded &&
+    (!ptr.last_response_handled_at || ptr.last_response_handled_at < ptr.last_response_at)
+  )
   const [interjectOpen, setInterjectOpen] = useState(false)
   const [interjectText, setInterjectText] = useState('')
   // Any decision still awaiting a human choice (e.g. a depth-driven addendum suggestion)
@@ -638,6 +661,11 @@ function PipelineCardItem({ card, config, onApprove, onReject, onCycleTrust, onC
         </Pill>
         {parkedCount > 0 && (
           <Pill color="var(--warn)" title={`${parkedCount} parked idea(s)`}>⏸ {parkedCount}</Pill>
+        )}
+        {hasPendingChatResponse && (
+          <Pill color="var(--accent)" active title="A response in an enabled linked agent chat is being applied to this card">
+            ↪ chat response
+          </Pill>
         )}
         {typeof card.effort?.total === 'number' && card.effort.total > 0 && (
           <Pill color="var(--info)" title={`estimated effort: ${card.effort.total} points`}>
@@ -1186,7 +1214,7 @@ function PipelineSetupModal({ candidates, existingRepos, defaults, knownAgents, 
   defaults: PipelineConfig
   knownAgents: string[]
   crews: { name: string; description?: string }[]
-  onCreate: (p: { repo: string; source: RepoCandidate['source']; trust: Trust; depth: Depth; backlog_intake: boolean; results_in_repo: boolean; self_enabling: boolean; approach: 'simplified' | 'enhanced'; steps: PipelineStep[] }) => void
+  onCreate: (p: { repo: string; source: RepoCandidate['source']; trust: Trust; depth: Depth; budget?: Budget; backlog_intake: boolean; results_in_repo: boolean; self_enabling: boolean; approach: 'simplified' | 'enhanced'; steps: PipelineStep[] }) => void
   onClose: () => void
   editPipeline?: Pipeline          // when set, the modal is in EDIT mode
   cardCount?: number               // cards in the pipeline (for the Danger Zone copy)
@@ -1198,6 +1226,16 @@ function PipelineSetupModal({ candidates, existingRepos, defaults, knownAgents, 
   const [source, setSource] = useState<RepoCandidate['source']>(editPipeline?.source || 'manual')
   const [trust, setTrust] = useState<Trust>(editPipeline?.trust || defaults.trust)
   const [depth, setDepth] = useState<Depth>(editPipeline?.depth || defaults.depth)
+  const initialBudget = editPipeline?.budget
+  const [budgetMode, setBudgetMode] = useState<BudgetMode>(
+    !initialBudget ? 'depth' :
+      initialBudget.max_child_cards === 'unlimited' && initialBudget.effort_ceiling === 'unlimited' ? 'unlimited' : 'custom'
+  )
+  const [customBudget, setCustomBudget] = useState<Budget>(() =>
+    initialBudget && initialBudget.max_child_cards !== 'unlimited' && initialBudget.effort_ceiling !== 'unlimited'
+      ? { ...initialBudget }
+      : budgetForDepth(editPipeline?.depth || defaults.depth)
+  )
   const [backlog, setBacklog] = useState(editPipeline?.backlog_intake ?? true)
   const [resultsInRepo, setResultsInRepo] = useState(editPipeline?.results_in_repo ?? false)
   const [selfEnabling, setSelfEnabling] = useState(editPipeline?.self_enabling ?? false)
@@ -1381,6 +1419,63 @@ function PipelineSetupModal({ candidates, existingRepos, defaults, knownAgents, 
             <span className="text-[11px] uppercase tracking-wider" style={{ color: 'var(--muted)' }}>Default Depth</span>
             <Seg value={depth} options={DEPTH_LEVELS} tokens={DEPTH_TOKEN} onPick={setDepth} />
           </div>
+
+          {/* Budget: independent from depth when explicitly overridden. */}
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-[11px] uppercase tracking-wider" style={{ color: 'var(--muted)' }}>Budget Mode</div>
+              <div className="text-[10px]" style={{ color: 'var(--muted)' }}>Controls fan-out and effort spend</div>
+            </div>
+            <Seg value={budgetMode} options={['depth', 'custom', 'unlimited'] as BudgetMode[]}
+              tokens={{ depth: 'var(--muted)', custom: 'var(--accent)', unlimited: 'var(--ok)' }} onPick={setBudgetMode} />
+          </div>
+          {budgetMode === 'depth' && (() => {
+            const b = budgetForDepth(depth)
+            return <div className="text-[11px] px-3 py-2 rounded-md" style={{ color: 'var(--muted)', background: 'var(--bg-elevated, var(--bg))', border: '1px solid var(--border)' }}>
+              Follows <strong>{depth}</strong>: {String(b.max_child_cards)} child cards · {String(b.effort_ceiling)} effort points · max {b.max_feature_size} · {b.addenda} addenda
+            </div>
+          })()}
+          {budgetMode === 'unlimited' && (
+            <div className="text-[11px] px-3 py-2 rounded-md" style={{ color: 'var(--ok)', background: 'color-mix(in srgb, var(--ok) 7%, transparent)', border: '1px solid color-mix(in srgb, var(--ok) 35%, var(--border))' }}>
+              No child-card or effort ceiling · max XL · proactive addenda
+            </div>
+          )}
+          {budgetMode === 'custom' && (
+            <div className="grid grid-cols-2 gap-2 p-3 rounded-md" style={{ background: 'var(--bg-elevated, var(--bg))', border: '1px solid var(--border)' }}>
+              <label className="text-[10px] uppercase tracking-wide" style={{ color: 'var(--muted)' }}>
+                Max child cards
+                <input type="number" min={0} value={customBudget.max_child_cards as number}
+                  onChange={e => setCustomBudget(b => ({ ...b, max_child_cards: Math.max(0, Number(e.target.value) || 0) }))}
+                  className="mt-1 w-full px-2 py-1.5 rounded text-[12px] outline-none"
+                  style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)' }} />
+              </label>
+              <label className="text-[10px] uppercase tracking-wide" style={{ color: 'var(--muted)' }}>
+                Effort ceiling
+                <input type="number" min={0} value={customBudget.effort_ceiling as number}
+                  onChange={e => setCustomBudget(b => ({ ...b, effort_ceiling: Math.max(0, Number(e.target.value) || 0) }))}
+                  className="mt-1 w-full px-2 py-1.5 rounded text-[12px] outline-none"
+                  style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)' }} />
+              </label>
+              <label className="text-[10px] uppercase tracking-wide" style={{ color: 'var(--muted)' }}>
+                Max feature size
+                <select value={customBudget.max_feature_size}
+                  onChange={e => setCustomBudget(b => ({ ...b, max_feature_size: e.target.value as FeatureSize }))}
+                  className="mt-1 w-full px-2 py-1.5 rounded text-[12px] outline-none"
+                  style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)' }}>
+                  {(['S', 'M', 'L', 'XL'] as FeatureSize[]).map(v => <option key={v}>{v}</option>)}
+                </select>
+              </label>
+              <label className="text-[10px] uppercase tracking-wide" style={{ color: 'var(--muted)' }}>
+                Addenda
+                <select value={customBudget.addenda}
+                  onChange={e => setCustomBudget(b => ({ ...b, addenda: e.target.value as AddendaBudget }))}
+                  className="mt-1 w-full px-2 py-1.5 rounded text-[12px] outline-none"
+                  style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)' }}>
+                  {(['none', 'obvious', 'proactive'] as AddendaBudget[]).map(v => <option key={v}>{v}</option>)}
+                </select>
+              </label>
+            </div>
+          )}
 
           {/* Backlog intake */}
           <label className="flex items-center justify-between cursor-pointer">
@@ -1583,7 +1678,11 @@ function PipelineSetupModal({ candidates, existingRepos, defaults, knownAgents, 
           <button
             disabled={!valid || (!isEdit && dup)}
             onClick={() => onCreate({
-              repo: normalizeRepoInput(repo), source, trust, depth, backlog_intake: backlog, results_in_repo: resultsInRepo, self_enabling: selfEnabling, approach,
+              repo: normalizeRepoInput(repo), source, trust, depth,
+              budget: budgetMode === 'depth' ? undefined : budgetMode === 'unlimited'
+                ? { max_child_cards: 'unlimited', effort_ceiling: 'unlimited', max_feature_size: 'XL', addenda: 'proactive' }
+                : customBudget,
+              backlog_intake: backlog, results_in_repo: resultsInRepo, self_enabling: selfEnabling, approach,
               steps: steps.map(s => ({ ...s, label: `dlc:${s.id}` })),
             })}
             className="text-xs px-3 py-1.5 rounded-md font-semibold transition-opacity disabled:opacity-40"
@@ -1678,6 +1777,15 @@ function PipelineEditModal({ repo, cardCount, isExample, onDelete, onClose }: {
 }
 
 // --- Main Component ---
+function ActivitySpinner({ size = 12 }: { size?: number }) {
+  return (
+    <svg className="animate-spin flex-shrink-0" width={size} height={size} viewBox="0 0 16 16" aria-hidden="true" style={{ color: 'var(--accent)' }}>
+      <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" strokeWidth="2" opacity="0.22" />
+      <path d="M8 2a6 6 0 0 1 6 6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  )
+}
+
 export default function SdlcPipeline() {
   const api = useAppApi()
   const [allCards, setAllCards] = useState<PipelineCard[]>([])
@@ -1694,6 +1802,9 @@ export default function SdlcPipeline() {
   const [liveSpawns, setLiveSpawns] = useState<{ id: string; task: string; status?: string }[]>([])
   const kanbanRef = useRef<HTMLDivElement>(null)
   const liveSpawnsAbsent = useRef(false)  // suppress live_spawns polling once found absent (no cron yet)
+  const linkedSlotsRef = useRef<Set<string>>(new Set())
+  const cardIdsRef = useRef<Set<string>>(new Set())
+  const [liveTails, setLiveTails] = useState<Record<string, { buffer: string; tail: string; active: boolean; phase: 'thinking' | 'generating' | 'idle'; seq: number }>>({})
 
   const fetchCards = useCallback(async () => {
     try {
@@ -1737,39 +1848,141 @@ export default function SdlcPipeline() {
     [allCards, repoFilter]
   )
 
-  // Run status: derive in-flight (pending) subagent steps from cards' step_status +
-  // pending_at. A step is "running" while pending; "stale" if pending_at is older than the
-  // reclaim threshold (~10min) — i.e. a spawn the advance cron will re-escalate. Read-only
-  // reflection of state; no polling of spawn_list needed for the at-a-glance pane.
+  // Real live-token projection (Order 6): the dashboard already broadcasts redacted text
+  // deltas as {type:'chat_chunk', data:{slot,content,seq}} and TurnEnd as chat_done on
+  // /api/ws. Filter to this app's enabled linked slots and retain only a bounded suffix.
+  // This is presentation transport only: never write chunks into state.json/live_spawns.json.
+  useEffect(() => {
+    cardIdsRef.current = new Set(allCards.map(card => card.id))
+    linkedSlotsRef.current = new Set(allCards.flatMap(card =>
+      Object.values(card.step_sessions || {})
+        .filter(ptr => !!ptr.slot_key && !ptr.chat_disabled_at && !ptr.superseded)
+        .map(ptr => ptr.slot_key as string)
+    ))
+  }, [allCards])
+
+  useEffect(() => {
+    let stopped = false
+    let socket: WebSocket | null = null
+    let retryTimer: ReturnType<typeof setTimeout> | undefined
+    let retries = 0
+
+    const connect = () => {
+      if (stopped) return
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+      socket = new WebSocket(`${protocol}//${window.location.host}/api/ws`)
+      socket.onopen = () => { retries = 0 }
+      socket.onmessage = event => {
+        if (typeof event.data !== 'string') return
+        try {
+          const frame = JSON.parse(event.data)
+          const data = frame?.data
+          // Slot creation is announced before its first generated chunks. Recognize the
+          // DLC step cron's stable "<step> :: <card-id>" title immediately, rather than
+          // waiting up to 10s for state.json polling to reveal the same slot_key.
+          if (frame.type === 'slots' && Array.isArray(data)) {
+            const linked = new Set(linkedSlotsRef.current)
+            const runningSlots: string[] = []
+            for (const candidate of data) {
+              const key = candidate?.key || candidate?.slot || candidate?.name
+              const title = String(candidate?.title || candidate?.name || '')
+              if (typeof key === 'string' && key.startsWith('cron-') &&
+                  [...cardIdsRef.current].some(cardId => title.includes(cardId))) linked.add(key)
+              if (typeof key === 'string' && candidate?.running && linked.has(key)) runningSlots.push(key)
+            }
+            linkedSlotsRef.current = linked
+            if (runningSlots.length) {
+              setLiveTails(previous => {
+                let result = previous
+                for (const key of runningSlots) {
+                  const next = beginLiveThinking(previous[key])
+                  if (next !== previous[key]) result = { ...result, [key]: next }
+                }
+                return result
+              })
+            }
+            return
+          }
+          const slot = data?.slot
+          if (!slot || !linkedSlotsRef.current.has(slot)) return
+          if ((frame.type === 'chat_status' && String(data.status || '').toLowerCase().startsWith('thinking')) ||
+              frame.type === 'chat_thinking') {
+            setLiveTails(previous => {
+              const next = beginLiveThinking(previous[slot], frame.type === 'chat_status')
+              return next === previous[slot] ? previous : { ...previous, [slot]: next }
+            })
+          } else if (frame.type === 'chat_chunk' && typeof data.content === 'string') {
+            setLiveTails(previous => {
+              const next = appendLiveTail(previous[slot], data.content, Number(data.seq))
+              return next === previous[slot] ? previous : { ...previous, [slot]: next }
+            })
+          } else if (frame.type === 'chat_done') {
+            setLiveTails(previous => {
+              const next = finishLiveTail(previous[slot])
+              return next === previous[slot] ? previous : { ...previous, [slot]: next }
+            })
+          }
+        } catch { /* unrelated/non-JSON dashboard frame */ }
+      }
+      socket.onclose = () => {
+        if (stopped) return
+        const delay = Math.min(1000 * 2 ** retries++, 15000)
+        retryTimer = setTimeout(connect, delay)
+      }
+      socket.onerror = () => socket?.close()
+    }
+
+    connect()
+    return () => {
+      stopped = true
+      if (retryTimer) clearTimeout(retryTimer)
+      socket?.close()
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!runPaneOpen) return
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setRunPaneOpen(false)
+    }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [runPaneOpen])
+
+  // Agent-session pane: retain every enabled linked step chat, including terminal turns.
+  // A completed turn does not disable its chat; only chat_disabled_at/superseded removes the
+  // linkage. Pending/error rows still carry staleness, while blocked/done/advanced rows remain
+  // openable so a later response can reactivate or route back into the card.
   const PENDING_STALE_MS = 600_000
   const runStatus = useMemo(() => {
-    const running: { card: string; step: string; agent: string; stale: boolean; status: string; live: boolean; agentId?: string; slotKey?: string; sessionKey?: string; sessionName?: string }[] = []
+    const rows: { card: string; step: string; agent: string; stale: boolean; status: string; live: boolean; responsePending: boolean; agentId?: string; slotKey?: string; sessionKey?: string; sessionName?: string }[] = []
     for (const c of cards) {
       const ss = c.step_status || {}
+      const sessions = c.step_sessions || {}
       const pl = pipelines.find(p => p.id === c.pipeline_id) || pipelines.find(p => p.repo === c.source?.repo)
-      for (const [step, st] of Object.entries(ss)) {
-        if (st === 'pending' || st === 'error') {
-          const at = c.pending_at?.[step]
-          const stale = at ? (Date.now() - new Date(at).getTime()) > PENDING_STALE_MS : false
-          const sdef = pl?.steps?.find(s => s.id === step)
-          const agent = sdef?.agent?.crew || sdef?.agent?.name || 'orchestrator'
-          // Session pointer (first-class-sessions §3, session-as-slot): the step's escalated
-          // session, recorded by the advance cron. Steps are now launched as one-shot AGENT CRONS
-          // that materialize an OPENABLE dashboard slot `cron-<id>` (slot_key on the pointer) — so
-          // prefer the slot_key as the open handle. `live` for a cron-backed run can't use
-          // spawn_list (crons don't appear there); fall back to the task-string heuristic / pending.
-          const sess = c.step_sessions?.[step]
-          const agentId = sess?.agent_id
-          const slotKey = sess?.slot_key
-          const sessionKey = sess?.session_key
-          const live = agentId
-            ? liveSpawns.some(ls => ls.id === agentId)
-            : liveSpawns.some(ls => (ls.task || '').includes(c.id) || (ls.task || '').includes(c.title))
-          running.push({ card: c.title || c.id, step, agent, stale, status: st, live, agentId, slotKey, sessionKey, sessionName: sess?.name })
-        }
+      const steps = new Set([...Object.keys(ss), ...Object.keys(sessions)])
+      for (const step of steps) {
+        const st = ss[step] || 'idle'
+        const sess = sessions[step]
+        const inFlight = st === 'pending' || st === 'error'
+        const enabledSession = !!sess?.slot_key && !sess.chat_disabled_at && !sess.superseded
+        if (!inFlight && !enabledSession) continue
+        const at = c.pending_at?.[step]
+        const stale = inFlight && !!at && (Date.now() - new Date(at).getTime()) > PENDING_STALE_MS
+        const sdef = pl?.steps?.find(s => s.id === step)
+        const agent = sess?.agent || sdef?.agent?.crew || sdef?.agent?.name || 'orchestrator'
+        const agentId = sess?.agent_id
+        const slotKey = sess?.slot_key
+        const sessionKey = sess?.session_key
+        const live = agentId
+          ? liveSpawns.some(ls => ls.id === agentId)
+          : inFlight && liveSpawns.some(ls => (ls.task || '').includes(c.id) || (ls.task || '').includes(c.title))
+        const responsePending = !!sess?.last_response_at &&
+          (!sess.last_response_handled_at || sess.last_response_handled_at < sess.last_response_at)
+        rows.push({ card: c.title || c.id, step, agent, stale, status: st, live, responsePending, agentId, slotKey, sessionKey, sessionName: sess?.name })
       }
     }
-    return running
+    return rows
   }, [cards, pipelines, liveSpawns])
 
   // Active step ladder: when exactly ONE pipeline (repo) is selected and it has
@@ -2025,7 +2238,7 @@ export default function SdlcPipeline() {
   }, [api])
 
   const createPipeline = useCallback(async (p: {
-    repo: string; source: RepoCandidate['source']; trust: Trust; depth: Depth; backlog_intake: boolean; results_in_repo: boolean; self_enabling: boolean; approach: 'simplified' | 'enhanced'; steps: PipelineStep[]
+    repo: string; source: RepoCandidate['source']; trust: Trust; depth: Depth; budget?: Budget; backlog_intake: boolean; results_in_repo: boolean; self_enabling: boolean; approach: 'simplified' | 'enhanced'; steps: PipelineStep[]
   }) => {
     const now = new Date().toISOString()
     const id = 'pl-' + Math.random().toString(36).slice(2, 10)
@@ -2037,6 +2250,8 @@ export default function SdlcPipeline() {
         existing.source = p.source
         existing.trust = p.trust
         existing.depth = p.depth
+        if (p.budget) existing.budget = p.budget
+        else delete existing.budget
         existing.backlog_intake = p.backlog_intake
         existing.results_in_repo = p.results_in_repo
         existing.self_enabling = p.self_enabling
@@ -2046,6 +2261,7 @@ export default function SdlcPipeline() {
         state.pipelines.push({
           id, repo: p.repo, source: p.source,
           trust: p.trust, depth: p.depth, backlog_intake: p.backlog_intake,
+          ...(p.budget ? { budget: p.budget } : {}),
           results_in_repo: p.results_in_repo,
           self_enabling: p.self_enabling, approach: p.approach,
           sot: 'github', steps: p.steps,
@@ -2113,6 +2329,8 @@ export default function SdlcPipeline() {
     status: cards.length,
     backlog: parkedTotal,
   }
+  const hasLiveGeneration = runStatus.some(row => !!row.slotKey && liveTails[row.slotKey]?.active && liveTails[row.slotKey]?.phase === 'generating')
+  const hasLiveThinking = runStatus.some(row => !!row.slotKey && liveTails[row.slotKey]?.active && liveTails[row.slotKey]?.phase === 'thinking')
 
   const cardProps = (card: PipelineCard) => ({
     card, config,
@@ -2127,6 +2345,66 @@ export default function SdlcPipeline() {
   return (
     <>
       <PageHeader title="DLC-YOLO" subtitle="Autonomous SDLC pipeline with human gates" />
+      {runPaneOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.48)', backdropFilter: 'blur(3px)' }}
+          onMouseDown={(event) => { if (event.currentTarget === event.target) setRunPaneOpen(false) }}>
+          <section role="dialog" aria-modal="true" aria-labelledby="agent-sessions-title" className="flex flex-col rounded-xl overflow-hidden"
+            style={{ width: 'min(680px, calc(100vw - 32px))', maxHeight: 'min(76vh, 680px)', background: 'var(--bg-elevated, var(--bg))', border: '1px solid var(--border-strong, var(--border))', boxShadow: '0 24px 80px rgba(0,0,0,0.45)' }}>
+            <header className="flex items-start gap-4 px-5 py-4" style={{ borderBottom: '1px solid var(--border)' }}>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <h2 id="agent-sessions-title" className="text-[15px] font-semibold" style={{ color: 'var(--text-strong, var(--text))' }}>Agent sessions</h2>
+                  <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full" style={{ background: 'color-mix(in srgb, var(--accent) 14%, transparent)', color: 'var(--accent)' }}>{runStatus.length}</span>
+                </div>
+                <p className="text-[11px] mt-0.5" style={{ color: 'var(--muted)' }}>Live activity from enabled chats linked to pipeline cards.</p>
+              </div>
+              <button onClick={() => setRunPaneOpen(false)} aria-label="Close agent sessions" className="w-8 h-8 rounded-lg flex items-center justify-center text-lg leading-none"
+                style={{ color: 'var(--muted)', background: 'var(--bg-hover, transparent)', border: '1px solid var(--border)' }}>×</button>
+            </header>
+            <div className="overflow-y-auto p-3 flex flex-col gap-2">
+              {runStatus.length === 0 ? (
+                <div className="px-3 py-8 text-center text-[12px]" style={{ color: 'var(--muted)' }}>No linked agent chats yet.</div>
+              ) : runStatus.map((r) => {
+                const activity = r.slotKey ? liveTails[r.slotKey] : undefined
+                return (
+                  <div key={`${r.card}:${r.step}`} className="rounded-lg px-3 py-2.5"
+                    style={{ background: r.responsePending ? 'color-mix(in srgb, var(--accent) 9%, var(--bg, transparent))' : 'var(--bg, transparent)', border: '1px solid var(--border)' }}>
+                    <div className="flex items-center gap-2 text-[11px] min-w-0">
+                      <span className={r.status === 'pending' || r.responsePending ? 'inline-block animate-pulse flex-shrink-0' : 'inline-block flex-shrink-0'}
+                        style={{ width: 7, height: 7, borderRadius: 999, background: r.stale ? 'var(--warn)' : r.responsePending ? 'var(--accent)' : r.status === 'pending' ? 'var(--accent)' : 'var(--muted)' }} />
+                      <span className="font-semibold flex-shrink-0" style={{ color: 'var(--accent)' }} title={r.sessionName || undefined}>{r.agent}</span>
+                      <span className="truncate" style={{ color: 'var(--muted)' }}>· {r.step}</span>
+                      <span className="ml-auto truncate max-w-[220px]" style={{ color: 'var(--text, var(--muted))' }} title={r.card}>{r.card}</span>
+                      <span className="flex-shrink-0" style={{ color: r.responsePending ? 'var(--warn)' : r.status === 'pending' ? 'var(--ok)' : 'var(--muted)' }}>{r.responsePending ? 'response' : r.status}</span>
+                      {r.stale && <span style={{ color: 'var(--warn)' }} title="stale — will be reclaimed">↻</span>}
+                    </div>
+                    {activity?.active && activity.phase === 'thinking' && (
+                      <div className="mt-2 ml-4 flex items-center gap-2 text-[11px] font-medium" style={{ color: 'var(--accent)' }} title="Real thinking state from this linked dashboard slot">
+                        <ActivitySpinner size={13} /><span>Thinking</span>
+                      </div>
+                    )}
+                    {activity?.active && activity.phase === 'generating' && activity.tail && (
+                      <div className="mt-2 ml-4 flex items-center gap-2 min-w-0" style={{ color: 'var(--ok)' }} title="Real text projected from this linked slot's live chat_chunk stream">
+                        <span className="w-1.5 h-1.5 rounded-full animate-pulse flex-shrink-0" style={{ background: 'var(--ok)' }} />
+                        <span className="font-mono text-[11px] truncate">Generating · …{activity.tail}</span>
+                      </div>
+                    )}
+                    {r.slotKey && (
+                      <button className="mt-2 ml-4 font-mono" style={{ color: 'var(--muted)', fontSize: 10, background: 'transparent', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
+                        title={`Copy openable slot ${r.slotKey} (${r.sessionName || r.sessionKey}); open it from Chats`}
+                        onClick={() => { try { navigator.clipboard?.writeText(r.slotKey || '') } catch { /* clipboard unavailable */ } }}>copy {r.slotKey.slice(0, 18)}</button>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+            <footer className="px-5 py-3 text-[10px]" style={{ color: 'var(--muted)', borderTop: '1px solid var(--border)' }}>
+              Thinking and text tails come directly from live dashboard events. Terminal turns stay linked until chat is explicitly disabled.
+            </footer>
+          </section>
+        </div>
+      )}
       {setupOpen && (
         <PipelineSetupModal
           candidates={candidates}
@@ -2181,60 +2459,21 @@ export default function SdlcPipeline() {
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-3 mb-4 flex-wrap">
               <ViewTabs active={view} onChange={setView} counts={tabCounts} />
-              {/* Subagents / run-status pane — click to expand which agents are running */}
-              <div className="relative">
-                <button onClick={() => setRunPaneOpen(o => !o)}
-                  className="flex items-center gap-1.5 text-[11px] px-2 py-1 rounded-md cursor-pointer"
-                  title="Click to see which agents are running"
-                  style={{ background: 'var(--bg-elevated, var(--bg))', border: '1px solid var(--border)', color: runStatus.length ? 'var(--accent)' : 'var(--muted)' }}>
-                  {runStatus.length > 0 ? (
-                    <>
-                      <span className="inline-block animate-pulse" style={{ width: 7, height: 7, borderRadius: 999, background: 'var(--accent)' }} />
-                      <span className="font-semibold">{runStatus.length} running</span>
-                      {runStatus.some(r => r.stale) && (
-                        <span style={{ color: 'var(--warn)' }}>· {runStatus.filter(r => r.stale).length} stale ↻</span>
-                      )}
-                    </>
-                  ) : (
-                    <><span style={{ width: 7, height: 7, borderRadius: 999, background: 'var(--muted)', display: 'inline-block', opacity: 0.5 }} /> <span>idle</span></>
-                  )}
-                  <span style={{ opacity: 0.5, fontSize: 9 }}>{runPaneOpen ? '▲' : '▼'}</span>
-                </button>
-                {runPaneOpen && (
-                  <div className="absolute z-20 mt-1 left-0 rounded-md p-2 flex flex-col gap-1 min-w-[260px]"
-                    style={{ background: 'var(--bg-elevated, var(--bg))', border: '1px solid var(--border-strong, var(--border))', boxShadow: '0 6px 20px rgba(0,0,0,0.25)' }}>
-                    <div className="text-[10px] uppercase tracking-wider mb-0.5" style={{ color: 'var(--muted)' }}>Subagents in flight</div>
-                    {runStatus.length === 0 ? (
-                      <div className="text-[11px]" style={{ color: 'var(--muted)' }}>No agents running — pipeline idle.</div>
-                    ) : runStatus.map((r) => (
-                      <div key={`${r.card}:${r.step}`} className="flex items-center gap-2 text-[11px] px-1.5 py-1 rounded"
-                        style={{ background: 'var(--bg, transparent)' }}>
-                        <span className="inline-block animate-pulse flex-shrink-0" style={{ width: 6, height: 6, borderRadius: 999, background: r.stale ? 'var(--warn)' : 'var(--accent)' }} />
-                        <span className="font-semibold" style={{ color: 'var(--accent)' }} title={r.sessionName || undefined}>{r.agent}</span>
-                        <span style={{ color: 'var(--muted)' }}>· {r.step}</span>
-                        {(r.slotKey || r.agentId) && (
-                          <button className="font-mono flex-shrink-0" style={{ color: 'var(--accent)', fontSize: 10, background: 'transparent', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
-                            title={r.slotKey
-                              ? `Openable session — slot "${r.slotKey}" (${r.sessionName || r.sessionKey}). Click to copy the slot handle, then open that session from your Chats list.`
-                              : `session ${r.sessionName || r.agentId} — click to copy the continue handle (spawn_continue ${r.agentId})`}
-                            onClick={() => {
-                              const handle = r.slotKey || `spawn_continue ${r.agentId}`
-                              try { navigator.clipboard?.writeText(handle) } catch { /* clipboard blocked — tooltip still shows the handle */ }
-                            }}>
-                            ⧉{(r.slotKey || r.agentId || '').slice(0, 10)}
-                          </button>
-                        )}
-                        <span className="ml-auto truncate max-w-[110px]" style={{ color: 'var(--text, var(--muted))' }} title={r.card}>{r.card}</span>
-                        {r.live
-                          ? <span style={{ color: 'var(--ok)' }} title="live spawn confirmed via spawn_list">●live</span>
-                          : <span style={{ color: 'var(--muted)' }} title="no live spawn found — likely dead, will reclaim">no-spawn</span>}
-                        {r.stale && <span style={{ color: 'var(--warn)' }} title="stale — will be re-escalated">↻</span>}
-                        {r.status === 'error' && <span style={{ color: 'var(--danger, #ef4444)' }} title="errored — retrying">⚠</span>}
-                      </div>
-                    ))}
-                  </div>
+              {/* Enabled agent sessions open as a centered floating modal. */}
+              <button onClick={() => setRunPaneOpen(true)} aria-haspopup="dialog" aria-expanded={runPaneOpen}
+                className="flex items-center gap-1.5 text-[11px] px-2 py-1 rounded-md cursor-pointer" title="Open enabled agent sessions and see live activity"
+                style={{ background: 'var(--bg-elevated, var(--bg))', border: '1px solid var(--border)', color: hasLiveGeneration || hasLiveThinking || runStatus.some(r => r.status === 'pending' || r.responsePending) ? 'var(--accent)' : 'var(--muted)' }}>
+                {hasLiveThinking ? <ActivitySpinner size={11} /> : (
+                  <span className={hasLiveGeneration || runStatus.some(r => r.status === 'pending' || r.responsePending) ? 'inline-block animate-pulse' : 'inline-block'}
+                    style={{ width: 7, height: 7, borderRadius: 999, background: hasLiveGeneration ? 'var(--ok)' : runStatus.some(r => r.responsePending) ? 'var(--warn)' : runStatus.some(r => r.status === 'pending') ? 'var(--accent)' : 'var(--muted)', opacity: runStatus.length ? 1 : 0.5 }} />
                 )}
-              </div>
+                <span className="font-semibold">{runStatus.length ? `${runStatus.length} session${runStatus.length === 1 ? '' : 's'}` : 'no sessions'}</span>
+                {hasLiveThinking && <span>· thinking</span>}
+                {hasLiveGeneration && <span style={{ color: 'var(--ok)' }}>· generating</span>}
+                {!hasLiveThinking && !hasLiveGeneration && runStatus.filter(r => r.status === 'pending').length > 0 && <span>· {runStatus.filter(r => r.status === 'pending').length} running</span>}
+                {runStatus.some(r => r.responsePending) && <span style={{ color: 'var(--warn)' }}>· response</span>}
+                {runStatus.some(r => r.stale) && <span style={{ color: 'var(--warn)' }}>· {runStatus.filter(r => r.stale).length} stale ↻</span>}
+              </button>
               {repoFilter.size > 0 && (
                 <span className="text-[11px] px-2 py-1 rounded-md font-medium"
                   style={{ background: 'color-mix(in srgb, var(--accent) 14%, transparent)', color: 'var(--accent)' }}>

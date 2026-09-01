@@ -34,6 +34,7 @@
       "/apps/dlc-yolo/*",
       "/api/file-read",
       "/api/file-write",
+      "/api/ws",
       "/api/chat",
       "/api/chat/*"
     ],

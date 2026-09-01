@@ -48,6 +48,13 @@ A card can regress when:
   "stage": "requirements",
   "trust": "assisted",
   "depth": "standard",
+  "lifecycle": "elaborated",
+  "child_tickets": [
+    {"issue": 43, "url": "https://github.com/owner/name/issues/43", "card_id": "card-…", "status": "consumed"}
+  ],
+  "parent_ticket": {"issue": 41, "url": "…", "card_id": "card-…"},
+  "block_reason": {"design": "needs a data-model decision"},
+  "retry_count": {"implement": 1},
   "created_at": "ISO8601",
   "updated_at": "ISO8601",
   "artifacts": {
@@ -123,9 +130,13 @@ with zero cards, and holds the per-repo default modes that its cards inherit.
   "results_in_repo": false,          // false (default): phase results (requirements/design/…) live ONLY in
                                      //   the workspace-partitioned .dlc-yolo results area
                                      //   (<base>/workspaces/<ws>/data/results/<card-id>/); true: ALSO mirror
-                                     //   a copy into the owned repo (docs/dlc/<card-id>/) and commit it there,
-                                     //   so results are present in the workspace repo itself. Card may override.
+                                     //   a copy into the owned repo — a repo-root .dlc-yolo/ mirror of the app-data layout
+                                     //   (.dlc-yolo/<card-id>/ results + .dlc-yolo/workspaces/<ws>/data/pipeline_conversation.md)
+                                     //   committed there, so results are present in the workspace repo itself. Card may override.
   "self_enabling": false,            // true: orchestrator runs the setup->intent->per-step self-enabling flow
+  "trusted_authors": ["hai-dvash"],  // OWNERSHIP GUARD: only issues whose author.login is here may
+                                     //   create/advance/RESOLVE a card. Unset/empty = [gh-auth user] only,
+                                     //   NEVER allow-all. Card->pipeline->config resolution; fail closed.
   "approach": "simplified",          // "simplified" (lean ladder) | "enhanced" (research gate + addendum crews + deeper);
                                      //   the chosen side of the setup dual-proposal; sets each agent's simplified/enhanced mode
   "steps": [
@@ -318,12 +329,46 @@ agent step, when it finishes its work, MUST:
    ENHANCEMENTS (add-crew/add-addendum/add-tool/add-step) that reshape the step/pipeline via
    `state.json`. The gate is ON-DEMAND — not every step; skip it when the step cleanly
    serves intent with no fork.
-4. Set `card.step_status[<step>] = "done"` when the step is genuinely complete (and any
-   raised decision is resolved). The deterministic loop advances ONLY on that signal; it
-   never judges completeness itself.
+4. **End on a TERMINAL status — never a dangling `pending`.** A step run MUST resolve
+   `card.step_status[<step>]` to one of: **`done`** (the step's artifact was genuinely produced
+   — code where applicable — and any raised decision resolved; the loop advances), **`blocked`**
+   (cannot proceed without a human/decision — missing capability, needs approval, a fork; set
+   `block_reason`; the loop neither advances nor re-escalates — it waits for an interjection),
+   or **`error`** (retriable failure; set `error_reason`; the loop re-escalates after the
+   staleness window, bounded by a retry cap, then treats it as `blocked`). `pending` means ONLY
+   "a spawn is in flight" and MUST be transient — never end a run leaving it `pending`, and
+   never advance an EMPTY phase just by moving a label (produce the artifact or write
+   `blocked`). Crews are spawned from WITHIN the step's agent session (which has the tools); a
+   run that lacks crew-routing tools writes `blocked` rather than faking it.
 
-`step_status` values: `pending` (escalated / running), `done` (agent finished — safe to
-advance), `advanced` (loop has moved past it). Gates use `approved` (set by the UI / user).
+`step_status` values: `pending` (spawn in flight — transient), `done` (artifact produced —
+safe to advance), `blocked` (awaits human; not re-escalated), `error` (retriable; re-escalated
+under a cap), `advanced` (loop has moved past it). Gates use `approved` (set by the UI / user).
+
+### Card Lifecycle (handoff — separate from step_status)
+
+`card.lifecycle` tracks the card's position in the create-next-ticket / confirm-receipt
+handoff, ABOVE per-step execution (`step_status`). States: `ingested` → `pending` →
+`elaborated` (step produced its artifact) → `handed-off` (step created the next ticket(s),
+recorded in `child_tickets[]`) → `consumed` (a successor step ingested the child) → `retired`
+(removable). Plus `blocked`/`parked` (awaiting human).
+
+**No-retire-until-consumed (hard guard):** a card may become `retired` (removed/archived) ONLY
+when every entry in its `child_tickets[]` has `status: "consumed"`. Until then it stays live —
+if a successor never picks up its child (crash/block), the parent is not lost; it re-surfaces.
+This is the card-level analogue of the step-level staleness reclaim.
+
+**Post-gate routing (orchestrator, on gate resolution):**
+- **Approved** on an elaborating step → the step elaborates + **creates the next ticket(s)** as
+  child cards (`gh issue create` + `dlc:<next>` label; record in `child_tickets[]`); parent →
+  `handed-off`. The successor marks the child `consumed` on ingest; parent → `retired` ONLY
+  then.
+- **Rejected** → no child created; back-step (re-run predecessor) or park; parent stays live.
+- **Interjected** → re-run the step incorporating the interjection (`card.interjection` /
+  `decisions[]`), then re-evaluate the gate; no premature child, no retire.
+
+Model B (distinct child tickets) — an elaborating step produces a real successor ticket, not
+just a relabel; the parent is retired only once that child is genuinely consumed.
 
 ---
 

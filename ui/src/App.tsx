@@ -3,14 +3,16 @@ import { Card, CardTitle, PageHeader, StatCard } from '@kirocrew/app-sdk/ui'
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 
 // --- State file location ---------------------------------------------------
-// Durable-first, mirroring crons/dlc_yolo_advance.py:_resolve_state_path().
-// Order: ~/.dlc-yolo/state.json (durable, survives reboot) -> /tmp fallback
-// (ephemeral). The cron bootstraps the file (the UI's /api/file-write refuses
-// to CREATE files), so the UI just probes which resolved path actually exists
-// and uses it for all reads/writes. resolveStatePath() runs once on mount.
+// Persistence-authoritative, mirroring crons/dlc_yolo_advance.py:_resolve_state_path().
+// ~/.dlc-yolo/state.json is THE state home — when it exists it is the SOLE tier the UI
+// reads/writes (no /tmp mirror, so no split-brain). /tmp/dlc-yolo/state.json is used ONLY
+// as a last-resort scratch fallback when the durable file is genuinely absent (locked-down
+// env). The cron bootstraps + promotes the durable file (the UI's /api/file-write refuses
+// to CREATE files); the UI probes the durable path first and only falls to /tmp if that
+// read genuinely fails. resolveStatePath() runs once on mount.
 const DURABLE_STATE = '~/.dlc-yolo/state.json'
 const TMP_STATE = '/tmp/dlc-yolo/state.json'
-let STATE_PATH = DURABLE_STATE   // updated by resolveStatePath() at startup
+let STATE_PATH = DURABLE_STATE   // persistence-authoritative; only demoted to /tmp if durable is absent
 
 // --- Types ---
 type Trust = 'manual' | 'assisted' | 'autonomous'
@@ -35,6 +37,10 @@ interface PipelineCard {
   created_at: string
   updated_at: string
   artifacts: Record<string, unknown>
+  step_status?: Record<string, string>
+  pending_at?: Record<string, string>
+  lifecycle?: string
+  interjection?: Array<{ at: string; step?: string; kind: string; text: string; by?: string; status?: string }>
   gate_history: Array<{ gate: string; decision: string; at: string; notes: string }>
   trigger_history?: Array<{ phase: string; trigger: string; at: string }>
   effort?: {
@@ -581,12 +587,18 @@ function PipelineCardItem({ card, config, onApprove, onReject, onCycleTrust, onC
   onReject?: () => void
   onCycleTrust?: () => void
   onCycleDepth?: () => void
+  onInterject?: (kind: string, text: string) => void
+  onResolveDecision?: (decisionId: string, choice: 'approve' | 'decline') => void
 }) {
   const isGate = card.stage.startsWith('gate-')
   const accent = isGate ? 'var(--warn)' : 'var(--border-strong, var(--border))'
   const effTrust = (card.trust || config.trust) as Trust
   const effDepth = (card.depth || config.depth) as Depth
   const parkedCount = card.parked?.length || 0
+  const [interjectOpen, setInterjectOpen] = useState(false)
+  const [interjectText, setInterjectText] = useState('')
+  // Any decision still awaiting a human choice (e.g. a depth-driven addendum suggestion)
+  const pendingDecisions = (card.decisions || []).filter(d => !d.chosen && (d.action === 'add-addendum' || d.options))
 
   return (
     <div
@@ -680,6 +692,41 @@ function PipelineCardItem({ card, config, onApprove, onReject, onCycleTrust, onC
             )
           })()}
         </div>
+      )}
+
+      {/* Pending decisions awaiting a human choice (e.g. depth-driven addendum-crew suggestion) */}
+      {onResolveDecision && pendingDecisions.map(d => (
+        <div key={d.id} className="mt-2 p-1.5 rounded-md text-[11px]"
+          style={{ background: 'color-mix(in srgb, var(--accent) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--accent) 35%, var(--border))' }}>
+          <div style={{ color: 'var(--text, var(--muted))' }}>⚖ {d.question || d.kind}</div>
+          <div className="mt-1 flex gap-1.5">
+            <button className="px-2 py-0.5 rounded font-semibold" style={{ background: 'var(--ok)', color: 'var(--bg)' }}
+              onClick={() => onResolveDecision(d.id, 'approve')}>Approve</button>
+            <button className="px-2 py-0.5 rounded font-semibold" style={{ background: 'var(--bg-hover, var(--border))', color: 'var(--muted)' }}
+              onClick={() => onResolveDecision(d.id, 'decline')}>Decline</button>
+          </div>
+        </div>
+      ))}
+
+      {/* Interject — session-visible on ANY step: inject design/spec the next run honors */}
+      {onInterject && (
+        interjectOpen ? (
+          <div className="mt-2 flex flex-col gap-1">
+            <textarea value={interjectText} onChange={e => setInterjectText(e.target.value)}
+              placeholder="Interject: design/spec note, re-scope…" rows={2}
+              className="w-full text-[11px] px-2 py-1 rounded outline-none resize-none"
+              style={{ background: 'var(--bg-elevated, var(--bg))', border: '1px solid var(--border)', color: 'var(--text)' }} />
+            <div className="flex gap-1.5">
+              <button className="text-[11px] px-2 py-0.5 rounded font-semibold" style={{ background: 'var(--accent)', color: 'var(--bg)' }}
+                onClick={() => { if (interjectText.trim()) { onInterject('note', interjectText.trim()); setInterjectText(''); setInterjectOpen(false) } }}>Send</button>
+              <button className="text-[11px] px-2 py-0.5 rounded" style={{ color: 'var(--muted)' }}
+                onClick={() => { setInterjectOpen(false); setInterjectText('') }}>Cancel</button>
+            </div>
+          </div>
+        ) : (
+          <button className="mt-2 text-[10px] hover:underline" style={{ color: 'var(--muted)' }}
+            onClick={() => setInterjectOpen(true)}>+ interject</button>
+        )
       )}
     </div>
   )
@@ -1351,7 +1398,7 @@ function PipelineSetupModal({ candidates, existingRepos, defaults, knownAgents, 
           <label className="flex items-center justify-between cursor-pointer">
             <div>
               <div className="text-sm" style={{ color: 'var(--text)' }}>Save results into repo</div>
-              <div className="text-[11px]" style={{ color: 'var(--muted)' }}>Also write &amp; commit phase results to <code style={{ color: 'var(--accent)' }}>docs/dlc/&lt;card&gt;/</code> in the owned repo (always kept in app data)</div>
+              <div className="text-[11px]" style={{ color: 'var(--muted)' }}>Also commit results &amp; the pipeline conversation to a <code style={{ color: 'var(--accent)' }}>.dlc-yolo/</code> copy in the owned repo (always kept in app data)</div>
             </div>
             <button onClick={() => setResultsInRepo(r => !r)}
               className="w-10 h-5.5 rounded-full transition-all relative flex-shrink-0"
@@ -1641,6 +1688,8 @@ export default function SdlcPipeline() {
   const [editRepo, setEditRepo] = useState<string | null>(null)
   const [candidates, setCandidates] = useState<RepoCandidate[]>([])
   const [crews, setCrews] = useState<{ name: string; description?: string }[]>([])
+  const [runPaneOpen, setRunPaneOpen] = useState(false)
+  const [liveSpawns, setLiveSpawns] = useState<{ id: string; task: string; status?: string }[]>([])
   const kanbanRef = useRef<HTMLDivElement>(null)
 
   const fetchCards = useCallback(async () => {
@@ -1649,8 +1698,8 @@ export default function SdlcPipeline() {
       try {
         data = await api.get('/api/file-read?path=' + encodeURIComponent(STATE_PATH))
       } catch (primaryErr) {
-        // durable path not present/readable yet — fall back to the ephemeral /tmp
-        // location (mirrors the cron's resolution order) and pin it for all sites.
+        // durable file genuinely absent — demote to the last-resort /tmp scratch tier
+        // (persistence-authoritative; /tmp is used ONLY when durable can't be read).
         if (STATE_PATH !== TMP_STATE) {
           STATE_PATH = TMP_STATE
           data = await api.get('/api/file-read?path=' + encodeURIComponent(STATE_PATH))
@@ -1685,6 +1734,31 @@ export default function SdlcPipeline() {
     [allCards, repoFilter]
   )
 
+  // Run status: derive in-flight (pending) subagent steps from cards' step_status +
+  // pending_at. A step is "running" while pending; "stale" if pending_at is older than the
+  // reclaim threshold (~10min) — i.e. a spawn the advance cron will re-escalate. Read-only
+  // reflection of state; no polling of spawn_list needed for the at-a-glance pane.
+  const PENDING_STALE_MS = 600_000
+  const runStatus = useMemo(() => {
+    const running: { card: string; step: string; agent: string; stale: boolean; status: string; live: boolean }[] = []
+    for (const c of cards) {
+      const ss = c.step_status || {}
+      const pl = pipelines.find(p => p.id === c.pipeline_id) || pipelines.find(p => p.repo === c.source?.repo)
+      for (const [step, st] of Object.entries(ss)) {
+        if (st === 'pending' || st === 'error') {
+          const at = c.pending_at?.[step]
+          const stale = at ? (Date.now() - new Date(at).getTime()) > PENDING_STALE_MS : false
+          const sdef = pl?.steps?.find(s => s.id === step)
+          const agent = sdef?.agent?.crew || sdef?.agent?.name || 'orchestrator'
+          // live = a spawn_list snapshot entry references this card (task mentions its id)
+          const live = liveSpawns.some(ls => (ls.task || '').includes(c.id) || (ls.task || '').includes(c.title))
+          running.push({ card: c.title || c.id, step, agent, stale, status: st, live })
+        }
+      }
+    }
+    return running
+  }, [cards, pipelines, liveSpawns])
+
   // Active step ladder: when exactly ONE pipeline (repo) is selected and it has
   // custom steps, render those; otherwise fall back to the default ladder + a
   // terminal "done". Steps drive the kanban columns, the graph, and gate logic.
@@ -1712,9 +1786,23 @@ export default function SdlcPipeline() {
 
   useEffect(() => {
     fetchCards()
-    const interval = setInterval(fetchCards, 10000)
+    const fetchLive = async () => {
+      try {
+        // Derive the snapshot path from the RESOLVED state dir (H1) — not a substring
+        // replace, and only after fetchCards has settled STATE_PATH onto the live tier, so
+        // we read the same dir the cron writes (durable or /tmp), never a phantom path.
+        const dir = STATE_PATH.slice(0, STATE_PATH.lastIndexOf('/'))
+        const livePath = (dir ? dir + '/' : '') + 'live_spawns.json'
+        const snap = await api.get('/api/file-read?path=' + encodeURIComponent(livePath))
+        // ignore a stale snapshot (cron may have frozen it on a tool-error window)
+        const fresh = snap?.at ? (Date.now() - new Date(snap.at).getTime()) < 180_000 : true
+        setLiveSpawns(fresh && Array.isArray(snap?.runs) ? snap.runs : [])
+      } catch { /* snapshot may not exist yet — leave empty */ }
+    }
+    fetchCards().then(fetchLive)
+    const interval = setInterval(() => { fetchCards().then(fetchLive) }, 10000)
     return () => clearInterval(interval)
-  }, [fetchCards])
+  }, [fetchCards, api])
 
   // Load the KiroCrew crew roster (config.json `agents` map) once, for the step Crew dropdown.
   // The UI reads config.json directly (same pattern as workspaces); select_crew binds these at run time.
@@ -1795,7 +1883,18 @@ export default function SdlcPipeline() {
       const state = await api.get('/api/file-read?path=' + encodeURIComponent(STATE_PATH))
       state.cards = state.cards || []
       mutator(state)
-      await api.post('/api/file-write', { path: STATE_PATH, content: JSON.stringify(state, null, 2) })
+      // H2 (reduce lost-update vs the 120s cron): re-read immediately before writing and
+      // re-apply the mutator onto the FRESH copy, so a cron write that landed during our
+      // edit is preserved and only our small field-set is layered on top — instead of
+      // overwriting the whole file with a stale snapshot. Mutators are idempotent field-sets.
+      try {
+        const fresh = await api.get('/api/file-read?path=' + encodeURIComponent(STATE_PATH))
+        fresh.cards = fresh.cards || []
+        mutator(fresh)
+        await api.post('/api/file-write', { path: STATE_PATH, content: JSON.stringify(fresh, null, 2) })
+      } catch {
+        await api.post('/api/file-write', { path: STATE_PATH, content: JSON.stringify(state, null, 2) })
+      }
       fetchCards()
     } catch (e) {
       console.error('Failed to mutate state:', e)
@@ -1805,6 +1904,49 @@ export default function SdlcPipeline() {
   const setPipelineConfig = useCallback((patch: Partial<PipelineConfig>) => {
     setConfig(prev => ({ ...prev, ...patch }))
     mutateState(state => { state.config = { ...DEFAULT_CONFIG, ...(state.config || {}), ...patch } })
+  }, [mutateState])
+
+  // --- Gate controls + interjection channel (persistence-interjection spec) ---
+  // Approve/reject a gate step, or interject design/spec on any step. All write state; the
+  // orchestrator/advance loop honor them on the next run (UI reflects+configures, never acts).
+  const approveGate = useCallback((cardId: string, stage: string) => {
+    mutateState(state => {
+      const card = state.cards.find(c => c.id === cardId)
+      if (!card) return
+      card.step_status = { ...(card.step_status || {}), [stage]: 'approved' }
+      card.updated_at = new Date().toISOString()
+    })
+  }, [mutateState])
+
+  const rejectGate = useCallback((cardId: string, stage: string) => {
+    mutateState(state => {
+      const card = state.cards.find(c => c.id === cardId)
+      if (!card) return
+      card.step_status = { ...(card.step_status || {}), [stage]: 'rejected' }
+      card.updated_at = new Date().toISOString()
+    })
+  }, [mutateState])
+
+  const addInterjection = useCallback((cardId: string, stage: string, kind: string, text: string) => {
+    mutateState(state => {
+      const card = state.cards.find(c => c.id === cardId)
+      if (!card) return
+      card.interjection = [...(card.interjection || []), {
+        at: new Date().toISOString(), step: stage, kind, text, by: 'user', status: 'pending',
+      }]
+      card.updated_at = new Date().toISOString()
+    })
+  }, [mutateState])
+
+  // Approve/decline a raised decision (e.g. a depth-driven addendum-crew suggestion).
+  const resolveDecision = useCallback((cardId: string, decisionId: string, choice: 'approve' | 'decline') => {
+    mutateState(state => {
+      const card = state.cards.find(c => c.id === cardId)
+      if (!card) return
+      const d = (card.decisions || []).find(x => x.id === decisionId)
+      if (d) { d.chosen = choice; (d as { resolved_at?: string }).resolved_at = new Date().toISOString() }
+      card.updated_at = new Date().toISOString()
+    })
   }, [mutateState])
 
   const cycleTrust = useCallback((cardId: string) => {
@@ -1956,6 +2098,8 @@ export default function SdlcPipeline() {
     onReject: isGateStep(card.stage) ? () => rejectCard(card.id) : undefined,
     onCycleTrust: () => cycleTrust(card.id),
     onCycleDepth: () => cycleDepth(card.id),
+    onInterject: (kind: string, text: string) => addInterjection(card.id, card.stage, kind, text),
+    onResolveDecision: (decisionId: string, choice: 'approve' | 'decline') => resolveDecision(card.id, decisionId, choice),
   })
 
   return (
@@ -2015,6 +2159,48 @@ export default function SdlcPipeline() {
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-3 mb-4 flex-wrap">
               <ViewTabs active={view} onChange={setView} counts={tabCounts} />
+              {/* Subagents / run-status pane — click to expand which agents are running */}
+              <div className="relative">
+                <button onClick={() => setRunPaneOpen(o => !o)}
+                  className="flex items-center gap-1.5 text-[11px] px-2 py-1 rounded-md cursor-pointer"
+                  title="Click to see which agents are running"
+                  style={{ background: 'var(--bg-elevated, var(--bg))', border: '1px solid var(--border)', color: runStatus.length ? 'var(--accent)' : 'var(--muted)' }}>
+                  {runStatus.length > 0 ? (
+                    <>
+                      <span className="inline-block animate-pulse" style={{ width: 7, height: 7, borderRadius: 999, background: 'var(--accent)' }} />
+                      <span className="font-semibold">{runStatus.length} running</span>
+                      {runStatus.some(r => r.stale) && (
+                        <span style={{ color: 'var(--warn)' }}>· {runStatus.filter(r => r.stale).length} stale ↻</span>
+                      )}
+                    </>
+                  ) : (
+                    <><span style={{ width: 7, height: 7, borderRadius: 999, background: 'var(--muted)', display: 'inline-block', opacity: 0.5 }} /> <span>idle</span></>
+                  )}
+                  <span style={{ opacity: 0.5, fontSize: 9 }}>{runPaneOpen ? '▲' : '▼'}</span>
+                </button>
+                {runPaneOpen && (
+                  <div className="absolute z-20 mt-1 left-0 rounded-md p-2 flex flex-col gap-1 min-w-[260px]"
+                    style={{ background: 'var(--bg-elevated, var(--bg))', border: '1px solid var(--border-strong, var(--border))', boxShadow: '0 6px 20px rgba(0,0,0,0.25)' }}>
+                    <div className="text-[10px] uppercase tracking-wider mb-0.5" style={{ color: 'var(--muted)' }}>Subagents in flight</div>
+                    {runStatus.length === 0 ? (
+                      <div className="text-[11px]" style={{ color: 'var(--muted)' }}>No agents running — pipeline idle.</div>
+                    ) : runStatus.map((r) => (
+                      <div key={`${r.card}:${r.step}`} className="flex items-center gap-2 text-[11px] px-1.5 py-1 rounded"
+                        style={{ background: 'var(--bg, transparent)' }}>
+                        <span className="inline-block animate-pulse flex-shrink-0" style={{ width: 6, height: 6, borderRadius: 999, background: r.stale ? 'var(--warn)' : 'var(--accent)' }} />
+                        <span className="font-semibold" style={{ color: 'var(--accent)' }}>{r.agent}</span>
+                        <span style={{ color: 'var(--muted)' }}>· {r.step}</span>
+                        <span className="ml-auto truncate max-w-[110px]" style={{ color: 'var(--text, var(--muted))' }} title={r.card}>{r.card}</span>
+                        {r.live
+                          ? <span style={{ color: 'var(--ok)' }} title="live spawn confirmed via spawn_list">●live</span>
+                          : <span style={{ color: 'var(--muted)' }} title="no live spawn found — likely dead, will reclaim">no-spawn</span>}
+                        {r.stale && <span style={{ color: 'var(--warn)' }} title="stale — will be re-escalated">↻</span>}
+                        {r.status === 'error' && <span style={{ color: 'var(--danger, #ef4444)' }} title="errored — retrying">⚠</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
               {repoFilter.size > 0 && (
                 <span className="text-[11px] px-2 py-1 rounded-md font-medium"
                   style={{ background: 'color-mix(in srgb, var(--accent) 14%, transparent)', color: 'var(--accent)' }}>

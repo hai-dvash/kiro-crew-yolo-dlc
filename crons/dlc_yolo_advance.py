@@ -178,11 +178,26 @@ def _resolve_capability(card: dict, step: dict) -> str:
     cap = card.get("capability") or step.get("capability")
     agent = step.get("agent") or {}
     dispatches = bool(agent.get("crew") or step.get("addenda"))
+    sid = str(step.get("id") or "")
+    # A DECOMPOSING step (intent/requirements) needs coordinator authority (gh child-ticket
+    # creation + child_tickets handoff) EVEN WITHOUT a crew — decomposition is pipeline work.
+    decomposes = sid in ("intent", "requirements")
+    # A CODE-WRITING step (implement) needs BUILDER scope (write src/test + general shell to run
+    # the toolchain: tsc/build/tests). Defaulting it to 'authoring' (results-only write, git-only
+    # shell) makes it correctly self-BLOCK with a capability-gap (PRODUCE-OR-BLOCK) — the cause of
+    # the implement stall. 'tasks' stays authoring (it writes a tasks.md doc, not code).
+    builds = sid in ("implement",)
     if not cap:
-        # role default: dispatching step -> coordinator; a plain producing step -> authoring.
-        cap = "coordinator" if dispatches else "authoring"
-    # guard: never grant coordinator to a step that doesn't dispatch.
-    if cap == "coordinator" and not dispatches:
+        # role default: code-writing -> builder; dispatching/decomposing -> coordinator;
+        # plain producing (requirements-doc/design-doc/tasks-doc/review) -> authoring.
+        if builds:
+            cap = "builder"
+        elif dispatches or decomposes:
+            cap = "coordinator"
+        else:
+            cap = "authoring"
+    # guard: never grant coordinator to a step that neither dispatches nor decomposes.
+    if cap == "coordinator" and not (dispatches or decomposes):
         cap = "authoring"
     valid = {"readonly", "authoring", "builder", "coordinator"}
     if cap not in valid:
@@ -216,6 +231,23 @@ def _spawn_agent_id(res) -> str | None:
                 return v
         return None
     try:
+        # call_tool may hand back the tool's text DIRECTLY as a bare str (verified: spawn_run/
+        # spawn_list return a bare human-readable str, NOT the {content:[...]} envelope). Handle
+        # the string case FIRST: JSON, else the first hex token (the new agent id leads the line).
+        # Without this branch the dict-only guard below fell straight to None and step_sessions was
+        # never written — the true cause of step_sessions empty on every escalation (mirrors the
+        # sibling dlc_yolo_spawns.py::_extract bare-str fix).
+        if isinstance(res, str):
+            try:
+                parsed = json.loads(res)
+                if isinstance(parsed, dict):
+                    hit = _from_dict(parsed)
+                    if hit:
+                        return hit
+            except (json.JSONDecodeError, TypeError):
+                pass
+            m = re.search(r"\b([0-9a-f]{6,12})\b", res)
+            return m.group(1) if m else None
         if isinstance(res, dict):
             hit = _from_dict(res)
             if hit:
@@ -374,6 +406,35 @@ def advance(ctx):
     escalations = 0
     moves = 0
 
+    # RC#2 — deterministic CONSUMED-flip (card-lifecycle-spec: no-retire-until-consumed). The
+    # `consumed` transition on a parent's child_tickets[] was previously assigned to "the
+    # orchestrator/successor" — but the escalation spawns a capability-PROFILE agent with NO
+    # cross-card scope, so nobody ever set it and parents could never retire. The advance cron is
+    # the right owner: it is a zero-token bookkeeping loop that already sees ALL cards + owns the
+    # retire gate, and marking consumed is pure state bookkeeping (not agent reasoning). Rule: once
+    # a CHILD card (one carrying parent_ticket) has been INGESTED — it has ANY step_status, i.e. a
+    # successor step genuinely picked it up — flip the matching entry in its parent's
+    # child_tickets[] to `consumed`. Idempotent (skips entries already consumed).
+    _by_id = {c.get("id"): c for c in cards if c.get("id")}
+    for child in cards:
+        pt = child.get("parent_ticket") or {}
+        parent_id = pt.get("card_id")
+        if not parent_id:
+            continue
+        ingested = bool(child.get("step_status"))  # any step recorded => a successor took it up
+        if not ingested:
+            continue
+        parent = _by_id.get(parent_id)
+        if not parent:
+            continue
+        cid = child.get("id")
+        cissue = (child.get("source") or {}).get("issue")
+        for entry in (parent.get("child_tickets") or []):
+            match = (entry.get("card_id") == cid) or (cissue and entry.get("issue") == cissue)
+            if match and entry.get("status") != "consumed":
+                entry["status"] = "consumed"
+                changed = True
+
     for card in cards:
         pl = _pipeline_for(state, card)
         ladder = _ladder(pl)
@@ -521,11 +582,38 @@ def advance(ctx):
                             f" Only if your resolved profile genuinely lacks a needed tool, raise a"
                             f" capability-gap decision — never fake a crew run or silently downgrade."
                             if crew else "")
+                        # DECOMPOSITION directive (persistent-step-agent ↔ depth-budget seam): the
+                        # decompose-into-child-cards logic lives in the ORCHESTRATOR prompt, but under
+                        # Spec C the spec/intent step is run by a capability PROFILE agent (not
+                        # pipeline-orchestrator), so it would never see that instruction. Inject it
+                        # here for the decomposing steps so the (coordinator-profiled) runner both HAS
+                        # the authority and IS TOLD to fan out. 'unlimited' budget = no cap.
+                        decomp_line = (
+                            f" DECOMPOSE: this is a spec/intent step — under the depth budget"
+                            f" (depth={depth}; pipeline.budget, where 'unlimited' means NO cap and"
+                            f" NEVER gate/wedge on budget), break the idea into features and OPEN A"
+                            f" CHILD CARD per feature (gh issue create + dlc:<first-step> label; record"
+                            f" in the parent's child_tickets[] and set each child's parent_ticket)"
+                            f" instead of piling everything on one card — quick keeps one card, deeper"
+                            f" fans out. You hold coordinator tools; if you resolved to a non-coordinator"
+                            f" profile, raise a capability-gap decision rather than skipping decomposition."
+                            if stage in ("intent", "requirements") else "")
+                        # BRANCH DISCIPLINE (branch-per-CARD, not branch-per-step): all of a card's
+                        # results_in_repo commits must land on ONE card-scoped branch so the card
+                        # yields ONE PR — not a branch+PR per step (the sprawl seen when each step
+                        # invented feat/card-<id>-<step>). Use card.target_branch if pinned, else the
+                        # deterministic dlc/<card-id>. Create/switch to it, don't open a per-step branch.
+                        _tb = card.get("target_branch") or f"dlc/{card.get('id')}"
+                        branch_line = (
+                            f" BRANCH: commit ALL results_in_repo output for this card to the SINGLE"
+                            f" card branch '{_tb}' (git checkout -B {_tb} once, reuse it every step) —"
+                            f" NEVER create a per-step branch; this card must produce ONE PR, not one"
+                            f" per step. Push only that branch by name.")
                         spawn_res = ctx.call_tool("kirocrew-core", "spawn_run", {
                             "task": (f"Run pipeline step '{stage}' for DLC-YOLO card "
                                      f"{card.get('id')} in repo {(card.get('source') or {}).get('repo')}. "
                                      f"Effective modes — trust={trust}, depth={depth}, capability={profile}."
-                                     f"{crew_line} "
+                                     f"{crew_line}{decomp_line}{branch_line} "
                                      f"Follow the pipeline-workflow skill and PRODUCE the step's "
                                      f"artifact (code where applicable), spawning crews/addenda from "
                                      f"WITHIN this session bounded by depth's fan-out budget. Honor "
@@ -580,9 +668,18 @@ def advance(ctx):
     if changed:
         _save(state)
 
-    # Notify only on a REAL signal: a gate is waiting for a human.
-    if waiting_gates:
+    # Notify only on a REAL, CHANGED signal: a gate/blocked card is waiting for a human. Dedup on
+    # the waiting-set signature persisted in state — a card parked at a gate (or blocked) must NOT
+    # re-notify every 120s cycle forever (that was the "stuck loop" notification spam). Only notify
+    # when the set of waiting items CHANGES (a new one appears); a steady-state wait stays silent.
+    prev_sig = state.get("_notified_waiting")
+    cur_sig = sorted(waiting_gates)
+    if waiting_gates and cur_sig != prev_sig:
         ctx.notify("⏸️ DLC-YOLO gates awaiting approval:\n- " + "\n- ".join(waiting_gates))
+    if cur_sig != prev_sig:
+        state["_notified_waiting"] = cur_sig
+        _save(state)
+        changed = True
 
     if not changed and not waiting_gates:
         raise Skip()  # silent: nothing happened this cycle

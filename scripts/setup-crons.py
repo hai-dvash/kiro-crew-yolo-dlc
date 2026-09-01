@@ -108,7 +108,7 @@ def _job_template(name: str) -> dict:
 def _desired_jobs() -> list[dict]:
     """Build the two desired job records from the manifest (app-crons.json) if present,
     else from known defaults. Script cron for advance, agent cron for backlog."""
-    every_advance, every_backlog = 120, 900
+    every_advance, every_backlog = 120, 200
     backlog_msg = (
         "Backlog back-feed. Collect the distinct owned repos from state.json cards' "
         "source.repo. For each repo, list open issues labeled dlc-backlog "

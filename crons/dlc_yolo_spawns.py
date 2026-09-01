@@ -137,8 +137,17 @@ def snapshot(ctx):
         if not isinstance(it, dict):
             continue
         task = str(it.get("task") or it.get("prompt") or "")
-        hay = (task + " " + str(it.get("agent") or it.get("agent_name") or "")).lower()
-        if not ("dlc-yolo" in hay or "card-" in hay or "dlcyolo-" in hay):
+        # spawn_list TRUNCATES each run's task in its human-readable listing (~60-80 chars).
+        # For a RUNNING row the "(<uptime>, Running: <cmd>)" progress + a "ctx-withheld:" note
+        # can consume the whole window BEFORE the card token appears, so a task-only filter
+        # dropped the running row → kept set collapsed to the stale done rows → the (id,status)
+        # signature never changed → the sig-guard raised Skip() → live_spawns.json froze
+        # (diagnosed by a clean-context subagent). Match on the widest stable set: the id + the
+        # "pipeline step" prefix that opens EVERY DLC task, not just the card token.
+        hay = (task + " " + str(it.get("agent") or it.get("agent_name") or "")
+               + " " + str(it.get("id") or "")).lower()
+        if not ("dlc-yolo" in hay or "card-" in hay or "dlcyolo-" in hay
+                or "pipeline step" in hay):
             continue
         runs.append({
             "id": it.get("agent_id") or it.get("id") or "",

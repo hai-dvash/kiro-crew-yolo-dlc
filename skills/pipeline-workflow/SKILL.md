@@ -169,8 +169,8 @@ with zero cards, and holds the per-repo default modes that its cards inherit.
                                      //   the chosen side of the setup dual-proposal; sets each agent's simplified/enhanced mode
   "budget": {                        // depth-derived at SETUP (depth-budget-spec): depth = the EFFORT SCALE
                                      //   (in the existing S=1/M=3/L=5/XL=8 points), not arbitrary numbers
-    "max_child_cards": 3,            //   quick=0 (one card) · standard<=3 · deep<=8
-    "effort_ceiling": 15,            //   points cap (same S/M/L/XL currency): quick~3 · standard~15 · deep~40
+    "max_child_cards": 3,            //   quick=0 (one card) · standard<=3 · deep<=8 · "unlimited" = no cap
+    "effort_ceiling": 15,            //   points cap (same S/M/L/XL currency): quick~3 · standard~15 · deep~40 · "unlimited" = no ceiling
     "max_feature_size": "L",         //   per-feature size welcomed: quick=S · standard=M/L · deep=L/XL
     "addenda": "obvious"             //   none (quick) | obvious (standard) | proactive (deep)
   },
@@ -463,6 +463,13 @@ blocks waiting on a persistent orchestrator**.
   interjects, a later run resumes) — it is what makes "interjectable" real rather than a wedge.
 
 ### Step agent = persistent scoped session that fans out from within (canon AND custom)
+
+**Invariant — STEP = SESSION, regardless of trigger:** if it's a step (canon OR custom
+`type:"agent"`), it is RUN by spawning a persistent step-agent (`keep=true` + record
+`card.step_sessions[step]`) — NEVER inline as the orchestrator itself. Crews + addenda are the
+opposite: ephemeral, spawned from WITHIN the step-agent's session, never persisted, never given a
+pointer. Persistence is a property of *being a step*, not of *which driver* (cron / `/dlc-yolo` /
+manual kick) spawned it — every driver runs a step the same persistent way.
 
 See `docs/persistent-step-agent-sessions-spec.md`. Each agent step — built-in OR a pipeline's own
 **custom** `type:"agent"` step — escalates as a **persistent, capability-scoped agent** so it is

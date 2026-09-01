@@ -116,6 +116,39 @@ fields are set by the CLI; a richer role/prompt is carried by the underlying kir
 For "canon vs addendum" and default `when` triggers, record those on the pipeline STEP
 (`step.agent.crew` / `step.addenda[]`) in `state.json`, not in the global registry.
 
+**`--kiro-agent <profile>` IS the crew's capability** (see `docs/capability-profile-spec.md`).
+`kirocrew agent create` has NO tool/trust flag — a crew's tools + trust come ENTIRELY from the
+`kiro_agent` template it points at (its `tools`/`allowedTools`/`toolsSettings`); the
+`config.json` crew record is a thin router with no tool fields, so editing it for trust is a
+no-op. So a crew stops raising spurious approval prompts ONLY when `--kiro-agent` points at a
+template whose `allowedTools` cover that crew's phase work. ALWAYS pass `--kiro-agent`
+deliberately — never leave a DLC-YOLO crew on the default `kirocrew` (that is exactly why the
+early `dlcyolo-rps3d-*` crews prompted). Pick one of the FOUR shipped base profile templates by
+what the step DOES:
+
+| Step does… | `--kiro-agent` | Scope |
+|---|---|---|
+| reads/triages/researches/reviews artifacts (no writes) | `dlcyolo-readonly` | read + card artifacts + read-only `gh` |
+| produces docs/specs (requirements/design/addendum notes) | `dlcyolo-authoring` | + scoped write to results + git-only shell + `ask_question` |
+| writes code + tests | `dlcyolo-builder` | + `write`/`shell` + `spawn_run`, git shell |
+| dispatches crews / files tickets / bootstraps | `dlcyolo-coordinator` | + `select_crew` + `kirocrew agent create` + `gh` write verbs |
+
+```
+kirocrew agent create --name dlcyolo-<pipeline-slug>-<role> --kiro-agent dlcyolo-authoring \
+  --workspace <workspace> --memory-store <memory-store>
+```
+Then record `step.capability` (`readonly|authoring|builder|coordinator`) on the step in
+`state.json` so the assignment is auditable. The per-repo sandbox (cwd = owned repo) ALWAYS
+applies on top — the profile grants a tool CLASS, the sandbox confines WHICH repo. If a step
+needs a scope no base profile covers, compose a one-off template (nearest base + the delta) and
+point `--kiro-agent` at it — but a scope-WIDENING one-off is a decision the user should confirm,
+not a silent grant.
+
+**Re-point an existing crew** that is on the wrong template (e.g. the default `kirocrew`): use
+the in-place `kirocrew agent update <name> --kiro-agent <profile>` (NOT `create`, which refuses
+an existing name with "already exists"). It rewrites the crew's `kiro_agent` pointer without a
+delete window. Confirm with `kirocrew agent list` / `kirocrew agent show <name>`.
+
 **Assign a crew to a step:** edit the pipeline's step in `state.json` — set
 `step.agent.crew = "<crew-name>"` (canon) or append `{crew, when, writes}` to
 `step.addenda[]` (addendum). The orchestrator resolves these via `select_crew` at run time.

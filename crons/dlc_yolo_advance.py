@@ -165,6 +165,41 @@ def _slug_step(step_id: str) -> str:
     return s.lstrip("-") or "step"
 
 
+def _spawn_agent_id(res) -> str | None:
+    """Extract the spawned agent_id from a spawn_run tool result (first-class-sessions §3).
+
+    The MCP result is typically an envelope {content:[{type:'text', text:'<json>'}]}, not a
+    bare dict — so unwrap defensively (same pattern as dlc_yolo_spawns.py). Returns the agent
+    id / session key if found, else None. Never raises: a missing id just means no deep-link
+    this run, so the escalation is unaffected."""
+    def _from_dict(d: dict) -> str | None:
+        for k in ("agent_id", "id", "session_key", "session_id"):
+            v = d.get(k)
+            if isinstance(v, str) and v:
+                return v
+        return None
+    try:
+        if isinstance(res, dict):
+            hit = _from_dict(res)
+            if hit:
+                return hit
+            content = res.get("content")
+            if isinstance(content, list):
+                for part in content:
+                    if isinstance(part, dict) and part.get("type") == "text":
+                        try:
+                            parsed = json.loads(part.get("text") or "")
+                        except (json.JSONDecodeError, TypeError):
+                            continue
+                        if isinstance(parsed, dict):
+                            hit = _from_dict(parsed)
+                            if hit:
+                                return hit
+    except Exception:
+        return None
+    return None
+
+
 def _current_dlc_labels(repo: str, issue: int) -> list[str]:
     """Best-effort: read the issue's existing dlc:* labels so we can remove them."""
     try:
@@ -404,7 +439,7 @@ def advance(ctx):
                                      f" (select_crew/spawn_run) is required and unavailable in your"
                                      f" tools, set step_status['{stage}']='blocked' with a"
                                      f" block_reason instead of faking it." if crew else "")
-                        ctx.call_tool("kirocrew-core", "spawn_run", {
+                        spawn_res = ctx.call_tool("kirocrew-core", "spawn_run", {
                             "task": (f"Run pipeline step '{stage}' for DLC-YOLO card "
                                      f"{card.get('id')} in repo {(card.get('source') or {}).get('repo')}.{crew_line} "
                                      f"Follow the pipeline-workflow skill and PRODUCE the step's "
@@ -419,6 +454,16 @@ def advance(ctx):
                         })
                         card.setdefault("step_status", {})[stage] = "pending"
                         card.setdefault("pending_at", {})[stage] = now
+                        # FIRST-CLASS SESSIONS (first-class-sessions-spec §3): record a pointer to
+                        # the step's spawned session so the UI can link to it (join on agent_id
+                        # against live_spawns.json) and a later interjection can spawn_continue the
+                        # SAME conversation instead of a cold re-spawn. Best-effort — a missing id
+                        # just means no deep-link this run; it never blocks the escalation.
+                        _aid = _spawn_agent_id(spawn_res)
+                        if _aid:
+                            card.setdefault("step_sessions", {})[stage] = {
+                                "agent_id": _aid, "name": f"dlc-yolo · {card.get('title', card.get('id'))} · {stage}",
+                                "at": now}
                         if status == "error":
                             card.setdefault("retry_count", {})[stage] = retries + 1
                         escalations += 1

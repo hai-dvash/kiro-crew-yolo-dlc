@@ -72,6 +72,13 @@ A card can regress when:
     {"phase": "requirements", "trigger": "spec-builder", "at": "ISO8601"},
     {"phase": "implement", "trigger": "task-runner", "at": "ISO8601"}
   ],
+  "step_sessions": {
+    "design": {"agent_id": "…", "session_key": "…", "name": "dlc-yolo · gesture-engine · design", "at": "ISO8601"}
+  },
+  "orchestrator_session": {"agent_id": "…", "session_key": "…", "name": "dlc-yolo · <pipeline> · orchestrator", "at": "ISO8601", "warm": false},
+  "interjection": [
+    {"at": "ISO8601", "step": "design", "kind": "design", "text": "use a component store, not props drilling", "by": "hai-dvash", "status": "pending"}
+  ],
   "effort": {
     "features": [
       {"id": "f1", "note": "Rate-limit middleware", "size": "M", "points": 3},
@@ -150,11 +157,11 @@ with zero cards, and holds the per-repo default modes that its cards inherit.
   "steps": [
     { "id": "requirements", "name": "Requirements", "type": "agent",
       "agent": { "name": "spec-agent", "role": "produce requirements.md", "tools": ["ask_question"] },
-      "trust": "assisted", "depth": "standard", "label": "dlc:requirements" },
+      "trust": "assisted", "depth": "standard", "capability": "authoring", "label": "dlc:requirements" },
     { "id": "gate-spec", "name": "Gate: Spec", "type": "gate", "label": "dlc:gate-spec" },
     { "id": "implement", "name": "Implement", "type": "agent",
-      "agent": { "name": "impl-agent", "role": "write code + tests" },
-      "trust": "autonomous", "depth": "deep", "label": "dlc:implement" }
+      "agent": { "name": "impl-agent", "role": "write code + tests", "crew": "dlcyolo-<pipeline>-impl" },
+      "trust": "autonomous", "depth": "deep", "capability": "builder", "label": "dlc:implement" }
   ],
   "created_at": "ISO8601"
 }
@@ -179,6 +186,28 @@ built-in 11-stage ladder is only the default the wizard offers. Each step is one
 Each step may set its OWN execution profile — `trust` (manual/assisted/autonomous) and
 `depth` (quick/standard/deep) — overriding the pipeline default for that step only. This
 is how "this step runs YOLO/autonomous+deep, that gate stays manual" is expressed.
+
+A step also carries a **`capability`** — the THIRD orthogonal axis (see
+`docs/capability-profile-spec.md`): **depth** = how MANY crews/cards, **trust** = WHEN to pause,
+**capability** = WHAT tool/scope the step's crew/agent gets. Values map 1:1 to four fixed base
+**kiro-agent profile templates** the orchestrator points a crew at via
+`kirocrew agent create --kiro-agent <profile>` (a crew's tools/trust come from its `kiro_agent`
+template, NOT the thin `config.json` crew record and NOT a CLI flag — so the profile IS how a
+crew stops raising spurious approvals):
+
+| `capability` | Profile template | Scope |
+|---|---|---|
+| `readonly` | `dlcyolo-readonly` | read + card artifacts + read-only `gh` (investigate/triage/research/review) |
+| `authoring` | `dlcyolo-authoring` | + scoped write to results + git-only shell + `ask_question` (requirements/design/spec/doc-addenda) |
+| `builder` | `dlcyolo-builder` | + `write`/`shell` + `spawn_run`, git shell (implement/code/tests) |
+| `coordinator` | `dlcyolo-coordinator` | + `select_crew` + `kirocrew agent create` + `gh` write verbs (dispatch crews/file tickets/bootstrap) |
+
+Resolution: `card.capability` → `step.capability` → **derived from the step's role + the prior
+step's produced scope**. A step DEFINING a new crew (bootstrap) is where the orchestrator picks
+the profile; a step USING an existing crew inherits the profile that crew was created against.
+The per-repo sandbox (cwd = owned repo) ALWAYS applies on top: capability = which tools, sandbox
+= which repo. A one-off `capability_template` (nearest base + a delta) is allowed when no base
+fits, but a scope-WIDENING one is a trust-gated decision, never silent.
 
 Every step has a `label` (`dlc:<step-id>`) used as the GitHub stage label (below).
 
@@ -377,6 +406,41 @@ This is the card-level analogue of the step-level staleness reclaim.
 
 Model B (distinct child tickets) — an elaborating step produces a real successor ticket, not
 just a relabel; the parent is retired only once that child is genuinely consumed.
+
+---
+
+## First-Class Sessions & Non-Blocking Orchestrator
+
+See `docs/first-class-sessions-spec.md`. Steps and the orchestrator are **visible, addressable,
+interjectable SESSIONS** — not opaque fire-and-forget spawns — while the advance loop **NEVER
+blocks waiting on a persistent orchestrator**.
+
+- **Session pointers.** When a step's work is spawned (by the advance cron's escalation or by the
+  orchestrator directly), a pointer is recorded on the card:
+  `step_sessions[<step>] = {agent_id, session_key?, name:"dlc-yolo · <card> · <step>", at}`.
+  The UI joins this against `live_spawns.json` (on `agent_id`) to turn a subagents-pane row into a
+  **link that opens the session**; a later interjection uses the pointer to `spawn_continue` the
+  SAME conversation (keeping accumulated context) instead of a cold re-spawn. Best-effort — a
+  missing id just means no deep-link, never a block.
+- **Orchestrator session + local trigger.** The orchestrator can be **triggered on demand**
+  (`/dlc-yolo` or a pane control) as a NAMED session (`dlc-yolo · <pipeline> · orchestrator`,
+  recorded in `card.orchestrator_session`) that a human can open to see its per-card reasoning,
+  capability/profile assignments, and fan-out/back-step decisions — and interject. It is
+  available + inspectable, NOT a standing daemon.
+- **Non-blocking invariant (load-bearing).** The advance loop escalates via a fire-and-forget
+  `spawn_run`, records `step_status='pending'` + `pending_at`, and **moves on in the same cycle**
+  — it never awaits completion. Completion is signalled by a TERMINAL status written to state
+  (done/blocked/error); the next tick reads it. A **warm** orchestrator session (kept open via
+  `monitor_start`/`register_hook`, `orchestrator_session.warm=true`) is an OPT-IN observer/driver
+  — the loop is correct whether it exists, is closed, or crashed, because the loop reads STATE,
+  never waits on a session. A `pending` step with no matching `live_spawns` entry past the
+  staleness window is a confirmed-dead spawn → reclaimed + re-escalated, so an abandoned session
+  never wedges the pipeline.
+- **Steer vs interject.** A running step session can be **live-steered** (`spawn_steer`) for an
+  in-flight correction; a finished/`blocked` one is resumed by **`spawn_continue`** from its
+  `step_sessions` pointer; OR write a durable **`card.interjection[]`** the next run honors. None
+  block the loop. `blocked` is the interjection hand-off (a step parks with a reason, a human
+  interjects, a later run resumes) — it is what makes "interjectable" real rather than a wedge.
 
 ---
 

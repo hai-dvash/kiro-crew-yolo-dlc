@@ -12,7 +12,11 @@
     "agents/spec-agent.json",
     "agents/design-agent.json",
     "agents/impl-agent.json",
-    "agents/review-agent.json"
+    "agents/review-agent.json",
+    "agents/dlcyolo-readonly.json",
+    "agents/dlcyolo-authoring.json",
+    "agents/dlcyolo-builder.json",
+    "agents/dlcyolo-coordinator.json"
   ],
   "skills": [
     "skills/pipeline-workflow",

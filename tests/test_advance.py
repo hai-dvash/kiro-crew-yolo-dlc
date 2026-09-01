@@ -158,8 +158,11 @@ class TestAdvanceEscalate:
         assert args.args[1] == "cron_add"
         payload = args.args[2]
         assert payload.get("agent", "").startswith("dlcyolo-")   # bound to a capability profile
-        assert payload.get("delay") == 0                          # one-shot, fires immediately
-        assert payload.get("hide_in_chat") is False               # so the slot actually appears
+        assert payload.get("delay") == 1                          # one-shot, fires immediately (>=1)
+        assert payload.get("hide_in_chat") is False              # so the slot actually appears
+        assert payload.get("silent") is False                     # MUST be False — silent routes to the
+        #                                                           non-creator gateway branch; the openable
+        #                                                           slot is only minted on the non-silent path
         out = read_state()["cards"][0]
         assert out["step_status"]["requirements"] == "pending"
         assert "requirements" in out["pending_at"]
@@ -537,3 +540,94 @@ class TestResolveGuard:
         card = card_factory(stage="done", sot="github")
         _run(advance_mod, mock_ctx, write_state, state_factory(cards=[card]))
         assert read_state()["cards"][0]["lifecycle"] == "retired"
+
+
+# =========================================================================== #
+# TIER 2e — PARENT_TICKET SELF-HEAL (§5 gap #4 — harden writers)
+# =========================================================================== #
+class TestParentTicketSelfHeal:
+    def test_bare_int_parent_ticket_normalized_to_dict(self, advance_mod, mock_ctx, state_factory,
+                                                       card_factory, write_state, read_state):
+        parent = card_factory(stage="requirements",
+                              step_status={"requirements": "pending"},
+                              pending_at={"requirements": _iso(_now())},
+                              source={"type": "github", "repo": "owner/repo", "issue": 41,
+                                      "url": "https://x/41"})
+        child = card_factory(stage="requirements",
+                             step_status={"requirements": "pending"},
+                             pending_at={"requirements": _iso(_now())},
+                             parent_ticket=41)  # bare int (malformed writer)
+        _run(advance_mod, mock_ctx, write_state, state_factory(cards=[parent, child]))
+        out = {c["id"]: c for c in read_state()["cards"]}
+        healed = out[child["id"]]["parent_ticket"]
+        assert isinstance(healed, dict)
+        assert healed["issue"] == 41
+        assert healed["card_id"] == parent["id"]
+        assert healed["url"] == "https://x/41"
+
+    def test_dict_parent_ticket_untouched(self, advance_mod, mock_ctx, state_factory,
+                                          card_factory, write_state, read_state):
+        pt = {"issue": 9, "card_id": "card-parent", "url": "u"}
+        child = card_factory(stage="requirements",
+                             step_status={"requirements": "pending"},
+                             pending_at={"requirements": _iso(_now())},
+                             parent_ticket=dict(pt))
+        _run(advance_mod, mock_ctx, write_state, state_factory(cards=[child]))
+        assert read_state()["cards"][0]["parent_ticket"] == pt
+
+
+# =========================================================================== #
+# TIER 2f — CHILD INGESTION + DECOMPOSE FORM-CHANGE (fan-out completeness)
+# =========================================================================== #
+class TestChildIngestion:
+    def test_child_ticket_card_id_null_becomes_driven_card(self, advance_mod, mock_ctx,
+                                                           state_factory, card_factory,
+                                                           write_state, read_state):
+        # a mid-ladder parent with an un-carded child_ticket -> a real child card is created,
+        # card_id back-filled, parent marked decomposed.
+        parent = card_factory(
+            stage="requirements",
+            step_status={"requirements": "advanced"},
+            child_tickets=[{"issue": 43, "url": "u43", "feature": "f1", "status": "handed-off",
+                            "card_id": None}],
+        )
+        _run(advance_mod, mock_ctx, write_state, state_factory(cards=[parent]))
+        out = read_state()["cards"]
+        p = next(c for c in out if c["id"] == parent["id"])
+        assert p.get("decomposed")                                   # parent form-changed
+        entry = p["child_tickets"][0]
+        assert entry["card_id"] is not None                          # back-filled
+        child = next(c for c in out if c["id"] == entry["card_id"])
+        assert (child["source"] or {}).get("issue") == 43            # driven card exists
+        assert child["parent_ticket"]["card_id"] == parent["id"]     # links back
+        assert child["stage"]                                        # has a start stage
+
+    def test_decomposed_parent_does_not_run_its_ladder(self, advance_mod, mock_ctx, state_factory,
+                                                       card_factory, write_state, read_state):
+        # an already-decomposed parent at an agent step is NOT escalated (no cron_add for it).
+        parent = card_factory(
+            stage="requirements", step_status={},
+            decomposed={"at": "x", "children": [43]},
+            child_tickets=[{"issue": 43, "card_id": "card-child-43", "status": "open"}],
+        )
+        child = card_factory(id="card-child-43", stage="requirements", step_status={},
+                             source={"type": "github", "repo": "owner/repo", "issue": 43})
+        _run(advance_mod, mock_ctx, write_state, state_factory(cards=[parent, child]))
+        # the parent must not have been escalated; only the child (if any) drives.
+        add_calls = [c for c in mock_ctx.call_tool.call_args_list
+                     if c.args[:2] == ("kirocrew-cron", "cron_add")
+                     and parent["id"] in str(c.args[2])]
+        assert len(add_calls) == 0
+
+    def test_consumed_child_ticket_not_re_ingested(self, advance_mod, mock_ctx, state_factory,
+                                                   card_factory, write_state, read_state):
+        # a consumed child_ticket on a mid-ladder parent creates no new card + no decompose.
+        parent = card_factory(
+            stage="requirements", step_status={"requirements": "advanced"},
+            child_tickets=[{"issue": 44, "status": "consumed", "card_id": None}],
+        )
+        _run(advance_mod, mock_ctx, write_state, state_factory(cards=[parent]))
+        out = read_state()["cards"]
+        assert not any((c.get("source") or {}).get("issue") == 44 for c in out)  # no card made
+        p = next(c for c in out if c["id"] == parent["id"])
+        assert not p.get("decomposed")

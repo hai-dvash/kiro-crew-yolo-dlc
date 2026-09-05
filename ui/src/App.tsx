@@ -1,7 +1,8 @@
-import { useAppApi, useChatLauncher } from '@kirocrew/app-sdk'
+import { useAppApi, useChatLauncher, useNavigate } from '@kirocrew/app-sdk'
 import { Card, CardTitle, PageHeader, StatCard } from '@kirocrew/app-sdk/ui'
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { appendLiveTail, beginLiveThinking, finishLiveTail } from './liveTail.js'
+import { buildGateInspection, gateValue } from './gateInspection.js'
 
 // --- State file location ---------------------------------------------------
 // Persistence-authoritative, mirroring crons/dlc_yolo_advance.py:_resolve_state_path().
@@ -43,6 +44,70 @@ interface ParkedIdea {
   phase?: string
 }
 
+interface StepSessionPointer {
+  agent_id?: string
+  session_key?: string
+  slot_key?: string
+  cron_id?: string
+  agent?: string
+  name?: string
+  at?: string
+  kept?: boolean
+  retired_at?: string
+  superseded?: string
+  chat_disabled_at?: string
+  last_response_at?: string
+  last_response_handled_at?: string
+  response_routed_at?: string
+  response_routed_to_step?: string
+  retention?: string
+  retained_for_gate?: string
+  retained_at?: string
+  release_after?: string
+  retention_handoff_at?: string
+  retention_released_at?: string
+}
+
+interface GateResultBundle {
+  summary?: string
+  artifacts?: unknown[]
+  changes_since_prior?: unknown[]
+  intent_and_requirement_coverage?: unknown[]
+  decisions_and_questions?: unknown[]
+  alternatives?: unknown[]
+  research_and_citations?: unknown[]
+  card_topology?: Record<string, unknown>
+  budget?: { allocated?: unknown; consumed?: unknown; remaining?: unknown }
+  routing_and_provenance?: Record<string, unknown>
+  validation_and_evidence?: unknown[]
+  known_risks?: unknown[]
+  omissions_and_deviations?: unknown[]
+}
+
+interface GateReview {
+  gate?: string
+  producer_step?: string
+  producer_session_ref?: string
+  envelope_id?: string
+  result_revision?: number
+  status?: string
+  bundle?: GateResultBundle
+  created_at?: string
+}
+
+interface GateCommand {
+  id: string
+  gate: string
+  action: 'approve' | 'reject' | 'interject'
+  expected_revision: number | null
+  actor: string
+  at: string
+  status: 'pending'
+  reason?: string
+  kind?: string
+  text?: string
+}
+
 interface PipelineCard {
   id: string
   title: string
@@ -57,11 +122,16 @@ interface PipelineCard {
   artifacts: Record<string, unknown>
   step_status?: Record<string, string>
   pending_at?: Record<string, string>
-  step_sessions?: Record<string, { agent_id?: string; session_key?: string; slot_key?: string; cron_id?: string; agent?: string; name?: string; at?: string; kept?: boolean; retired_at?: string; superseded?: string; chat_disabled_at?: string; last_response_at?: string; last_response_handled_at?: string; response_routed_at?: string; response_routed_to_step?: string }>
+  step_sessions?: Record<string, StepSessionPointer>
+  successor_receipts?: Record<string, { producer_step?: string; successor_step?: string; received_at?: string }>
+  gate_review?: GateReview
+  gate_commands?: GateCommand[]
+  runtime_handshakes?: Record<string, Record<string, unknown>>
+  runtime_handshake?: Record<string, unknown>
   orchestrator_session?: { agent_id?: string; session_key?: string; slot_key?: string; cron_id?: string; name?: string; at?: string; warm?: boolean }
   lifecycle?: string
-  interjection?: Array<{ at: string; step?: string; kind: string; text: string; by?: string; status?: string }>
-  gate_history: Array<{ gate: string; decision: string; at: string; notes: string }>
+  interjection?: Array<{ id?: string; at: string; step?: string; kind: string; text: string; by?: string; status?: string; result_revision?: number }>
+  gate_history: Array<{ gate: string; decision: string; at: string; notes: string; command_id?: string; actor?: string; result_revision?: number }>
   trigger_history?: Array<{ phase: string; trigger: string; at: string }>
   effort?: {
     features?: Array<{ id: string; note: string; size: string; points: number }>
@@ -88,6 +158,7 @@ interface PipelineStep {
   id: string
   name: string
   type: 'agent' | 'gate'
+  reviews_step?: string
   agent?: StepAgent
   addenda?: Addendum[]
   trigger?: 'ask' | 'spec-builder' | 'task-runner' | 'inline' | 'skip'  // default engine for this phase (ask = prompt at runtime)
@@ -113,6 +184,7 @@ const DEFAULT_STEPS: PipelineStep[] = [
 interface Pipeline {
   id: string
   repo: string
+  repo_path?: string
   workspace?: string
   source?: 'issue-radar' | 'workspace' | 'manual'
   trust?: Trust
@@ -600,18 +672,251 @@ function ViewTabs({ active, onChange, counts }: {
   )
 }
 
+type GateInspectionView = ReturnType<typeof buildGateInspection>
+type GateInspectionRow = { key: string; title: string; detail?: string | null; status?: string | null; level?: string | null; ref?: string | null; url?: string | null }
+
+function GateInspectionSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="rounded-lg p-3" style={{ background: 'var(--bg, transparent)', border: '1px solid var(--border)' }}>
+      <h3 className="text-[10px] uppercase tracking-wider font-semibold mb-2" style={{ color: 'var(--muted)' }}>{title}</h3>
+      {children}
+    </section>
+  )
+}
+
+function GateInspectionRows({ rows, empty = 'None recorded' }: { rows: GateInspectionRow[]; empty?: string }) {
+  if (!rows.length) return <div className="text-[11px]" style={{ color: 'var(--muted)' }}>{empty}</div>
+  return (
+    <div className="flex flex-col gap-1.5">
+      {rows.map(row => (
+        <div key={row.key} className="rounded-md px-2 py-1.5" style={{ background: 'var(--bg-elevated, var(--card))', border: '1px solid color-mix(in srgb, var(--border) 78%, transparent)' }}>
+          <div className="flex items-start gap-2 text-[11px]">
+            <span className="font-medium min-w-0 break-words" style={{ color: 'var(--text)' }}>{row.title}</span>
+            <span className="ml-auto flex gap-1 flex-shrink-0">
+              {row.level && <span className="px-1 py-0.5 rounded text-[9px] font-semibold" style={{ color: row.level === 'required' ? 'var(--warn)' : 'var(--muted)', background: 'var(--bg-hover, var(--border))' }}>{row.level}</span>}
+              {row.status && <span className="px-1 py-0.5 rounded text-[9px] font-semibold" style={{ color: /fail|block|open|pending/i.test(row.status) ? 'var(--warn)' : 'var(--ok)', background: 'var(--bg-hover, var(--border))' }}>{row.status}</span>}
+            </span>
+          </div>
+          {row.detail && <div className="mt-0.5 text-[10px] break-words" style={{ color: 'var(--muted)' }}>{row.detail}</div>}
+          {row.ref && (row.url
+            ? <a href={row.url} target="_blank" rel="noreferrer" className="mt-1 block text-[10px] underline break-all" style={{ color: 'var(--accent)' }}>{row.ref}</a>
+            : <code className="mt-1 block text-[10px] break-all" style={{ color: 'var(--muted)' }}>{row.ref}</code>)}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function GateDatum({ label, value, status }: { label: string; value: unknown; status?: unknown }) {
+  return (
+    <div className="min-w-0">
+      <div className="text-[9px] uppercase tracking-wide" style={{ color: 'var(--muted)' }}>{label}</div>
+      <div className="text-[11px] mt-0.5 break-words" style={{ color: gateValue(value) === 'unobservable' ? 'var(--warn)' : 'var(--text)' }}>
+        {gateValue(value)}
+        {status && <span className="ml-1 text-[9px]" style={{ color: 'var(--muted)' }}>({gateValue(status)})</span>}
+      </div>
+    </div>
+  )
+}
+
+function GateInspectionDialog({ card, inspection, producerSession, onClose, onOpenProducer, onApprove, onReject, onInterject }: {
+  card: PipelineCard
+  inspection: GateInspectionView
+  producerSession?: { step: string; slotKey: string; retained: boolean }
+  onClose: () => void
+  onOpenProducer?: () => void
+  onApprove?: () => void
+  onReject?: (reason: string) => void
+  onInterject?: () => void
+}) {
+  const routing = inspection.routing
+  const requestReject = () => {
+    const reason = window.prompt(`Why reject revision ${inspection.revision ?? 'unknown'}?`)
+    if (reason?.trim() && onReject) {
+      onReject(reason.trim())
+      onClose()
+    }
+  }
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.58)', backdropFilter: 'blur(4px)' }}
+      onMouseDown={event => { if (event.currentTarget === event.target) onClose() }}>
+      <section role="dialog" aria-modal="true" aria-labelledby={`gate-inspection-${card.id}`}
+        className="flex flex-col rounded-xl overflow-hidden"
+        style={{ width: 'min(860px, calc(100vw - 32px))', maxHeight: 'min(88vh, 860px)', background: 'var(--bg-elevated, var(--bg))', border: '1px solid var(--border-strong, var(--border))', boxShadow: '0 28px 90px rgba(0,0,0,0.5)' }}>
+        <header className="px-5 py-4 flex items-start gap-4" style={{ borderBottom: '1px solid var(--border)' }}>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h2 id={`gate-inspection-${card.id}`} className="text-[15px] font-semibold" style={{ color: 'var(--text-strong, var(--text))' }}>Gate result inspection</h2>
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold" style={{ color: inspection.ready ? 'var(--ok)' : 'var(--warn)', background: `color-mix(in srgb, ${inspection.ready ? 'var(--ok)' : 'var(--warn)'} 14%, transparent)` }}>
+                {inspection.ready ? 'review-ready' : 'not review-ready'}
+              </span>
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold" style={{ color: 'var(--accent)', background: 'color-mix(in srgb, var(--accent) 14%, transparent)' }}>
+                revision {inspection.revision ?? 'unobservable'}
+              </span>
+            </div>
+            <div className="text-[12px] mt-1 truncate" style={{ color: 'var(--text)' }}>{card.title}</div>
+            <div className="text-[10px] mt-0.5" style={{ color: 'var(--muted)' }}>
+              {inspection.gate || card.stage} reviews {inspection.producerStep || 'unobservable producer'} · status {inspection.reviewStatus}
+            </div>
+          </div>
+          <button onClick={onClose} aria-label="Close gate inspection" className="w-8 h-8 rounded-lg flex items-center justify-center text-lg leading-none"
+            style={{ color: 'var(--muted)', background: 'var(--bg-hover, transparent)', border: '1px solid var(--border)' }}>×</button>
+        </header>
+
+        <div className="overflow-y-auto p-4 flex flex-col gap-3">
+          <div className="rounded-lg p-3" style={{ background: inspection.ready ? 'color-mix(in srgb, var(--ok) 8%, transparent)' : 'color-mix(in srgb, var(--warn) 8%, transparent)', border: `1px solid color-mix(in srgb, ${inspection.ready ? 'var(--ok)' : 'var(--warn)'} 38%, var(--border))` }}>
+            <div className="text-[11px] font-semibold" style={{ color: inspection.ready ? 'var(--ok)' : 'var(--warn)' }}>
+              {inspection.ready ? 'Bundle is structurally ready for review' : `${inspection.missing.length} readiness gap${inspection.missing.length === 1 ? '' : 's'}`}
+            </div>
+            {!inspection.ready && (
+              <ul className="mt-1.5 pl-4 list-disc text-[10px] space-y-0.5" style={{ color: 'var(--muted)' }}>
+                {inspection.missing.map((item: string) => <li key={item}>{item}</li>)}
+              </ul>
+            )}
+            {inspection.preferredShortfalls.length > 0 && (
+              <div className="mt-2 text-[10px]" style={{ color: 'var(--muted)' }}>
+                Preferred shortfalls (non-blocking): {inspection.preferredShortfalls.join(' · ')}
+              </div>
+            )}
+            <div className="text-[9px] mt-2" style={{ color: 'var(--muted)' }}>Inspection is read-only; deterministic runtime remains authoritative for movement and readiness enforcement.</div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <GateInspectionSection title="Result summary">
+              <div className="text-[12px] leading-relaxed whitespace-pre-wrap" style={{ color: inspection.summary ? 'var(--text)' : 'var(--warn)' }}>
+                {inspection.summary || 'No result summary was published.'}
+              </div>
+              <div className="grid grid-cols-2 gap-2 mt-3">
+                <GateDatum label="Envelope" value={inspection.envelopeId} />
+                <GateDatum label="Created" value={inspection.createdAt} />
+              </div>
+            </GateInspectionSection>
+            <GateInspectionSection title="Changes since prior revision">
+              <GateInspectionRows rows={inspection.changes} empty="No revision delta recorded" />
+            </GateInspectionSection>
+          </div>
+
+          <GateInspectionSection title="Artifacts and evidence references">
+            {inspection.artifacts.length ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                {inspection.artifacts.map((artifact: { key: string; label: string; ref: string | null; url: string | null; preview: string | null; kind: string | null; status: string | null }) => (
+                  <div key={artifact.key} className="rounded-md p-2" style={{ background: 'var(--bg-elevated, var(--card))', border: '1px solid var(--border)' }}>
+                    <div className="flex gap-2 text-[11px]"><span className="font-medium" style={{ color: 'var(--text)' }}>{artifact.label}</span>{artifact.kind && <span className="ml-auto text-[9px]" style={{ color: 'var(--muted)' }}>{artifact.kind}</span>}</div>
+                    {artifact.preview && <div className="mt-1 text-[10px] leading-relaxed" style={{ color: 'var(--muted)' }}>{artifact.preview}</div>}
+                    {artifact.ref && (artifact.url
+                      ? <a href={artifact.url} target="_blank" rel="noreferrer" className="mt-1 block text-[10px] underline break-all" style={{ color: 'var(--accent)' }}>{artifact.ref}</a>
+                      : <code className="mt-1 block text-[10px] break-all" style={{ color: 'var(--muted)' }}>{artifact.ref}</code>)}
+                  </div>
+                ))}
+              </div>
+            ) : <div className="text-[11px]" style={{ color: 'var(--warn)' }}>No referenced artifacts were published.</div>}
+          </GateInspectionSection>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <GateInspectionSection title="Alternatives and trade-offs">
+              <GateInspectionRows rows={inspection.alternatives} empty="No alternatives published" />
+            </GateInspectionSection>
+            <GateInspectionSection title="Research and citations">
+              <GateInspectionRows rows={inspection.research} empty="No research passes published" />
+            </GateInspectionSection>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <GateInspectionSection title="Intent and requirement coverage">
+              <GateInspectionRows rows={inspection.coverage} empty="No coverage records published" />
+            </GateInspectionSection>
+            <GateInspectionSection title="Omissions and deviations">
+              <GateInspectionRows rows={inspection.deviations} empty="No omissions or deviations recorded" />
+            </GateInspectionSection>
+          </div>
+
+          <GateInspectionSection title="Card topology and integration">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+              <GateDatum label="Action" value={inspection.topology.action} />
+              <GateDatum label="Integration owner" value={inspection.topology.integrationOwner} />
+              <GateDatum label="Integration status" value={inspection.topology.integrationStatus} />
+              <GateDatum label="Required children incomplete" value={inspection.topology.incompleteRequiredChildren.length} />
+            </div>
+            {inspection.topology.children.length > 0 ? (
+              <div className="flex flex-col gap-1.5">
+                {inspection.topology.children.map((child: { key: string; label: string; required: boolean; status: string }) => (
+                  <div key={child.key} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-[11px]" style={{ background: 'var(--bg-elevated, var(--card))', border: '1px solid var(--border)' }}>
+                    <span style={{ color: 'var(--text)' }}>{child.label}</span>
+                    <span className="ml-auto text-[9px]" style={{ color: child.required ? 'var(--warn)' : 'var(--muted)' }}>{child.required ? 'required' : 'optional'}</span>
+                    <span className="text-[9px]" style={{ color: /done|advanced|complete|consume|integrate|waive|omit/i.test(child.status) ? 'var(--ok)' : 'var(--warn)' }}>{child.status}</span>
+                  </div>
+                ))}
+              </div>
+            ) : <div className="text-[11px]" style={{ color: 'var(--muted)' }}>No child topology recorded.</div>}
+          </GateInspectionSection>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <GateInspectionSection title="Budget consumption">
+              <div className="grid grid-cols-1 gap-3">
+                <GateDatum label="Allocated" value={inspection.budget.allocated} />
+                <GateDatum label="Consumed" value={inspection.budget.consumed} />
+                <GateDatum label="Remaining" value={inspection.budget.remaining} />
+              </div>
+            </GateInspectionSection>
+            <GateInspectionSection title="Routing and runtime provenance">
+              <div className="grid grid-cols-2 gap-3">
+                <GateDatum label="Assigned profile" value={routing.assignedProfile} />
+                <GateDatum label="Effective profile" value={routing.effectiveProfile} />
+                <GateDatum label="Model requested" value={routing.model.requested} />
+                <GateDatum label="Model applied" value={routing.model.applied} status={routing.model.status} />
+                <GateDatum label="Provider / version" value={routing.model.provider || routing.model.version ? [routing.model.provider, routing.model.version].filter(Boolean) : null} />
+                <GateDatum label="Effort requested" value={routing.effort.requested} />
+                <GateDatum label="Effort applied" value={routing.effort.applied} status={routing.effort.status} />
+                <GateDatum label="Tools available" value={routing.tools.actual} status={routing.tools.status} />
+                <GateDatum label="Skills available" value={routing.skills.actual} status={routing.skills.status} />
+                <GateDatum label="Network scope" value={routing.network.actual} status={routing.network.status} />
+                <GateDatum label="Write scope" value={routing.write.actual} status={routing.write.status} />
+                <GateDatum label="Worktree / branch" value={routing.worktree} />
+              </div>
+            </GateInspectionSection>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <GateInspectionSection title="Validation and evidence">
+              <GateInspectionRows rows={inspection.validation} empty="No validation results published" />
+            </GateInspectionSection>
+            <GateInspectionSection title="Known risks">
+              <GateInspectionRows rows={inspection.risks} empty="No known risks recorded" />
+            </GateInspectionSection>
+            <GateInspectionSection title="Open decisions and questions">
+              <GateInspectionRows rows={inspection.decisions} empty="No open decisions recorded" />
+            </GateInspectionSection>
+          </div>
+        </div>
+
+        <footer className="px-5 py-3 flex items-center gap-2 flex-wrap" style={{ borderTop: '1px solid var(--border)', background: 'var(--bg-elevated, var(--bg))' }}>
+          {onApprove && <button onClick={() => { onApprove(); onClose() }} className="text-[11px] px-3 py-1.5 rounded-md font-semibold" style={{ background: 'var(--ok)', color: 'var(--bg)' }}>Approve{inspection.revision != null ? ` r${inspection.revision}` : ''}</button>}
+          {onReject && <button onClick={requestReject} className="text-[11px] px-3 py-1.5 rounded-md font-semibold" style={{ background: 'var(--danger)', color: 'var(--bg)' }}>Reject{inspection.revision != null ? ` r${inspection.revision}` : ''}</button>}
+          {onInterject && <button onClick={onInterject} className="text-[11px] px-3 py-1.5 rounded-md font-semibold" style={{ background: 'var(--bg-hover, var(--border))', color: 'var(--accent)', border: '1px solid var(--border)' }}>Interject on this revision</button>}
+          {producerSession && onOpenProducer && <button onClick={onOpenProducer} className="text-[11px] px-3 py-1.5 rounded-md font-semibold" style={{ background: 'var(--bg-hover, var(--border))', color: 'var(--accent)', border: '1px solid var(--border)' }}>Open producer · {producerSession.step}</button>}
+          <span className="ml-auto text-[9px]" style={{ color: 'var(--muted)' }}>{inspection.producerSessionRef || 'producer session reference unobservable'}</span>
+        </footer>
+      </section>
+    </div>
+  )
+}
+
 // --- Card Component ---
-function PipelineCardItem({ card, config, onApprove, onReject, onCycleTrust, onCycleDepth, onInterject, onResolveDecision }: {
+function PipelineCardItem({ card, config, isGate, producerStep, producerSession, onOpenProducer, onApprove, onReject, onCycleTrust, onCycleDepth, onInterject, onResolveDecision }: {
   card: PipelineCard
   config: PipelineConfig
+  isGate: boolean
+  producerStep?: string
+  producerSession?: { step: string; slotKey: string; retained: boolean }
+  onOpenProducer?: () => void
   onApprove?: () => void
-  onReject?: () => void
+  onReject?: (reason: string) => void
   onCycleTrust?: () => void
   onCycleDepth?: () => void
   onInterject?: (kind: string, text: string) => void
   onResolveDecision?: (decisionId: string, choice: 'approve' | 'decline') => void
 }) {
-  const isGate = card.stage.startsWith('gate-')
   const accent = isGate ? 'var(--warn)' : 'var(--border-strong, var(--border))'
   const effTrust = (card.trust || config.trust) as Trust
   const effDepth = (card.depth || config.depth) as Depth
@@ -622,6 +927,15 @@ function PipelineCardItem({ card, config, onApprove, onReject, onCycleTrust, onC
   )
   const [interjectOpen, setInterjectOpen] = useState(false)
   const [interjectText, setInterjectText] = useState('')
+  const [inspectionOpen, setInspectionOpen] = useState(false)
+  const inspection = useMemo(
+    () => isGate ? buildGateInspection(card, producerStep) : null,
+    [card, isGate, producerStep],
+  )
+  const requestReject = () => {
+    const reason = window.prompt(`Why reject revision ${inspection?.revision ?? 'unknown'}?`)
+    if (reason?.trim() && onReject) onReject(reason.trim())
+  }
   // Any decision still awaiting a human choice (e.g. a depth-driven addendum suggestion)
   const pendingDecisions = (card.decisions || []).filter(d => !d.chosen && (d.action === 'add-addendum' || d.options))
 
@@ -689,6 +1003,27 @@ function PipelineCardItem({ card, config, onApprove, onReject, onCycleTrust, onC
         })()}
       </div>
 
+      {isGate && inspection && (
+        <div data-gate-inspection-summary className="mt-2.5 rounded-md p-2"
+          style={{ background: inspection.ready ? 'color-mix(in srgb, var(--ok) 7%, transparent)' : 'color-mix(in srgb, var(--warn) 7%, transparent)', border: `1px solid color-mix(in srgb, ${inspection.ready ? 'var(--ok)' : 'var(--warn)'} 32%, var(--border))` }}>
+          <div className="flex items-center gap-1.5 text-[10px]">
+            <span className="font-semibold" style={{ color: inspection.ready ? 'var(--ok)' : 'var(--warn)' }}>
+              {inspection.ready ? 'Review-ready' : 'Not review-ready'}
+            </span>
+            <span className="ml-auto" style={{ color: 'var(--muted)' }}>r{inspection.revision ?? '?'}</span>
+            <span className="px-1 py-0.5 rounded" style={{ color: 'var(--muted)', background: 'var(--bg-hover, var(--border))' }}>{inspection.reviewStatus}</span>
+          </div>
+          <div className="mt-1 text-[11px] leading-snug overflow-hidden" style={{ color: inspection.summary ? 'var(--text)' : 'var(--warn)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+            {inspection.summary || 'No review bundle summary published.'}
+          </div>
+          {!inspection.ready && <div className="mt-1 text-[9px]" style={{ color: 'var(--muted)' }}>{inspection.missing.length} readiness gap{inspection.missing.length === 1 ? '' : 's'}</div>}
+          <button type="button" onClick={() => setInspectionOpen(true)}
+            className="mt-1.5 text-[10px] font-semibold hover:underline" style={{ color: 'var(--accent)' }}>
+            Inspect result bundle →
+          </button>
+        </div>
+      )}
+
       {isGate && onApprove && onReject && (
         <div className="mt-2.5 flex gap-1.5 items-center flex-wrap">
           <button
@@ -701,10 +1036,21 @@ function PipelineCardItem({ card, config, onApprove, onReject, onCycleTrust, onC
           <button
             className="text-[11px] px-2.5 py-1 rounded-md font-semibold transition-opacity hover:opacity-85"
             style={{ background: 'var(--danger)', color: 'var(--bg)' }}
-            onClick={onReject}
+            onClick={requestReject}
           >
             Reject
           </button>
+          {producerSession && onOpenProducer && (
+            <button
+              className="text-[11px] px-2.5 py-1 rounded-md font-semibold transition-opacity hover:opacity-85 inline-flex items-center gap-1"
+              style={{ background: 'var(--bg-hover, var(--border))', color: 'var(--accent)', border: '1px solid color-mix(in srgb, var(--accent) 40%, var(--border))' }}
+              onClick={onOpenProducer}
+              title={`Open the ${producerSession.step} producer session${producerSession.retained ? ' (held for this gate)' : ''}`}
+            >
+              <span aria-hidden="true">↗</span>
+              Open producer · {producerSession.step}
+            </button>
+          )}
           {/* Review gate: hand off to Code Review Sage, scoped to the card's repo (+ PR if known). */}
           {(card.stage === 'gate-review' || /review/i.test(card.stage || '')) && (() => {
             const repo = card.source?.repo
@@ -757,6 +1103,19 @@ function PipelineCardItem({ card, config, onApprove, onReject, onCycleTrust, onC
           <button className="mt-2 text-[10px] hover:underline" style={{ color: 'var(--muted)' }}
             onClick={() => setInterjectOpen(true)}>+ interject</button>
         )
+      )}
+
+      {inspectionOpen && inspection && (
+        <GateInspectionDialog
+          card={card}
+          inspection={inspection}
+          producerSession={producerSession}
+          onClose={() => setInspectionOpen(false)}
+          onOpenProducer={onOpenProducer}
+          onApprove={onApprove}
+          onReject={onReject}
+          onInterject={onInterject ? () => { setInspectionOpen(false); setInterjectOpen(true) } : undefined}
+        />
       )}
     </div>
   )
@@ -1206,7 +1565,12 @@ function AgentSetupPanel({ initial, knownAgents, crews, repo, stepName, onSave, 
 }
 
 // --- Pipeline Setup Modal ---
-interface RepoCandidate { repo: string; source: 'issue-radar' | 'workspace' | 'manual'; detail?: string }
+interface RepoCandidate {
+  repo: string
+  source: 'issue-radar' | 'workspace' | 'manual'
+  detail?: string
+  path?: string
+}
 
 function PipelineSetupModal({ candidates, existingRepos, defaults, knownAgents, crews, onCreate, onClose, editPipeline, cardCount, isExample, onDelete }: {
   candidates: RepoCandidate[]
@@ -1214,7 +1578,7 @@ function PipelineSetupModal({ candidates, existingRepos, defaults, knownAgents, 
   defaults: PipelineConfig
   knownAgents: string[]
   crews: { name: string; description?: string }[]
-  onCreate: (p: { repo: string; source: RepoCandidate['source']; trust: Trust; depth: Depth; budget?: Budget; backlog_intake: boolean; results_in_repo: boolean; self_enabling: boolean; approach: 'simplified' | 'enhanced'; steps: PipelineStep[] }) => void
+  onCreate: (p: { repo: string; repo_path?: string; source: RepoCandidate['source']; trust: Trust; depth: Depth; budget?: Budget; backlog_intake: boolean; results_in_repo: boolean; self_enabling: boolean; approach: 'simplified' | 'enhanced'; steps: PipelineStep[] }) => void
   onClose: () => void
   editPipeline?: Pipeline          // when set, the modal is in EDIT mode
   cardCount?: number               // cards in the pipeline (for the Danger Zone copy)
@@ -1223,6 +1587,7 @@ function PipelineSetupModal({ candidates, existingRepos, defaults, knownAgents, 
 }) {
   const isEdit = !!editPipeline
   const [repo, setRepo] = useState(editPipeline?.repo || '')
+  const [repoPath, setRepoPath] = useState(editPipeline?.repo_path || '')
   const [source, setSource] = useState<RepoCandidate['source']>(editPipeline?.source || 'manual')
   const [trust, setTrust] = useState<Trust>(editPipeline?.trust || defaults.trust)
   const [depth, setDepth] = useState<Depth>(editPipeline?.depth || defaults.depth)
@@ -1260,7 +1625,11 @@ function PipelineSetupModal({ candidates, existingRepos, defaults, knownAgents, 
     agent: type === 'agent' ? { name: 'impl-agent', role: '' } : undefined,
   }])
 
-  const pick = (c: RepoCandidate) => { setRepo(c.repo); setSource(c.source) }
+  const pick = (c: RepoCandidate) => {
+    setRepo(c.repo)
+    setRepoPath(c.path || '')
+    setSource(c.source)
+  }
   // Accept a pasted GitHub/GitLab URL OR a bare owner/name and normalize to "owner/name".
   // e.g. https://github.com/hai-dvash/repo(.git)(/…) -> hai-dvash/repo
   const normalizeRepoInput = (raw: string): string => {
@@ -1407,6 +1776,23 @@ function PipelineSetupModal({ candidates, existingRepos, defaults, knownAgents, 
                   </div>
                 </div>
               ))}
+            </div>
+          </div>
+
+          {/* Local checkout used by the deterministic per-card worktree lease manager. */}
+          <div>
+            <label className="text-[11px] uppercase tracking-wider" style={{ color: 'var(--muted)' }}>
+              Local checkout path
+            </label>
+            <input
+              value={repoPath}
+              onChange={e => setRepoPath(e.target.value)}
+              placeholder="/absolute/path/to/checkout"
+              className="mt-1 w-full px-3 py-2 rounded-md text-sm outline-none"
+              style={{ background: 'var(--bg-elevated, var(--bg))', border: '1px solid var(--border)', color: 'var(--text)' }}
+            />
+            <div className="text-[10px] mt-1" style={{ color: 'var(--muted)' }}>
+              Required before code or repo-mirrored results run. Mutable steps block rather than use the shared checkout when this path is absent or unverifiable.
             </div>
           </div>
 
@@ -1678,7 +2064,9 @@ function PipelineSetupModal({ candidates, existingRepos, defaults, knownAgents, 
           <button
             disabled={!valid || (!isEdit && dup)}
             onClick={() => onCreate({
-              repo: normalizeRepoInput(repo), source, trust, depth,
+              repo: normalizeRepoInput(repo),
+              ...(repoPath.trim() ? { repo_path: repoPath.trim() } : {}),
+              source, trust, depth,
               budget: budgetMode === 'depth' ? undefined : budgetMode === 'unlimited'
                 ? { max_child_cards: 'unlimited', effort_ceiling: 'unlimited', max_feature_size: 'XL', addenda: 'proactive' }
                 : customBudget,
@@ -1788,6 +2176,7 @@ function ActivitySpinner({ size = 12 }: { size?: number }) {
 
 export default function SdlcPipeline() {
   const api = useAppApi()
+  const navigate = useNavigate()
   const [allCards, setAllCards] = useState<PipelineCard[]>([])
   const [pipelines, setPipelines] = useState<Pipeline[]>([])
   const [config, setConfig] = useState<PipelineConfig>(DEFAULT_CONFIG)
@@ -2010,6 +2399,51 @@ export default function SdlcPipeline() {
   const isGateStep = useCallback((id: string) => activeSteps.find(s => s.id === id)?.type === 'gate' || id.startsWith('gate-'), [activeSteps])
   const stepAgent = useCallback((id: string) => activeSteps.find(s => s.id === id)?.agent?.name || STAGE_AGENTS[id as Stage] || 'unknown', [activeSteps])
 
+  const producerStepFor = useCallback((card: PipelineCard) => {
+    const sessions = card.step_sessions || {}
+    const retained = Object.entries(sessions).find(([, ptr]) =>
+      ptr.retained_for_gate === card.stage && ptr.retention !== 'released'
+    )
+    let producer = card.gate_review?.producer_step || retained?.[0]
+
+    if (!producer) {
+      const pipeline = pipelines.find(p => p.id === card.pipeline_id) ||
+        pipelines.find(p => p.repo === card.source?.repo)
+      const configured = pipeline?.steps?.length ? pipeline.steps : DEFAULT_STEPS
+      const normalized: PipelineStep[] = [
+        { id: 'intake', name: 'Intake', type: 'agent' },
+        ...configured.filter(step => step.id !== 'intake' && step.id !== 'done'),
+        { id: 'done', name: 'Done', type: 'agent' },
+      ]
+      const gateIndex = normalized.findIndex(step => step.id === card.stage)
+      const gate = gateIndex >= 0 ? normalized[gateIndex] : undefined
+      producer = gate?.reviews_step
+      if (!producer && gateIndex >= 0) {
+        for (let index = gateIndex - 1; index >= 0; index--) {
+          const candidate = normalized[index]
+          if (candidate.id === 'intake' || candidate.id === 'done') continue
+          if (candidate.type !== 'gate' && !candidate.id.startsWith('gate-')) {
+            producer = candidate.id
+            break
+          }
+        }
+      }
+    }
+    return producer
+  }, [pipelines])
+
+  const producerSessionFor = useCallback((card: PipelineCard) => {
+    const producer = producerStepFor(card)
+    if (!producer) return undefined
+    const pointer = (card.step_sessions || {})[producer]
+    if (!pointer?.slot_key || pointer.chat_disabled_at || pointer.superseded) return undefined
+    return {
+      step: producer,
+      slotKey: pointer.slot_key,
+      retained: pointer.retention === 'held-for-gate',
+    }
+  }, [producerStepFor])
+
   useEffect(() => {
     fetchCards()
     const fetchLive = async () => {
@@ -2054,65 +2488,6 @@ export default function SdlcPipeline() {
     })()
   }, [api])
 
-  // Resolve the step ladder for a given card from state (its pipeline's steps, else default),
-  // always bracketed by intake…done, returning an array of step ids.
-  const ladderFor = (state: { pipelines?: Pipeline[] }, card: PipelineCard): string[] => {
-    const pl = (state.pipelines || []).find(p => p.id === card.pipeline_id) ||
-               (state.pipelines || []).find(p => p.repo === card.source?.repo)
-    const steps = (pl?.steps && pl.steps.length ? pl.steps : DEFAULT_STEPS).map(s => s.id)
-    const ids = ['intake', ...steps.filter(s => s !== 'intake' && s !== 'done'), 'done']
-    return [...new Set(ids)]
-  }
-
-  const advanceCard = useCallback(async (cardId: string) => {
-    try {
-      const state = await api.get('/api/file-read?path=' + encodeURIComponent(STATE_PATH))
-      const card = state.cards?.find((c: PipelineCard) => c.id === cardId)
-      if (!card) return
-      const ladder = ladderFor(state, card)
-      const idx = ladder.indexOf(card.stage)
-      if (idx < 0 || idx >= ladder.length - 1) return
-      const prevStage = card.stage
-      card.stage = ladder[idx + 1]
-      card.updated_at = new Date().toISOString()
-      card.gate_history = card.gate_history || []
-      card.gate_history.push({ gate: prevStage, decision: 'approved', at: card.updated_at, notes: '' })
-      card.history = card.history || []
-      card.history.push({ from: prevStage, to: card.stage, at: card.updated_at, agent: 'human' })
-      await api.post('/api/file-write', { path: STATE_PATH, content: JSON.stringify(state, null, 2) })
-      fetchCards()
-    } catch (e) {
-      console.error('Failed to advance card:', e)
-    }
-  }, [api, fetchCards])
-
-  const rejectCard = useCallback(async (cardId: string) => {
-    try {
-      const state = await api.get('/api/file-read?path=' + encodeURIComponent(STATE_PATH))
-      const card = state.cards?.find((c: PipelineCard) => c.id === cardId)
-      if (!card) return
-      const ladder = ladderFor(state, card)
-      const gateIds = new Set((
-        ((state.pipelines || []).find((p: Pipeline) => p.id === card.pipeline_id)?.steps) || DEFAULT_STEPS
-      ).filter((s: PipelineStep) => s.type === 'gate').map((s: PipelineStep) => s.id))
-      const idx = ladder.indexOf(card.stage)
-      if (idx <= 0) return
-      const prevStage = card.stage
-      let target = idx - 1
-      while (target > 0 && (gateIds.has(ladder[target]) || ladder[target].startsWith('gate-'))) target--
-      card.stage = ladder[target]
-      card.updated_at = new Date().toISOString()
-      card.gate_history = card.gate_history || []
-      card.gate_history.push({ gate: prevStage, decision: 'rejected', at: card.updated_at, notes: '' })
-      card.history = card.history || []
-      card.history.push({ from: prevStage, to: card.stage, at: card.updated_at, agent: 'human' })
-      await api.post('/api/file-write', { path: STATE_PATH, content: JSON.stringify(state, null, 2) })
-      fetchCards()
-    } catch (e) {
-      console.error('Failed to reject card:', e)
-    }
-  }, [api, fetchCards])
-
   const mutateState = useCallback(async (mutator: (state: { config?: PipelineConfig; pipelines?: Pipeline[]; cards: PipelineCard[] }) => void) => {
     try {
       const state = await api.get('/api/file-read?path=' + encodeURIComponent(STATE_PATH))
@@ -2141,35 +2516,61 @@ export default function SdlcPipeline() {
     mutateState(state => { state.config = { ...DEFAULT_CONFIG, ...(state.config || {}), ...patch } })
   }, [mutateState])
 
-  // --- Gate controls + interjection channel (persistence-interjection spec) ---
-  // Approve/reject a gate step, or interject design/spec on any step. All write state; the
-  // orchestrator/advance loop honor them on the next run (UI reflects+configures, never acts).
-  const approveGate = useCallback((cardId: string, stage: string) => {
+  // --- One gate/card command path (revision-safe gate state machine) ---
+  // At a gate the UI appends one immutable command only. The deterministic driver validates the
+  // exact stage/revision/readiness, serializes races, records history/interjections, and moves
+  // stages/labels. The stable id survives mutateState's read-re-read application.
+  const submitCardCommand = useCallback((
+    cardId: string,
+    stage: string,
+    command: { type: 'approve' } | { type: 'reject'; reason: string } |
+      { type: 'interject'; kind: string; text: string },
+    expectedRevision?: number | null,
+  ) => {
+    const at = new Date().toISOString()
+    const commandId = `ui-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
     mutateState(state => {
       const card = state.cards.find(c => c.id === cardId)
-      if (!card) return
-      card.step_status = { ...(card.step_status || {}), [stage]: 'approved' }
-      card.updated_at = new Date().toISOString()
-    })
-  }, [mutateState])
+      if (!card || card.stage !== stage) return
 
-  const rejectGate = useCallback((cardId: string, stage: string) => {
-    mutateState(state => {
-      const card = state.cards.find(c => c.id === cardId)
-      if (!card) return
-      card.step_status = { ...(card.step_status || {}), [stage]: 'rejected' }
-      card.updated_at = new Date().toISOString()
-    })
-  }, [mutateState])
+      // Interjections on ordinary agent steps remain the existing durable card channel. Gate
+      // interjections join approve/reject in gate_commands so all three share one mutation path.
+      if (expectedRevision === undefined && command.type === 'interject') {
+        const text = command.text.trim()
+        if (!text) return
+        card.interjection = card.interjection || []
+        if (!card.interjection.some(entry => entry.id === commandId)) {
+          card.interjection.push({
+            id: commandId, at, step: stage, kind: command.kind,
+            text, by: 'user', status: 'pending',
+          })
+        }
+        card.updated_at = at
+        return
+      }
 
-  const addInterjection = useCallback((cardId: string, stage: string, kind: string, text: string) => {
-    mutateState(state => {
-      const card = state.cards.find(c => c.id === cardId)
-      if (!card) return
-      card.interjection = [...(card.interjection || []), {
-        at: new Date().toISOString(), step: stage, kind, text, by: 'user', status: 'pending',
-      }]
-      card.updated_at = new Date().toISOString()
+      const actualRevision = card.gate_review?.result_revision ?? null
+      if (actualRevision !== expectedRevision) return
+      const reason = command.type === 'reject' ? command.reason.trim() : undefined
+      const text = command.type === 'interject' ? command.text.trim() : undefined
+      if (command.type === 'reject' && !reason) return
+      if (command.type === 'interject' && !text) return
+
+      card.gate_commands = card.gate_commands || []
+      if (!card.gate_commands.some(entry => entry.id === commandId)) {
+        card.gate_commands.push({
+          id: commandId,
+          gate: stage,
+          action: command.type,
+          expected_revision: expectedRevision ?? null,
+          actor: 'user',
+          at,
+          status: 'pending',
+          ...(reason ? { reason } : {}),
+          ...(command.type === 'interject' ? { kind: command.kind, text } : {}),
+        })
+      }
+      card.updated_at = at
     })
   }, [mutateState])
 
@@ -2224,7 +2625,10 @@ export default function SdlcPipeline() {
       const cfg = await api.get('/api/file-read?path=~/.kiro/crew/config.json')
       const ws = cfg?.workspaces || {}
       Object.entries(ws).forEach(([name, v]: [string, any]) =>
-        found.push({ repo: name, source: 'workspace', detail: v?.dir || name }))
+        found.push({
+          repo: name, source: 'workspace', detail: v?.dir || name,
+          path: typeof v?.dir === 'string' ? v.dir : undefined,
+        }))
     } catch (e) { console.warn('workspaces registry unreadable:', e) }
     // Issue Radar connected repos (read-only — never write to its data dir)
     try {
@@ -2238,7 +2642,7 @@ export default function SdlcPipeline() {
   }, [api])
 
   const createPipeline = useCallback(async (p: {
-    repo: string; source: RepoCandidate['source']; trust: Trust; depth: Depth; budget?: Budget; backlog_intake: boolean; results_in_repo: boolean; self_enabling: boolean; approach: 'simplified' | 'enhanced'; steps: PipelineStep[]
+    repo: string; repo_path?: string; source: RepoCandidate['source']; trust: Trust; depth: Depth; budget?: Budget; backlog_intake: boolean; results_in_repo: boolean; self_enabling: boolean; approach: 'simplified' | 'enhanced'; steps: PipelineStep[]
   }) => {
     const now = new Date().toISOString()
     const id = 'pl-' + Math.random().toString(36).slice(2, 10)
@@ -2248,6 +2652,8 @@ export default function SdlcPipeline() {
       if (existing) {
         // Edit mode: update the existing pipeline in place.
         existing.source = p.source
+        if (p.repo_path) existing.repo_path = p.repo_path
+        else delete existing.repo_path
         existing.trust = p.trust
         existing.depth = p.depth
         if (p.budget) existing.budget = p.budget
@@ -2259,7 +2665,8 @@ export default function SdlcPipeline() {
         existing.steps = p.steps
       } else {
         state.pipelines.push({
-          id, repo: p.repo, source: p.source,
+          id, repo: p.repo, ...(p.repo_path ? { repo_path: p.repo_path } : {}),
+          source: p.source,
           trust: p.trust, depth: p.depth, backlog_intake: p.backlog_intake,
           ...(p.budget ? { budget: p.budget } : {}),
           results_in_repo: p.results_in_repo,
@@ -2332,15 +2739,36 @@ export default function SdlcPipeline() {
   const hasLiveGeneration = runStatus.some(row => !!row.slotKey && liveTails[row.slotKey]?.active && liveTails[row.slotKey]?.phase === 'generating')
   const hasLiveThinking = runStatus.some(row => !!row.slotKey && liveTails[row.slotKey]?.active && liveTails[row.slotKey]?.phase === 'thinking')
 
-  const cardProps = (card: PipelineCard) => ({
-    card, config,
-    onApprove: isGateStep(card.stage) ? () => advanceCard(card.id) : undefined,
-    onReject: isGateStep(card.stage) ? () => rejectCard(card.id) : undefined,
-    onCycleTrust: () => cycleTrust(card.id),
-    onCycleDepth: () => cycleDepth(card.id),
-    onInterject: (kind: string, text: string) => addInterjection(card.id, card.stage, kind, text),
-    onResolveDecision: (decisionId: string, choice: 'approve' | 'decline') => resolveDecision(card.id, decisionId, choice),
-  })
+  const cardProps = (card: PipelineCard) => {
+    const pipeline = pipelines.find(item => item.id === card.pipeline_id) ||
+      pipelines.find(item => item.repo === card.source?.repo)
+    const gate = pipeline?.steps?.find(step => step.id === card.stage)?.type === 'gate' ||
+      isGateStep(card.stage)
+    const expectedRevision = gate ? (card.gate_review?.result_revision ?? null) : undefined
+    const producerStep = gate ? producerStepFor(card) : undefined
+    const producerSession = gate ? producerSessionFor(card) : undefined
+    return {
+      card,
+      config,
+      isGate: gate,
+      producerStep,
+      producerSession,
+      onOpenProducer: producerSession
+        ? () => navigate(`/chat?sid=${encodeURIComponent(producerSession.slotKey)}`)
+        : undefined,
+      onApprove: gate
+        ? () => submitCardCommand(card.id, card.stage, { type: 'approve' }, expectedRevision)
+        : undefined,
+      onReject: gate
+        ? (reason: string) => submitCardCommand(card.id, card.stage, { type: 'reject', reason }, expectedRevision)
+        : undefined,
+      onCycleTrust: () => cycleTrust(card.id),
+      onCycleDepth: () => cycleDepth(card.id),
+      onInterject: (kind: string, text: string) => submitCardCommand(
+        card.id, card.stage, { type: 'interject', kind, text }, expectedRevision),
+      onResolveDecision: (decisionId: string, choice: 'approve' | 'decline') => resolveDecision(card.id, decisionId, choice),
+    }
+  }
 
   return (
     <>

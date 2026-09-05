@@ -1,21 +1,67 @@
 ---
 name: dlc-yolo
-description: Drive the DLC-YOLO pipeline from chat — start a new pipeline conversation (spec an idea and file it to GitHub as an issue the pipeline can trigger off) or maintain an existing pipeline. Load when the user runs /dlc-yolo or asks to start/maintain a DLC-YOLO pipeline.
+description: Configure, start, or maintain a DLC-YOLO pipeline from chat. `/dlc-yolo config` opens pipeline configuration; a fresh pipeline always configures before intent or issue creation.
 ---
 
 # /dlc-yolo — pipeline driver
 
 You turn this chat session into a driver for the DLC-YOLO pipeline.
 
+## Command entry and configuration form (mandatory first action)
+
+Parse the trimmed `$ARGUMENTS` before reading intent or choosing a mode:
+
+- **`config [<repo>]`** — configuration-only mode. Resolve the named/current pipeline, open the
+  configuration form below with its current values as defaults, persist the accepted changes, and
+  END the configuration action. Do not capture intent, create an issue/card, move a stage, or hand
+  off to the orchestrator in this subcommand.
+- **Any other arguments / no subcommand** — resolve the target repository and look for its pipeline.
+  If no pipeline exists, this is a FRESH pipeline: the configuration form is the first interaction
+  and must complete before intent capture, issue/card creation, or handoff. If a pipeline already
+  exists, preserve normal maintain/start behavior; configuration is not re-asked unless the user
+  explicitly invokes `config`.
+
+### Dashboard configuration form
+
+Use **one `ask_question` card** as the setup form, then END the turn because the answer arrives as
+an ordinary next message. Defaults/current values are valid answers; a user response of
+**`defaults`** accepts every listed default without another setup round.
+
+When the target repo is already known, ask at most these four questions:
+
+1. **Trust** — manual | **assisted (default)** | autonomous.
+2. **Depth** — quick | **standard (default)** | deep.
+3. **Budget** — **follow depth (default)** | custom | unlimited. If custom is chosen, collect its
+   numeric/enum fields in one follow-up only after this form.
+4. **Pipeline extras** (multi-select) — save results in repo; disable backlog auto-intake; enable
+   self-enabling simplified; enable self-enabling enhanced. No selections means the defaults:
+   results-in-repo OFF, backlog auto-intake ON, self-enabling OFF, approach simplified,
+   conversation log OFF.
+
+When the target repo is not known, question 1 selects a known pipeline/workspace or accepts a custom
+`owner/repo`; combine trust+depth into question 2 as execution presets (default =
+assisted+standard), then use question 3 for budget and question 4 for the same extras. Never ask a
+separate design/scope question in this form.
+
+Persist `pipeline.repo_path` only from an explicit local checkout supplied by the user or the exact
+`dir` of a selected KiroCrew workspace. Do not infer a filesystem path from `owner/repo`, Issue Radar,
+the current chat directory, or a remote URL. If no path is available, leave it unset and state that
+mutable builder/repo-mirror steps will block safely until it is filled in through `/dlc-yolo config`
+or Pipeline Setup; this does not justify an extra solution/scope question.
+
+For an existing pipeline under `config`, show its current values as the default choices. Persist
+only configuration fields. Choosing follow-depth removes an explicit `budget`; changing depth does
+not erase a custom/unlimited budget unless follow-depth was explicitly chosen.
+
 ## Your lane: thin CONSOLE, not the orchestrator (single-orchestrator-role-lanes-spec)
 
 There is ONE orchestrator brain — the `pipeline-orchestrator` agent. **You are the human's
 CONSOLE, not that brain.** Your job is narrow and you HAND OFF the rest:
 
-- **You DO:** (a) capture/sharpen the idea WITH the human, (b) present the SETUP form + collect
-  the config, (c) file the issue + record the card, (d) **HAND OFF to the orchestrator**, (e)
-  relay the orchestrator's gates/questions to the human and write their answers/interjections
-  back to `state.json`.
+- **You DO:** (a) for a fresh/config invocation, present the SETUP form + collect the config,
+  (b) capture/sharpen the idea WITH the human, (c) file the issue + record the card, (d)
+  **HAND OFF to the orchestrator**, and (e) relay the orchestrator's gates/questions to the human
+  and write their answers/interjections back to `state.json`.
 - **You do NOT** run intent-resolution logic yourself, spawn step-agents, create/bootstrap crews,
   wire `step.agent.crew`/`addenda[]`, deliberate back-step/fan-out, or dispatch phases. Those are
   the ORCHESTRATOR's — you INVOKE it, you don't BECOME it.
@@ -128,41 +174,31 @@ test — it is NOT the orchestrator/cron path.
   `<base>/workspaces/<ws>/data/digests/`, or `docs/.sessions/` for a dev/session archive). The
   digest is derived from the log, never replaces it; size-capped; no secrets.
 
-## On invoke
+## On invoke (after command dispatch)
 
-**SETUP FIRST — before intent, before any crew/issue work (do NOT skip to intent).** The flow
-is **SETUP → INTENT (skippable) → per-step**; front-loading intent is a bug. On invoke:
+The command-entry dispatcher above is authoritative and runs first:
 
-1. **Resolve the pipeline: exists-or-create.** Determine the target repo (from `$ARGUMENTS`, a
-   pasted URL, or by asking). Look it up in `state.json.pipelines[]`.
-   - **Exists →** offer **maintain** (§2): read the issue's `dlc:*` label, drive the next step.
-   - **Does NOT exist →** this is a NEW pipeline. Create it — but FIRST **ask the pipeline
-     basics** as an explicit setup step (one `ask_question`, present these as the primary
-     knobs, not footnotes):
-       · **trust** — manual / assisted / autonomous
-       · **depth** — quick / standard / deep
-       · **budget mode** — **follow depth** (omit `budget`, use the depth-derived defaults),
-         **custom** (collect `max_child_cards`, `effort_ceiling`, `max_feature_size`, `addenda`),
-         or **unlimited** (`max_child_cards:"unlimited"`, `effort_ceiling:"unlimited"`,
-         `max_feature_size:"XL"`, `addenda:"proactive"`)
-       · **results in repo** — commit results AND the pipeline conversation into the repo's
-         root `.dlc-yolo/` (this is the knob that puts the conversation + phase results in the
-         workspace repo itself; ASK it every time — do not silently default it off)
-       · **backlog auto-intake** — on/off
-       · **self-enabling** + **approach** (simplified / enhanced)
-     Accept "defaults are fine" → assisted / standard / **budget follows depth** /
-     results-in-repo OFF / backlog ON / self-enabling OFF. Write the pipeline to
-     `state.json.pipelines[]` with the chosen values. Budget is an independent control: changing
-     depth does not overwrite an explicit custom/unlimited budget; choosing follow-depth REMOVES
-     the pipeline's explicit `budget` object so the resolver derives it from depth.
-2. **THEN, and only then, proceed to intent / the chosen mode.** Intent is the first WORK step
-   and is **skippable** (§ self-enablement); do not run it until the pipeline is set up.
+1. **`config` mode:** execute only the configuration form/update described above, then stop. Never
+   continue into mode selection, intent capture, issue/card creation, or handoff in the same
+   invocation.
+2. **Resolve the pipeline: exists-or-fresh.** Determine the target repo from non-`config`
+   `$ARGUMENTS`, a pasted URL, or the form's target question; then look it up in
+   `state.json.pipelines[]`.
+   - **Exists →** continue to **maintain** (§2) without forcing setup to reopen. The human can use
+     `/dlc-yolo config [repo]` whenever they want to edit it.
+   - **Does not exist →** this is a FRESH pipeline. Present and complete the dashboard
+     configuration form above before capturing intent or doing any crew/issue/card work. Persist
+     the pipeline with the accepted values; saving setup itself performs no work and causes no
+     stage movement.
+3. **Fresh pipeline only, after setup:** proceed to intent / the chosen mode. Intent is the first
+   WORK step and is skippable; it must never run while setup is incomplete.
 
-Do this pipeline-setup step EVEN WHEN `$ARGUMENTS` names a repo/idea — a named idea resolves
-step 1's repo, it does NOT license skipping setup and jumping into intent. Record the setup
-choices in the conversation log.
+A repo/idea in `$ARGUMENTS` resolves the target; it does not license skipping fresh setup. A plain
+`/dlc-yolo` against an existing pipeline remains a maintenance entry point, not a surprise config
+edit.
 
-After setup, pick the mode / topic (via `ask_question`):
+After fresh setup (or immediately for a normal existing-pipeline invocation), pick the mode/topic
+with one `ask_question` call when the arguments did not already choose it:
 
 1. **Start a new pipeline conversation**
 2. **Maintain an existing pipeline**
@@ -222,8 +258,10 @@ kirocrew agent create --name dlcyolo-<pipeline-slug>-<role> --kiro-agent dlcyolo
   --workspace <workspace> --memory-store <memory-store>
 ```
 Then record `step.capability` (`readonly|authoring|builder|coordinator`) on the step in
-`state.json` so the assignment is auditable. The per-repo sandbox (cwd = owned repo) ALWAYS
-applies on top — the profile grants a tool CLASS, the sandbox confines WHICH repo. If a step
+`state.json` so the assignment is auditable. The deterministic card worktree lease ALWAYS
+applies on top for mutable repo work — the profile grants a tool CLASS, while the active+locked
+lease supplies the exact path/branch and must be verified in session metadata. Never use
+`source.repo` as a path or let a crew switch/create/reset the branch. If a step
 needs a scope no base profile covers, compose a one-off template (nearest base + the delta) and
 point `--kiro-agent` at it — but a scope-WIDENING one-off is a decision the user should confirm,
 not a silent grant.
@@ -256,44 +294,27 @@ agent-setup panel's handoff). Do this conversationally:
    pipeline by repo, find the step by name/id, set `step.agent = { name, role, tools }`
    and `step.trust`/`step.depth` if chosen. Persist via file-write. Keep GitHub the source
    of truth for stage (this only edits the step's agent config, not a card's stage).
-4. Respect the per-repo sandbox: the agent you design is confined to the pipeline's repo.
+4. Respect the verified repository boundary: mutable agents are confined to the exact active card lease; read-only access uses only the configured `repo_path`; `source.repo` is repository identity, never a path.
 
 ## 1. Start a new pipeline conversation
 
-1. **Pick the target pipeline/repo.** List existing pipelines from `state.json.pipelines[]`.
-   If none fit, the user can **paste a GitHub URL** (`https://github.com/owner/name`, with
-   or without `.git`/trailing path) OR type a bare `owner/name`, OR name a KiroCrew
-   workspace. Normalize a pasted URL to `owner/name` (strip scheme/host/`.git`/trailing
-   path). If no pipeline exists for that repo yet, **create one** in
-   `state.json.pipelines[]` (default steps, inheriting `config` trust/depth,
-   `source:"manual"`, `sot:"github"`) so the repo is added as a pipeline/workspace — this
-   is the command-side equivalent of the UI's paste-a-link → add-pipeline flow.
-   **Ask the results-location preference** when creating (or confirm on an existing
-   pipeline): "Where should phase results (requirements/design/…) be saved?" — *App data
-   only* (`results_in_repo: false`, default — results live in the workspace-partitioned
-   `.dlc-yolo` results area) or *Also save into the repo* (`results_in_repo: true` — also
-   write + commit a copy into the owned repo's `.dlc-yolo/` mirror — `.dlc-yolo/<card-id>/`
-   results AND `.dlc-yolo/workspaces/<ws>/data/pipeline_conversation.md`). Write the choice onto
-   `pipeline.results_in_repo` in `state.json` (a card may override it). This is the same knob
-   the UI Pipeline Setup modal exposes as the "Save results into repo" toggle.
+1. **Use the configured target pipeline/repo.** Pipeline resolution and fresh setup already happened
+   in the authoritative entry flow above. Normalize a pasted GitHub URL to `owner/name` (strip
+   scheme/host/`.git`/trailing path). If no pipeline record exists, return to the configuration
+   form and stop this invocation; never create a pipeline or ask results/budget questions ad hoc in
+   the intent flow. Do not re-ask settings that the form just accepted.
 
-   **Budget (same control as the UI).** During setup/edit, collect one compact budget mode:
-   `follow depth | custom | unlimited`. `follow depth` omits `pipeline.budget`; `custom` writes
-   all four fields (`max_child_cards`: non-negative integer, `effort_ceiling`: non-negative
-   integer, `max_feature_size`: S|M|L|XL, `addenda`: none|obvious|proactive); `unlimited` writes
-   literal string `"unlimited"` for both caps plus XL/proactive. When the user explicitly gives
-   a budget while creating a card (for example "deep, unlimited"), write the same object to
-   `card.budget` as a card-level override; when omitted, inherit pipeline budget/depth. Never
-   silently collapse `unlimited` to the depth preset.
+   **Persisted setup semantics.** App data only is `results_in_repo:false`; repo mirroring is
+   `results_in_repo:true`. Follow-depth omits `pipeline.budget`; custom writes all four fields
+   (`max_child_cards`: non-negative integer, `effort_ceiling`: non-negative integer,
+   `max_feature_size`: S|M|L|XL, `addenda`: none|obvious|proactive); unlimited writes literal
+   `"unlimited"` for both caps plus XL/proactive. An explicit card-level budget is written to
+   `card.budget`; otherwise the card inherits pipeline budget/depth. Never silently collapse
+   unlimited to the depth preset.
 
-   **Self-enablement → HAND OFF (do NOT run it here).** Setup → intent → per-step → bootstrap is
-   ORCHESTRATOR work (design: pipeline-workflow skill / `docs/self-enablement-spec.md`). Your part
-   is ONLY the **Setup form**: present **simplified vs enhanced** + trust/depth/results/backlog
-   (trust/depth-gated; if the user doesn't choose, default mid + simplified) and WRITE the chosen
-   config onto the pipeline in `state.json`. Then HAND OFF — do NOT run the intent-agent, do NOT
-   bootstrap crews, do NOT elaborate steps yourself. The orchestrator (escalated by the advance
-   cron, or spawned directly if the user wants it moving now) runs intent (skippable), per-step
-   elaboration, and bootstrap, relaying its gates back through you.
+   **Self-enablement → HAND OFF (do not run it here).** Setup → intent → per-step → bootstrap is
+   orchestrator work. The console only persisted the form. Hand off after intent/card creation;
+   never run the intent-agent, bootstrap crews, or elaborate steps in this command.
 2. **Spec the idea WITH the user.** Ask focused clarifying questions (1–3 at a time), state
    recommendations, keep it tight. You may spec anything — feature, bug, chore.
 3. **File it to GitHub as an issue** on the pipeline's repo — this is the invariant, because
@@ -307,7 +328,14 @@ agent-setup panel's handoff). Do this conversationally:
    Ensure the stage label exists first (idempotent):
    `gh label create dlc:<step-id> --color 6366f1 --description "DLC-YOLO stage" 2>/dev/null || true`
 4. **Record the card** in `state.json`: `{ id, title, stage: "<first-step-id>",
-   pipeline_id, source: { type:"github", repo, issue:<n>, url }, sot:"github", … }`.
+   pipeline_id, source: { type:"github", repo, issue:<n>, url }, sot:"github",
+   raw_intent:{ text:"<exact original user message>", captured_at:"<RFC3339>",
+   source_ref:"<real session/message reference or null>" }, … }`. `raw_intent` is immutable evidence:
+   preserve the exact message once, never rewrite it with the sharpened issue body, and never
+   fabricate a source reference. The intent-agent writes the separate versioned
+   `card.intent_contract`; the console must not infer outcomes, enforcement, quality, research, or
+   solution constraints. A later correction is a decision/interjection and new contract revision,
+   not an edit to `raw_intent`.
    If the user specified card-level depth/budget, record `card.depth` and `card.budget` explicitly
    now; do not merely narrate the requested mode and then let pipeline defaults overwrite it.
    **Ownership guard:** when recording a card from an EXISTING issue you did not just file
@@ -347,7 +375,7 @@ agent-setup panel's handoff). Do this conversationally:
 
 ## Rules
 
-- The per-repo sandbox always applies: only act within the card's `source.repo`.
+- The verified repository boundary always applies: mutable work uses only the card's exact active locked lease; read-only repository access uses only verified `repo_path`. Treat `source.repo` as repository identity, never a filesystem path.
 - Never write to Issue Radar's data dir; it is a read-only candidate source.
 - Keep GitHub the source of truth for stage; `state.json` mirrors it plus the rich data.
 - Under `autonomous` trust you may auto-pick triggers and auto-approve gates; under

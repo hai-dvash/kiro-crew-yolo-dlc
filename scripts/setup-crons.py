@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""DLC-YOLO sync & repair — idempotent post-sync deployment + cron reconcile.
+"""DLC-YOLO sync & repair — idempotent runtime and slash-discovery reconcile.
 
 WHY THIS EXISTS
 ---------------
@@ -7,33 +7,35 @@ WHY THIS EXISTS
   • `app enable` on an already-enabled app is a no-op — it does NOT re-scan crons,
   • `disable`→`enable` can drop the crons without cleanly re-registering the SCRIPT
     cron (the CLI/MCP `cron add` cannot create a script cron — only the manifest scan
-    can), and
-  • the runtime cron script under ~/.kiro/crew/crons/ drifts from the repo after edits.
+    can),
+  • the runtime cron script under ~/.kiro/crew/crons/ drifts from the repo after edits,
+    and
+  • app skills are registered under ~/.kiro/crew/skills, but Kiro's fresh-session slash
+    picker discovers global skills under ~/.kiro/skills.
 
-So an EDIT to the repo does not reliably reach the running gateway. This script closes
-that gap deterministically and idempotently:
+So an EDIT to the repo does not reliably reach the running gateway, and app registration alone
+cannot make `/dlc-yolo` fresh-session discoverable. This script closes both gaps deterministically:
 
-  1. DEPLOY   — copy crons/dlc_yolo_advance.py → ~/.kiro/crew/crons/ (the manifest
-                references this runtime path; install does not copy it for you).
-  2. RECONCILE— upsert the two DLC-YOLO cron jobs in ~/.kiro/crew/crons.json to match
-                the app manifest (app-crons.json). SCRIPT cron for advance, AGENT cron
-                (bound to pipeline-orchestrator) for backlog-intake.
-  3. VERIFY    — compile-check the deployed script; report drift it repaired.
+  1. DEPLOY   — copy the two zero-token cron scripts into ~/.kiro/crew/crons/.
+  2. RECONCILE— upsert DLC-YOLO's three cron jobs in ~/.kiro/crew/crons.json.
+  3. PUBLISH  — link only the deployed/source DLC-YOLO command skill at
+                ~/.kiro/skills/dlc-yolo for fresh-session slash discovery.
+  4. VERIFY   — compile-check deployed scripts and report repaired drift.
 
 SAFETY
 ------
   • Backs up crons.json to crons.json.bak before writing.
-  • UPSERT-ONLY on jobs named `dlc-yolo-*` — every other app's jobs are preserved
-    byte-for-byte.
+  • UPSERT-ONLY on jobs named `dlc-yolo-*` — every other app's jobs are preserved.
+  • Slash publication never overwrites a real path or a foreign symlink.
   • Idempotent: re-running changes nothing once in sync.
-  • Never touches credentials, never force-pushes, never deletes another app's data.
+  • Never touches credentials, force-pushes, or deletes another app's data/skills.
 
 USAGE
 -----
-    python3 scripts/setup-crons.py            # deploy + reconcile + verify
+    python3 scripts/setup-crons.py            # deploy + reconcile + publish + verify
     python3 scripts/setup-crons.py --check     # report drift only, change nothing
 
-Run it after editing the cron script or the manifest crons, or after a UI/skill sync.
+Run it after editing a cron/skill, syncing app files, upgrading, or reinstalling.
 """
 
 from __future__ import annotations
@@ -285,6 +287,88 @@ def reconcile_crons(check: bool) -> bool:
     return changed
 
 
+def reconcile_slash_skill(
+    check: bool,
+    *,
+    link: Path | None = None,
+    sources: tuple[Path, ...] | None = None,
+) -> tuple[bool, bool]:
+    """Publish ``/dlc-yolo`` into Kiro's fresh-session slash discovery path.
+
+    KiroCrew registers manifest skills below ``~/.kiro/crew/skills`` for agents,
+    while Kiro's default slash picker discovers global skills below
+    ``~/.kiro/skills``.  This bridge creates one directory symlink and never
+    replaces a real file/directory or a symlink not owned by this app.
+
+    Returns ``(drift, blocked)``.  ``--check`` reports drift without mutating.
+    """
+    if link is None:
+        kiro_home = Path(os.path.expanduser(os.environ.get("KIRO_HOME", "~/.kiro")))
+        link = kiro_home / "skills" / "dlc-yolo"
+    if sources is None:
+        sources = (
+            CREW / "apps" / "dlc-yolo" / "skills" / "dlc-yolo",
+            REPO / "skills" / "dlc-yolo",
+        )
+
+    candidates = tuple(path.expanduser().absolute() for path in sources)
+    source = next((path for path in candidates if (path / "SKILL.md").is_file()), None)
+    if source is None:
+        _log("ERROR: no DLC-YOLO slash skill source contains SKILL.md")
+        return True, True
+
+    def _target_of(path: Path) -> Path:
+        raw = Path(os.readlink(path))
+        if not raw.is_absolute():
+            raw = path.parent / raw
+        return raw.absolute()
+
+    exists = os.path.lexists(link)
+    if exists and not link.is_symlink():
+        _log(
+            f"ERROR: slash skill destination is user-managed; refusing to overwrite {link}"
+        )
+        return True, True
+
+    current_target: Path | None = None
+    if exists:
+        try:
+            current_target = _target_of(link)
+        except OSError as exc:
+            _log(f"ERROR: cannot inspect slash skill link {link}: {exc}")
+            return True, True
+
+        if current_target == source:
+            _log(f"slash command skill already discoverable: {link}")
+            return False, False
+
+        # Only a link to one of this checkout/app install's known skill directories
+        # is ours to repair. A foreign link is preserved exactly as found.
+        if current_target not in candidates:
+            _log(
+                f"ERROR: foreign slash skill symlink at {link}; refusing to replace it"
+            )
+            return True, True
+
+    if check:
+        state = "stale" if exists else "missing"
+        _log(f"DRIFT: slash command link is {state} (would publish {link} → {source})")
+        return True, False
+
+    link.parent.mkdir(parents=True, exist_ok=True)
+    temporary = link.with_name(f".{link.name}.dlc-yolo-{os.getpid()}.tmp")
+    if os.path.lexists(temporary):
+        temporary.unlink()
+    try:
+        temporary.symlink_to(source, target_is_directory=True)
+        os.replace(temporary, link)
+    finally:
+        if os.path.lexists(temporary):
+            temporary.unlink()
+    _log(f"published fresh-session slash command → {link} ({source})")
+    return True, False
+
+
 def main() -> int:
     check = "--check" in sys.argv
     _log("checking for drift (no changes will be made)" if check else "deploying + reconciling")
@@ -293,12 +377,21 @@ def main() -> int:
         return 2
     d1 = deploy_script(check)
     d2 = reconcile_crons(check)
+    d3, blocked = reconcile_slash_skill(check)
+    if blocked:
+        print()
+        _log("INCOMPLETE — slash command publication was blocked; no conflicting path was changed")
+        return 2
     if check:
         print()
-        _log("DRIFT DETECTED — re-run without --check to repair" if (d1 or d2)
+        _log("DRIFT DETECTED — re-run without --check to repair" if (d1 or d2 or d3)
              else "everything in sync ✅")
-        return 1 if (d1 or d2) else 0
-    _log("done ✅  (verify: kirocrew cron list — advance=[script], backlog=[agent])")
+        return 1 if (d1 or d2 or d3) else 0
+    _log(
+        "done ✅  (open a fresh native Kiro session for /dlc-yolo skill discovery; "
+        "KiroCrew 0.5.0's dashboard picker is host-static; verify crons with: "
+        "kirocrew cron list)"
+    )
     return 0
 
 

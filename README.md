@@ -82,7 +82,7 @@ mirrors + commits a copy into the owned repo's `.dlc-yolo/` (a repo-root mirror 
 app-data layout — `.dlc-yolo/workspaces/<ws>/data/` with the pipeline conversation log, and
 `.dlc-yolo/<card-id>/` results) — so both results **and** pipeline conversations can live in
 the workspace repo itself when you want them there. Specialist agents (spec/design/impl) hold
-scoped `git add/commit/push` for this, confined to the owned repo and feature branches only.
+scoped `git add/commit/push` for this, confined to the exact active card lease path and branch.
 
 ---
 
@@ -106,6 +106,18 @@ can override it. Resolution cascades **card → step → pipeline → global**.
 | `deep` | Exhaustive design, adversarial review, extra test coverage | `feature` (deep) |
 
 Per-step overrides mean "this step runs autonomous + deep, that gate stays manual."
+
+### Adaptive model and pass controls
+
+Before dispatch, the runtime persists an immutable execution envelope. A card/step/role/pipeline/
+global model policy may name a concrete model; only then is that exact model supplied to the
+step's `cron_add`. `auto` and provider-default modes never become fabricated model IDs. The same
+envelope allocates bounded research and crew/addendum passes and target IDs; infeasible required
+work blocks before dispatch, and terminal results cannot record more passes than allocated.
+Requested and observed model/effort remain separate provenance. KiroCrew's cron API currently has
+no per-run reasoning-effort field, so effort is seeded as a request and is never claimed as applied
+unless live session metadata reports it. Topology, live parallel scheduling, and event authority are
+not part of this control slice.
 
 ### Backlog — parked ideas that can't be spec'd now
 
@@ -166,13 +178,22 @@ Under `autonomous` trust the orchestrator auto-picks the recommended trigger.
 
 ---
 
-## Per-repo sandbox
+## Per-card worktree sandbox
 
-Independently of trust mode, **every pipeline agent is strictly confined to the single
-repository its card owns** (`source.repo`). Specialist and Spec-Builder / Task-Runner
-subagents are seeded with exactly one `WORKING_DIR` and one `SPEC_DIR`; only the
-orchestrator touches shared pipeline state. Trust governs *when to pause*; the sandbox
-governs *where an agent may act*, always.
+Independently of trust mode, mutable repository work runs on one deterministic linked
+worktree and branch per card. Pipeline Setup stores the absolute primary checkout as
+`repo_path`; for owner/name repositories the advance runtime verifies its Git `origin`,
+then creates and locks
+`<state-base>/workspaces/<workspace>/worktrees/<card-id>` without `--force` or `-B`.
+A path or branch already owned elsewhere blocks.
+
+The cron API does not expose an atomic per-run cwd option, so requested and applied cwd
+are kept separate: each mutable step receives the exact lease path/branch/id, verifies
+it before writing, and records `step_sessions[step].working_dir`. Terminal completion
+blocks if that live observation is absent or mismatched. Leases survive blocked/retriable/
+gate-held work. Clean terminal trees release without deleting their branch; dirty or
+unverifiable trees are quarantined and never force-removed. Trust governs *when to
+pause*; the lease governs *where mutable work may occur*.
 
 ---
 
@@ -196,7 +217,8 @@ scheduled crons, `/api/file-read` + `/api/file-write`, the SDK chat launcher
   "config": { "trust": "assisted", "depth": "standard" },   // global defaults
   "pipelines": [
     {
-      "id": "pl-…", "repo": "owner/name", "workspace": "default",
+      "id": "pl-…", "repo": "owner/name",
+      "repo_path": "/absolute/path/to/primary-checkout", "workspace": "default",
       "source": "issue-radar", "sot": "github",
       "trust": "assisted", "depth": "standard", "backlog_intake": true,
       "steps": [
@@ -212,6 +234,11 @@ scheduled crons, `/api/file-read` + `/api/file-write`, the SDK chat launcher
       "id": "…", "title": "…", "stage": "design", "pipeline_id": "pl-…", "sot": "github",
       "trust": "deep", "depth": "deep",
       "source": { "type": "github", "repo": "owner/name", "issue": 42, "url": "…" },
+      "worktree_lease": {
+        "lease_id": "lease-…", "path": "…/worktrees/<card-id>",
+        "branch": "dlc/<pipeline>/<card>/<slug>", "base_commit": "<sha>",
+        "owner_card": "<card-id>", "locked": true, "status": "active"
+      },
       "effort": { "total": 8, "scope": { "requirements": 8, "design": 9 } },
       "backstep_history": [ … ], "parked": [ … ],
       "artifacts": { … }, "gate_history": [ … ], "trigger_history": [ … ], "history": [ … ]
@@ -224,7 +251,7 @@ scheduled crons, `/api/file-read` + `/api/file-write`, the SDK chat launcher
 
 | Cron | Interval | Role |
 |------|----------|------|
-| `dlc-yolo-advance` | 120s | Walk each pipeline's own steps, honor per-step trust/depth/**capability**, escalate each agent step as a **persistent capability-profiled step-agent** (`keep=true`, records `step_sessions`), move `dlc:<step>` labels, deterministically flip a parent's `child_tickets` to `consumed` + retire, notify (deduped) on new waiting gates |
+| `dlc-yolo-advance` | 120s | Walk each pipeline's own steps, honor per-step trust/depth/**capability**, provision/reconcile/release exclusive card worktree leases before mutable dispatch, escalate each agent step as a **persistent capability-profiled step-agent** (`keep=true`, records `step_sessions`), move `dlc:<step>` labels, deterministically flip a parent's `child_tickets` to `consumed` + retire, notify (deduped) on new waiting gates |
 | `dlc-yolo-spawns` | 30s | Zero-token observability: poll `spawn_list`, write `live_spawns.json` so the UI subagents pane shows dead-vs-in-flight (read-only, never drives) |
 | `dlc-yolo-backlog-intake` | 200s | Back-feed open `dlc-backlog` issues as new intake cards (read + create only) |
 
@@ -234,7 +261,7 @@ scheduled crons, `/api/file-read` + `/api/file-write`, the SDK chat launcher
 
 - **Pipeline graph** — glowing, count-correlated nodes (circles = agent steps, diamonds = gates); click a node to scroll to its column
 - **Workspace rail** — multi-select repos to view several pipelines combined, plus **+ New Pipeline**
-- **Pipeline Setup modal** — pick a repo (Issue Radar / KiroCrew workspace / manual), set trust/depth/backlog-intake, and edit custom steps with an inline agent setup panel
+- **Pipeline Setup modal** — pick a repo (Issue Radar / KiroCrew workspace / manual), set its local checkout path for deterministic card worktrees, configure trust/depth/backlog-intake, and edit custom steps with an inline agent setup panel
 - **Views** — Pipeline (by step) · Workspace (by repo) · Crew (by agent) · Status (blocked/in-flight/done) · Backlog (parked ideas)
 - **Mode pills** — click a card's trust/depth to override; ⚡ effort and ↩ back-step badges; theme-aware (adapts to the active dashboard theme)
 
@@ -248,41 +275,45 @@ scheduled crons, `/api/file-read` + `/api/file-write`, the SDK chat launcher
 kirocrew app install /path/to/kiro-crew-yolo-dlc
 kirocrew app enable dlc-yolo
 
-# 2. Deploy the zero-token advance cron + reconcile the cron registry to the manifest.
-#    This idempotent script copies crons/dlc_yolo_advance.py to its sandboxed runtime
-#    location AND upserts DLC-YOLO's two cron jobs in the scheduler (app install does not
-#    copy the script for you, and `app enable` does not re-scan crons on an existing
-#    install). Safe to re-run; it never touches other apps' jobs. Use --check to preview.
+# 2. Deploy both zero-token cron scripts, reconcile DLC-YOLO's three cron jobs, and
+#    publish /dlc-yolo into Kiro's documented global slash-skill directory.
+#    The script is idempotent, never overwrites a user-owned skill path or foreign
+#    symlink, and never touches another app's jobs. Use --check to preview drift.
 python3 scripts/setup-crons.py
 
-# 3. If /dlc-yolo doesn't autocomplete in the command palette, link the skill into the
-#    palette's global scan dir (the installer registers it for the app; this makes the
-#    slash-command visible in autocomplete too):
-ln -s ~/.kiro/crew/apps/dlc-yolo/skills/dlc-yolo      ~/.kiro/skills/dlc-yolo
-ln -s ~/.kiro/crew/apps/dlc-yolo/skills/pipeline-workflow ~/.kiro/skills/pipeline-workflow
+# 3. Open a FRESH Kiro session (skill resources are loaded when the session is
+#    created). Native Kiro surfaces can then discover /dlc-yolo from the global path.
 ```
+
+> **Dashboard host limitation (KiroCrew 0.5.0).** The dashboard `/` picker is currently
+> populated by KiroCrew's static `/api/slash-commands` catalogue, not the Kiro skill catalogue.
+> Publishing the skill is necessary for native execution but cannot add an app command to that
+> host-owned list. Fixing the dashboard picker requires a KiroCrew core change; this app does not
+> patch live `site-packages` or overwrite the host command registry.
 
 > **Upgrading an existing install.** Two things do not refresh automatically and need a
 > nudge after you pull new code and sync the app files:
 >
-> 1. **Crons.** KiroCrew reads the manifest's crons on first install; on an existing
->    install, `app enable` does **not** re-scan them, and the CLI/MCP `cron add` cannot
->    create the zero-token **script** cron (only the manifest scan can). So after syncing,
->    re-run the idempotent reconcile script — it re-deploys the cron script and upserts
->    DLC-YOLO's two jobs to match the manifest, leaving every other app's jobs untouched:
+> 1. **Runtime + slash discovery.** KiroCrew reads manifest crons on first install; on
+>    an existing install, `app enable` does **not** reliably re-scan them. KiroCrew also
+>    registers app skills below `~/.kiro/crew/skills`, while Kiro's fresh-session slash
+>    picker scans `~/.kiro/skills`. After syncing, re-run the idempotent reconciler: it
+>    deploys both scripts, upserts DLC-YOLO's three jobs, and publishes only the
+>    `/dlc-yolo` command link, leaving other apps' jobs and user-owned skills untouched:
 >
 >    ```bash
->    python3 scripts/setup-crons.py            # deploy + reconcile
+>    python3 scripts/setup-crons.py            # deploy + reconcile + publish
 >    python3 scripts/setup-crons.py --check     # preview drift only, change nothing
 >    ```
 >
->    Verify with `kirocrew cron list` — `dlc-yolo-advance` should show as a `script` cron
->    and `dlc-yolo-backlog-intake` as `agent: pipeline-orchestrator`.
+>    Verify with `kirocrew cron list`: advance/spawns are `script` jobs and backlog-intake
+>    uses `agent: pipeline-orchestrator`. Open a fresh native Kiro session for skill discovery.
+>    KiroCrew 0.5.0's dashboard `/` picker remains host-static as noted above; changing that list
+>    requires a core host fix rather than an app reinstall.
 >
->    > **Note:** `kirocrew app uninstall dlc-yolo` **removes the app's registered crons**
->    > (they belong to the app; app *data* is preserved by default). Reinstalling does not
->    > reliably re-register the zero-token **script** cron on its own — run
->    > `python3 scripts/setup-crons.py` afterward to restore both jobs.
+>    > **Note:** `kirocrew app uninstall dlc-yolo` removes the app's registered crons
+>    > (app *data* remains by default). After reinstalling, run
+>    > `python3 scripts/setup-crons.py` to restore all three jobs and slash publication.
 >
 > 2. **New agents.** A new agent added to the manifest (e.g. `intent-agent` for
 >    self-enabling pipelines) is registered by re-enabling the app:
@@ -324,7 +355,7 @@ kiro-crew-yolo-dlc/
 │   ├── dlc_yolo_advance.py           ← zero-token deterministic advance loop (deployed to ~/.kiro/crew/crons/)
 │   └── dlc_yolo_spawns.py            ← zero-token live-spawn snapshot for the UI subagents pane
 ├── scripts/
-│   └── setup-crons.py                ← idempotent post-sync: deploy the cron scripts + reconcile the cron jobs to the manifest
+│   └── setup-crons.py                ← idempotent post-sync: deploy crons, reconcile jobs, publish /dlc-yolo globally
 ├── ui/
 │   ├── src/App.tsx                   ← kanban, graph, setup modal, agent panel (@kirocrew/app-sdk)
 │   └── vite.config.ts

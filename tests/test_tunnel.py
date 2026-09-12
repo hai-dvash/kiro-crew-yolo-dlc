@@ -54,3 +54,51 @@ def test_stop_is_safe_when_idle():
     state = tunnel._TunnelState()
     result = asyncio.run(tunnel.stop(state))
     assert result["running"] is False
+
+
+def test_url_state_transitions():
+    """A running tunnel with no URL is 'pending' (never reported as healthy-with-null);
+    once captured it is 'captured'; not running is 'failed'."""
+    state = tunnel._TunnelState()
+    assert state.url_state() == "failed"          # not running, no url
+    # simulate running without a captured url yet
+    class _P:
+        returncode = None
+    state.proc = _P()
+    assert state.running() is True
+    assert state.url_state() == "pending"         # running, url not captured
+    state.url = "https://x.trycloudflare.com"
+    assert state.url_state() == "captured"
+
+
+def test_drain_stderr_captures_late_url_and_fires_callback():
+    """The stderr reader must catch a URL banner that arrives AFTER a few other lines,
+    and fire on_url_captured exactly once — this is what lets a LATE capture trigger
+    auto-sync instead of silently leaving GitHub on a stale URL."""
+    fired: list[str] = []
+
+    class _Stderr:
+        def __init__(self, lines):
+            self._lines = list(lines)
+        async def readline(self):
+            return self._lines.pop(0) if self._lines else b""
+
+    class _Proc:
+        returncode = None
+        def __init__(self):
+            self.stderr = _Stderr([
+                b"2026 INF Thank you for trying Cloudflare Tunnel.\n",
+                b"2026 INF Requesting new quick Tunnel...\n",
+                b"|  https://late-banner-xyz.trycloudflare.com   |\n",
+                b"2026 INF Registered tunnel connection\n",
+            ])
+
+    state = tunnel._TunnelState()
+    async def _cb(url):
+        fired.append(url)
+    state.on_url_captured = _cb
+    proc = _Proc()
+    asyncio.run(tunnel._drain_stderr(state, proc))
+    assert state.url == "https://late-banner-xyz.trycloudflare.com"
+    assert state.url_captured_at is not None
+    assert fired == ["https://late-banner-xyz.trycloudflare.com"]  # fired exactly once

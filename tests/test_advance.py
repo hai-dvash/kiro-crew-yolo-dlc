@@ -1779,6 +1779,27 @@ class TestBootstrap:
         advance_mod._bootstrap()
         assert json.loads(state_path.read_text()) == real
 
+    def test_bootstrap_never_seeds_over_unreadable_file(self, advance_mod, state_path):
+        # REGRESSION (16:31 wipe): a file that EXISTS with bytes but does not parse (a
+        # transient read caught mid os.replace, or a lock) must NOT be seeded empty — that
+        # is how a live reconcile clobbered a 13-card board. _content returns None on the
+        # unparseable read; the clobber guard must leave the bytes intact.
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        # non-empty, non-JSON bytes stand in for the transient partial/locked read
+        original = "{partial write not yet valid json ....."
+        state_path.write_text(original)
+        advance_mod._bootstrap()
+        # the guard must have refused to write the empty seed
+        assert state_path.read_text() == original, "bootstrap clobbered an unreadable non-empty state"
+
+    def test_bootstrap_seeds_when_truly_empty(self, advance_mod, state_path):
+        # A genuinely EMPTY (zero-byte) or absent file is a real first run — seeding is correct.
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        state_path.write_text("")  # zero bytes
+        advance_mod._bootstrap()
+        data = json.loads(state_path.read_text())
+        assert data["cards"] == [] and data["pipelines"] == []
+
     def test_load_corrupt_json_returns_empty(self, advance_mod, state_path):
         state_path.parent.mkdir(parents=True, exist_ok=True)
         state_path.write_text("{not valid json,,,")

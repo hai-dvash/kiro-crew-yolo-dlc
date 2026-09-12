@@ -324,20 +324,50 @@ async def _handle_tunnel_start(request: web.Request) -> web.StreamResponse:
         payload["receiver_ready"] = False
         payload["receiver_block_reason"] = reason
         return web.json_response(payload, status=409)
+
+    # Register a late-capture hook BEFORE starting: if cloudflared announces the URL
+    # after start()'s bounded wait, the reader fires this and auto-sync runs then —
+    # so a slow banner never leaves GitHub pointed at a stale URL with no sync.
+    already_running = state.running()
+    async def _on_url(url: str) -> None:
+        # url is the base https://<id>.trycloudflare.com; _maybe_autosync/autosync_hooks
+        # append the /github path themselves.
+        with contextlib.suppress(Exception):
+            await _maybe_autosync(request.app, url)
+    try:
+        state.on_url_captured = _on_url
+    except Exception:  # pragma: no cover - defensive
+        pass
+
     payload = await tunnel.start(state, port)
     payload["target_port"] = port
     payload["receiver_ready"] = True
     payload["receiver_block_reason"] = None
-    # Self-healing quick-tunnel: if the pipeline opted in (webhook config
-    # autosync=true) and the start captured a fresh public URL, re-point the
-    # allowlisted repos' GitHub hooks to it — but only a hook already on a
-    # *.trycloudflare.com host (never a hand-set stable URL). Best-effort:
-    # sync failure never fails the start (the manual/UI path still works).
-    payload["autosync"] = await _maybe_autosync(request.app, payload.get("public_url"))
+    # Self-healing quick-tunnel (auto-sync). Fire it whenever the live URL is KNOWN —
+    # both on a fresh capture AND on the already-running short-circuit (a re-Start is
+    # exactly when the user wants a stale GitHub hook healed). A late capture is handled
+    # by the on_url_captured callback above. Best-effort: never fails the start.
+    live_url = payload.get("public_url")
+    if live_url:
+        payload["autosync"] = await _maybe_autosync(request.app, live_url)
+    elif already_running:
+        # start() short-circuited on an already-running tunnel; use its known url.
+        payload["autosync"] = await _maybe_autosync(request.app, getattr(state, "url", None))
+    else:
+        # URL not captured yet — the late-capture callback will sync when it lands.
+        payload["autosync"] = {"enabled": True, "status": "awaiting-url-capture"} \
+            if _autosync_enabled(request.app) else None
     status_code = 200 if payload.get("running") else (
         409 if not payload.get("installed") else 502
     )
     return web.json_response(payload, status=status_code)
+
+
+def _autosync_enabled(app: web.Application) -> bool:
+    try:
+        return bool(app["_dlc_routes_mod"].webhook.effective_webhook_config().get("autosync"))
+    except Exception:  # pragma: no cover - defensive
+        return False
 
 
 async def _maybe_autosync(app: web.Application, public_url: object) -> dict | None:

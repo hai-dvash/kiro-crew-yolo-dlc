@@ -54,14 +54,28 @@ class _TunnelState:
         self.proc: asyncio.subprocess.Process | None = None
         self.port: int | None = None
         self.url: str | None = None
+        self.url_captured_at: float | None = None
         self.command: list[str] | None = None
         self.started_at: float | None = None
         self.last_error: str | None = None
         self._reader: asyncio.Task | None = None
         self._lock = asyncio.Lock()
+        # Optional async callback invoked exactly once when the URL is captured
+        # (including a LATE capture after start() returned) — lets the caller fire
+        # auto-sync at the moment the URL is actually known, not only at start.
+        self.on_url_captured = None  # type: ignore[assignment]
 
     def running(self) -> bool:
         return self.proc is not None and self.proc.returncode is None
+
+    def url_state(self) -> str:
+        """captured | pending | failed — so a running tunnel with no URL is never
+        reported as a healthy state (both the panel and auto-sync depend on this)."""
+        if self.url:
+            return "captured"
+        if self.running():
+            return "pending"
+        return "failed"
 
 
 def cloudflared_path() -> str | None:
@@ -95,6 +109,7 @@ def status(state: _TunnelState) -> dict:
         "running": running,
         "public_url": state.url if running else None,
         "payload_url": payload_url,
+        "url_status": state.url_state() if running else "failed",
         "command": command,
         "started_at": state.started_at if running else None,
         "last_error": state.last_error,
@@ -103,7 +118,10 @@ def status(state: _TunnelState) -> dict:
 
 
 async def _drain_stderr(state: _TunnelState, proc: asyncio.subprocess.Process) -> None:
-    """Read cloudflared stderr to catch the URL banner; discard the rest."""
+    """Read cloudflared stderr for the whole tunnel lifetime to catch the URL banner
+    (it can arrive AFTER start()'s bounded wait), then keep draining so the pipe never
+    blocks. On the first capture, record the time and fire on_url_captured exactly once
+    so a late capture still triggers auto-sync / panel refresh."""
     assert proc.stderr is not None
     try:
         while True:
@@ -114,6 +132,11 @@ async def _drain_stderr(state: _TunnelState, proc: asyncio.subprocess.Process) -
                 match = _URL_RE.search(line.decode("utf-8", "replace"))
                 if match:
                     state.url = match.group(0)
+                    state.url_captured_at = time.time()
+                    cb = state.on_url_captured
+                    if cb is not None:
+                        with contextlib.suppress(Exception):
+                            await cb(state.url)
     except asyncio.CancelledError:  # pragma: no cover - shutdown path
         pass
 
@@ -149,6 +172,7 @@ async def start(state: _TunnelState, port: int) -> dict:
         state.proc = proc
         state.port = port
         state.url = None
+        state.url_captured_at = None
         state.command = command
         state.started_at = time.time()
         state.last_error = None
@@ -176,6 +200,7 @@ async def _cleanup(state: _TunnelState) -> None:
     state._reader = None
     state.proc = None
     state.url = None
+    state.url_captured_at = None
     state.started_at = None
 
 

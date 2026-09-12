@@ -7,6 +7,7 @@ import { DURABLE_STATE, readCurrentState, resolveStateFile } from './statePath.j
 import { DlcYoloControls, WebhookSettingsSection } from './WebhookSettings.js'
 import { CardBudgetEditor } from './CardBudgetEditor.js'
 import { CARD_STATUS_META, CARD_STATUS_ORDER, deriveCardStatus } from './cardStatus.js'
+import { projectCardTimeline, resolveChildren, resolveParentId } from './cardTimeline.js'
 import { AgentCrewCatalogModal, type AgentProfile, type CrewRecord, type CrewRouteDraft } from './AgentCrewCatalog.js'
 import { applyAgentProfileToDraft, catalogProfileNames, normalizeAgentProfile, normalizeCrewRecords, profileDeclarationPath } from './agentCatalog.js'
 
@@ -129,6 +130,7 @@ interface PipelineCard {
   updated_at: string
   artifacts: Record<string, unknown>
   step_status?: Record<string, string>
+  step_summaries?: Record<string, { step?: string; status?: string; headline?: string; description?: string; executor?: string | null; needs_human?: boolean; synthesized?: boolean; at?: string }>
   block_reason?: Record<string, string>
   error_reason?: Record<string, string>
   retry_count?: Record<string, number>
@@ -805,7 +807,7 @@ function GateInspectionDialog({ card, inspection, producerSession, onClose, onOp
 }
 
 // --- Card Component ---
-function PipelineCardItem({ card, config, isGate, cardStatus, effectiveCapability, producerStep, producerSession, onOpenProducer, onApprove, onReject, onCycleTrust, onCycleDepth, onSetBudget, onInterject, onResolveDecision, onOpenOrchestrator }: {
+function PipelineCardItem({ card, config, isGate, cardStatus, effectiveCapability, producerStep, producerSession, onOpenProducer, onApprove, onReject, onCycleTrust, onCycleDepth, onSetBudget, onInterject, onResolveDecision, onOpenOrchestrator, liveView, allCards, onOpenCard }: {
   card: PipelineCard
   config: PipelineConfig
   isGate: boolean
@@ -822,6 +824,9 @@ function PipelineCardItem({ card, config, isGate, cardStatus, effectiveCapabilit
   onInterject?: (kind: string, text: string) => void
   onResolveDecision?: (decisionId: string) => void
   onOpenOrchestrator?: () => void
+  liveView?: { stage: string; phase: string; tail: string; active: boolean; seq: number; slotKey: string; onOpen: () => void }
+  allCards?: PipelineCard[]
+  onOpenCard?: (cardId: string) => void
 }) {
   const accent = isGate ? 'var(--warn)' : cardStatus.kind === 'idle' ? 'var(--border-strong, var(--border))' : cardStatus.color
   const effTrust = (card.trust || config.trust) as Trust
@@ -834,6 +839,16 @@ function PipelineCardItem({ card, config, isGate, cardStatus, effectiveCapabilit
   const [interjectOpen, setInterjectOpen] = useState(false)
   const [interjectText, setInterjectText] = useState('')
   const [inspectionOpen, setInspectionOpen] = useState(false)
+  const [timelineOpen, setTimelineOpen] = useState(false)
+  const timelineEvents = useMemo(() => projectCardTimeline(card), [card])
+  const relChildren = useMemo(() => resolveChildren(card, allCards || []), [card, allCards])
+  const relParentId = useMemo(() => resolveParentId(card), [card])
+  const relParent = useMemo(() => {
+    if (!relParentId) return null
+    const p = (allCards || []).find(c => c.id === relParentId)
+    return p ? { id: p.id, title: p.title } : null
+  }, [relParentId, allCards])
+  const hasTimeline = timelineEvents.length > 0 || relChildren.length > 0 || !!relParent
   const inspection = useMemo(
     () => isGate ? buildGateInspection(card, producerStep) : null,
     [card, isGate, producerStep],
@@ -847,6 +862,7 @@ function PipelineCardItem({ card, config, isGate, cardStatus, effectiveCapabilit
 
   return (
     <div
+      id={`card-${card.id}`}
       className="rounded-lg p-2.5 transition-all duration-150"
       style={{
         background: 'var(--card)',
@@ -869,31 +885,60 @@ function PipelineCardItem({ card, config, isGate, cardStatus, effectiveCapabilit
         </a>
       )}
 
-      {/* Mode badges — click to cycle a per-card override */}
+      {/* Glanceable per-step summary (legibility-and-event-tree-spec §3b): plain-language
+          headline for the current stage + a "needs you" dot; full description on hover. */}
+      {(() => {
+        const summ = card.step_summaries?.[card.stage]
+        if (!summ?.headline) return null
+        return (
+          <div className="mt-1 flex items-start gap-1 text-[11px] leading-snug" title={summ.description || summ.headline}>
+            {summ.needs_human
+              ? <span aria-label="needs you" title="Needs you" style={{ color: 'var(--warn)' }}>🔴</span>
+              : <span aria-hidden="true" style={{ color: 'var(--muted)' }}>•</span>}
+            <span className="truncate" style={{ color: summ.needs_human ? 'var(--warn)' : 'var(--text)' }}>
+              {summ.headline}
+            </span>
+          </div>
+        )
+      })()}
+
+      {/* ── Zone: MODES (click a pill to cycle a per-card override) ── */}
       <div className="mt-2 flex items-center gap-1 flex-wrap">
+        <span className="text-[9px] uppercase tracking-wider mr-0.5 select-none" style={{ color: 'var(--muted)' }}>⚙ modes</span>
         <Pill color={TRUST_TOKEN[effTrust]} active={!!card.trust} onClick={onCycleTrust}
           title={`trust: ${effTrust}${card.trust ? ' (override)' : ' (inherited)'} — click to cycle`}>
-          {effTrust}
+          🛡 {effTrust}
         </Pill>
         <Pill color={DEPTH_TOKEN[effDepth]} active={!!card.depth} onClick={onCycleDepth}
           title={`depth: ${effDepth}${card.depth ? ' (override)' : ' (inherited)'} — click to cycle`}>
-          {effDepth}
-        </Pill>
-        <Pill color={cardStatus.color} active={cardStatus.kind !== 'idle'}
-          title={`${cardStatus.label}${cardStatus.reason ? ` — ${cardStatus.reason}` : ''}`}>
-          {cardStatus.label}
+          🔬 {effDepth}
         </Pill>
         <Pill color={effectiveCapability === 'coordinator' ? 'var(--warn)' : 'var(--info)'}
           active={effectiveCapability !== 'auto-derived'}
           title={`capability: ${effectiveCapability}; actual authority is runtime handshake-verified`}>
-          cap:{effectiveCapability === 'auto-derived' ? 'auto' : effectiveCapability}
+          🧰 {effectiveCapability === 'auto-derived' ? 'auto' : effectiveCapability}
+        </Pill>
+        {onSetBudget && (
+          <span className="inline-flex items-center gap-0.5" title="Decomposition/effort budget for this card">
+            <span className="text-[9px]" style={{ color: 'var(--muted)' }}>💰</span>
+            <CardBudgetEditor budget={card.budget} depth={effDepth} onSave={onSetBudget} />
+          </span>
+        )}
+      </div>
+
+      {/* ── Zone: PROPERTIES (status + source-of-truth + lifecycle + state badges — descriptive, not clickable actions) ── */}
+      <div className="mt-1.5 flex items-center gap-1 flex-wrap"
+        style={{ borderTop: '1px dashed var(--border)', paddingTop: '6px' }}>
+        <span className="text-[9px] uppercase tracking-wider mr-0.5 select-none" style={{ color: 'var(--muted)' }}>🏷 state</span>
+        <Pill color={cardStatus.color} active={cardStatus.kind !== 'idle'}
+          title={`${cardStatus.label}${cardStatus.reason ? ` — ${cardStatus.reason}` : ''}`}>
+          {cardStatus.label}
         </Pill>
         <Pill color={card.sot === 'local' ? 'var(--warn)' : card.sot === 'github' ? 'var(--info)' : 'var(--muted)'} active={card.sot === 'local'}
           title={card.sot === 'local' ? 'Local stage authority; linked cards retry guarded GitHub convergence' : card.sot === 'github' ? 'GitHub issue label is stage authority' : 'Source-of-truth field is unrecorded'}>
-          sot:{card.sot || 'unknown'}
+          {card.sot === 'github' ? '🌐' : card.sot === 'local' ? '💾' : '❔'} sot:{card.sot || 'unknown'}
         </Pill>
-        {card.lifecycle && <Pill color="var(--muted)" title={`card lifecycle: ${card.lifecycle}`}>life:{card.lifecycle}</Pill>}
-        {onSetBudget && <CardBudgetEditor budget={card.budget} depth={effDepth} onSave={onSetBudget} />}
+        {card.lifecycle && <Pill color="var(--muted)" title={`card lifecycle: ${card.lifecycle}`}>🔄 {card.lifecycle}</Pill>}
         {parkedCount > 0 && (
           <Pill color="var(--warn)" title={`${parkedCount} parked idea(s)`}>⏸ {parkedCount}</Pill>
         )}
@@ -961,24 +1006,26 @@ function PipelineCardItem({ card, config, isGate, cardStatus, effectiveCapabilit
               <>
                 <button
                   disabled={pending}
-                  className="text-[11px] px-2.5 py-1 rounded-md font-semibold transition-opacity hover:opacity-85 disabled:opacity-50 disabled:cursor-wait"
+                  className="text-[11px] px-2.5 py-1 rounded-md font-semibold transition-opacity hover:opacity-85 disabled:opacity-60 disabled:cursor-wait inline-flex items-center gap-1"
                   style={{ background: 'var(--ok)', color: 'var(--bg)' }}
                   onClick={onApprove}
                   title={pending ? 'A gate command is being processed…' : 'Approve this gate'}
                 >
-                  {pending && latest?.action === 'approve' ? 'Approving…' : 'Approve'}
+                  {pending && latest?.action === 'approve' && <ActivitySpinner size={10} />}
+                  {pending && latest?.action === 'approve' ? 'Approving…' : '✓ Approve'}
                 </button>
                 <button
                   disabled={pending}
-                  className="text-[11px] px-2.5 py-1 rounded-md font-semibold transition-opacity hover:opacity-85 disabled:opacity-50 disabled:cursor-wait"
+                  className="text-[11px] px-2.5 py-1 rounded-md font-semibold transition-opacity hover:opacity-85 disabled:opacity-60 disabled:cursor-wait inline-flex items-center gap-1"
                   style={{ background: 'var(--danger)', color: 'var(--bg)' }}
                   onClick={requestReject}
                 >
-                  {pending && latest?.action === 'reject' ? 'Rejecting…' : 'Reject'}
+                  {pending && latest?.action === 'reject' && <ActivitySpinner size={10} />}
+                  {pending && latest?.action === 'reject' ? 'Rejecting…' : '✕ Reject'}
                 </button>
                 {pending && (
-                  <span className="text-[10px]" style={{ color: 'var(--muted)' }}>
-                    ⏳ {latest?.action} sent — the runtime is processing it…
+                  <span className="text-[10px] inline-flex items-center gap-1" style={{ color: 'var(--muted)' }}>
+                    <ActivitySpinner size={10} /> {latest?.action} sent — runtime processing…
                   </span>
                 )}
                 {rejected && (
@@ -1038,35 +1085,55 @@ function PipelineCardItem({ card, config, isGate, cardStatus, effectiveCapabilit
         </div>
       ))}
 
-      {/* Interject — session-visible on ANY step: inject design/spec the next run honors */}
-      {onInterject && (
-        interjectOpen ? (
-          <div className="mt-2 flex flex-col gap-1">
-            <textarea value={interjectText} onChange={e => setInterjectText(e.target.value)}
-              placeholder="Interject: design/spec note, re-scope…" rows={2}
-              className="w-full text-[11px] px-2 py-1 rounded outline-none resize-none"
-              style={{ background: 'var(--bg-elevated, var(--bg))', border: '1px solid var(--border)', color: 'var(--text)' }} />
-            <div className="flex gap-1.5">
-              <button className="text-[11px] px-2 py-0.5 rounded font-semibold" style={{ background: 'var(--accent)', color: 'var(--bg)' }}
-                onClick={() => { if (interjectText.trim()) { onInterject('note', interjectText.trim()); setInterjectText(''); setInterjectOpen(false) } }}>Send</button>
-              <button className="text-[11px] px-2 py-0.5 rounded" style={{ color: 'var(--muted)' }}
-                onClick={() => { setInterjectOpen(false); setInterjectText('') }}>Cancel</button>
-            </div>
-          </div>
-        ) : (
-          <button className="mt-2 text-[10px] hover:underline" style={{ color: 'var(--muted)' }}
-            onClick={() => setInterjectOpen(true)}>+ interject</button>
-        )
+      {/* ── Zone: LIVE (streaming peek of the working agent's output — in-card-live-view-spec) ── */}
+      {liveView && <LiveMiniPane live={liveView} />}
+
+      {/* ── Zone: ACTIONS (mutating controls only — visually separated from the descriptive tags above) ── */}
+      {(onInterject || onOpenOrchestrator) && (
+        <div className="mt-2 flex items-center gap-2 flex-wrap"
+          style={{ borderTop: '1px dashed var(--border)', paddingTop: '6px' }}>
+          <span className="text-[9px] uppercase tracking-wider select-none" style={{ color: 'var(--muted)' }}>⚡ actions</span>
+          {onInterject && (
+            interjectOpen ? (
+              <div className="w-full flex flex-col gap-1">
+                <textarea value={interjectText} onChange={e => setInterjectText(e.target.value)}
+                  placeholder="Interject: design/spec note, re-scope…" rows={2}
+                  className="w-full text-[11px] px-2 py-1 rounded outline-none resize-none"
+                  style={{ background: 'var(--bg-elevated, var(--bg))', border: '1px solid var(--border)', color: 'var(--text)' }} />
+                <div className="flex gap-1.5">
+                  <button className="text-[11px] px-2 py-0.5 rounded font-semibold" style={{ background: 'var(--accent)', color: 'var(--bg)' }}
+                    onClick={() => { if (interjectText.trim()) { onInterject('note', interjectText.trim()); setInterjectText(''); setInterjectOpen(false) } }}>Send</button>
+                  <button className="text-[11px] px-2 py-0.5 rounded" style={{ color: 'var(--muted)' }}
+                    onClick={() => { setInterjectOpen(false); setInterjectText('') }}>Cancel</button>
+                </div>
+              </div>
+            ) : (
+              <button className="text-[10px] hover:underline" style={{ color: 'var(--muted)' }}
+                onClick={() => setInterjectOpen(true)}>✏️ interject</button>
+            )
+          )}
+          {onOpenOrchestrator && (
+            <button className="text-[10px] hover:underline" style={{ color: 'var(--muted)' }}
+              title={card.orchestrator_session?.slot_key
+                ? 'Open this pipeline\u2019s orchestrator session'
+                : 'Trigger an inspectable orchestrator session for this card'}
+              onClick={() => onOpenOrchestrator()}>
+              {card.orchestrator_session?.slot_key ? '\u2699 open orchestrator' : '\u2699 orchestrator'}
+            </button>
+          )}
+          {hasTimeline && (
+            <button className="text-[10px] hover:underline inline-flex items-center gap-0.5" style={{ color: 'var(--muted)' }}
+              title="Card timeline — the ordered story of what happened"
+              onClick={() => setTimelineOpen(true)}>
+              📜 timeline{timelineEvents.some(e => e.needs_human) ? ' 🔴' : ''}{relChildren.length > 0 ? ` 🌿${relChildren.length}` : ''}
+            </button>
+          )}
+        </div>
       )}
 
-      {onOpenOrchestrator && (
-        <button className="mt-2 ml-2 text-[10px] hover:underline" style={{ color: 'var(--muted)' }}
-          title={card.orchestrator_session?.slot_key
-            ? 'Open this pipeline\u2019s orchestrator session'
-            : 'Trigger an inspectable orchestrator session for this card'}
-          onClick={() => onOpenOrchestrator()}>
-          {card.orchestrator_session?.slot_key ? '\u2699 open orchestrator' : '\u2699 orchestrator'}
-        </button>
+      {timelineOpen && (
+        <CardTimelineDrawer card={card} events={timelineEvents} children={relChildren} parent={relParent}
+          onOpenCard={onOpenCard} onClose={() => setTimelineOpen(false)} />
       )}
 
       {inspectionOpen && inspection && (
@@ -2289,6 +2356,176 @@ function ActivitySpinner({ size = 12 }: { size?: number }) {
   )
 }
 
+// In-card live-view mini pane (in-card-live-view-spec): stage title + spinner + a bounded,
+// auto-scrolling peek of the working agent's streamed output. Presentation-only.
+const _STAGE_GLYPH: Record<string, string> = {
+  investigate: '🔎', requirements: '📝', design: '📐', tasks: '🧩',
+  implement: '🔨', review: '🔍', pr: '🚀', intent: '🎯',
+}
+// Character-by-character reveal toward a moving target (live-view typewriter). Reveals a few
+// chars per animation frame; if the 512-char window slid so the shown text is no longer a
+// prefix of the new target, SNAP to it — never lag the real stream (truthful liveness).
+function useTypewriter(target: string, active: boolean): string {
+  const [shown, setShown] = useState('')
+  const shownRef = useRef('')
+  const targetRef = useRef('')
+  const rafRef = useRef<number | null>(null)
+  targetRef.current = target || ''
+  useEffect(() => {
+    // If not active, or a fresh/slid window means shown is no longer a prefix, snap.
+    if (!active || !targetRef.current.startsWith(shownRef.current)) {
+      shownRef.current = targetRef.current
+      setShown(targetRef.current)
+      return
+    }
+    const tick = () => {
+      const t = targetRef.current
+      const cur = shownRef.current
+      if (cur.length >= t.length) { rafRef.current = null; return }
+      // reveal a small burst per frame; scale so long backlogs catch up fast
+      const step = Math.max(1, Math.ceil((t.length - cur.length) / 12))
+      shownRef.current = t.slice(0, cur.length + step)
+      setShown(shownRef.current)
+      rafRef.current = requestAnimationFrame(tick)
+    }
+    if (rafRef.current == null) rafRef.current = requestAnimationFrame(tick)
+    return () => { if (rafRef.current != null) { cancelAnimationFrame(rafRef.current); rafRef.current = null } }
+  }, [target, active])
+  return shown
+}
+
+function LiveMiniPane({ live }: { live: { stage: string; phase: string; tail: string; active: boolean; seq: number; onOpen: () => void } }) {
+  const [open, setOpen] = useState(true)
+  const bodyRef = useRef<HTMLDivElement>(null)
+  const shown = useTypewriter(live.tail, live.active)
+  useEffect(() => {
+    if (bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight
+  }, [shown])
+  const glyph = _STAGE_GLYPH[live.stage] || '⚙'
+  return (
+    <div className="mt-2" style={{ borderTop: '1px dashed var(--border)', paddingTop: '6px' }}>
+      <div className="flex items-center gap-1.5 text-[10px]">
+        <button className="inline-flex items-center gap-1 hover:underline" onClick={() => setOpen(o => !o)}
+          title="Toggle live output" style={{ color: 'var(--muted)' }}>
+          <span aria-hidden="true">{open ? '▾' : '▸'}</span>
+          <span className="uppercase tracking-wider">{glyph} {live.stage}</span>
+        </button>
+        <span style={{ color: live.active ? 'var(--accent)' : 'var(--muted)' }}>· {live.active ? live.phase : 'idle'}</span>
+        {live.active && <ActivitySpinner size={10} />}
+        <button className="ml-auto hover:underline" onClick={live.onOpen} title="Open the full step session"
+          style={{ color: 'var(--accent)' }}>open ↗</button>
+      </div>
+      {open && (
+        <div ref={bodyRef}
+          className="mt-1 text-[10px] font-mono leading-snug overflow-y-auto whitespace-pre-wrap break-words"
+          style={{ maxHeight: '3.6em', color: 'var(--muted)', background: 'var(--bg-elevated, var(--bg))',
+            border: '1px solid var(--border)', borderRadius: '4px', padding: '4px 6px' }}>
+          {shown || (live.active ? 'thinking…' : 'no live output')}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Card timeline drawer (legibility-and-event-tree-spec §5.2): the ordered per-step/gate/decision
+// story as glanceable sentences, actor-tagged + glyphed, expandable to detail. Reads the
+// client-side projection (cardTimeline.js).
+const _ACTOR_GLYPH: Record<string, string> = {
+  'loop': '⚙', 'step-agent': '🤖', 'orchestrator': '🧠', 'human': '🧑',
+}
+const _ACTOR_COLOR: Record<string, string> = {
+  'loop': 'var(--muted)', 'step-agent': 'var(--info)', 'orchestrator': 'var(--accent)', 'human': 'var(--ok)',
+}
+function CardTimelineDrawer({ card, events, children, parent, onOpenCard, onClose }: {
+  card: PipelineCard
+  events: Array<{ id: string; at: string; actor: string; kind: string; step?: string; cls: string; needs_human: boolean; headline: string; detail?: string; executor?: string | null }>
+  children: Array<{ id: string; title: string; stage?: string; lifecycle?: string; required?: boolean }>
+  parent?: { id: string; title: string } | null
+  onOpenCard?: (cardId: string) => void
+  onClose: () => void
+}) {
+  const hasRel = (children && children.length > 0) || !!parent
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.58)', backdropFilter: 'blur(4px)' }}
+      onMouseDown={event => { if (event.currentTarget === event.target) onClose() }}>
+      <section role="dialog" aria-modal="true" aria-label="Card timeline"
+        className="flex flex-col rounded-xl overflow-hidden"
+        style={{ width: 'min(680px, calc(100vw - 32px))', maxHeight: 'min(84vh, 760px)', background: 'var(--bg-elevated, var(--bg))', border: '1px solid var(--border-strong, var(--border))', boxShadow: '0 28px 90px rgba(0,0,0,0.5)' }}>
+        <header className="px-5 py-3.5 flex items-start gap-3" style={{ borderBottom: '1px solid var(--border)' }}>
+          <div className="min-w-0 flex-1">
+            <h2 className="text-[15px] font-semibold" style={{ color: 'var(--text-strong, var(--text))' }}>📜 Timeline</h2>
+            <div className="text-[12px] mt-0.5 truncate" style={{ color: 'var(--text)' }}>{card.title}</div>
+          </div>
+          <button onClick={onClose} className="text-[13px] px-2 py-0.5 rounded hover:opacity-80" style={{ color: 'var(--muted)' }} aria-label="Close">✕</button>
+        </header>
+        <div className="px-4 py-3 overflow-y-auto">
+          {/* Fan-out relationships (event-tree causal linkage). Turns an empty parent's
+              "no story" into "work happened in these children →". */}
+          {hasRel && (
+            <div className="mb-3 pb-3" style={{ borderBottom: '1px dashed var(--border)' }}>
+              <div className="text-[10px] uppercase tracking-wider mb-1.5" style={{ color: 'var(--muted)' }}>🌿 fan-out</div>
+              {parent && (
+                <button className="flex items-center gap-1.5 text-[12px] hover:underline mb-1" onClick={() => onOpenCard?.(parent.id)}
+                  style={{ color: 'var(--accent)' }} title="Open the integration parent">
+                  ↑ parent · <span className="truncate max-w-[420px]" style={{ color: 'var(--text)' }}>{parent.title}</span>
+                </button>
+              )}
+              {children.map(ch => (
+                <button key={ch.id} className="flex items-center gap-1.5 text-[12px] hover:underline w-full text-left" onClick={() => onOpenCard?.(ch.id)}
+                  title="Open this child card" style={{ color: 'var(--text)' }}>
+                  <span aria-hidden="true" style={{ color: 'var(--accent)' }}>↳</span>
+                  <span className="truncate flex-1" >{ch.title}</span>
+                  <span className="text-[9px] flex-shrink-0" style={{ color: ch.lifecycle === 'retired' ? 'var(--ok)' : 'var(--muted)' }}>
+                    {ch.stage || ''}{ch.lifecycle ? ` · ${ch.lifecycle}` : ''}{ch.required === false ? ' · optional' : ''}
+                  </span>
+                </button>
+              ))}
+              {children.length > 0 && events.length === 0 && (
+                <div className="text-[10px] mt-1.5 italic" style={{ color: 'var(--muted)' }}>
+                  This card fanned its work out to the {children.length} child card{children.length > 1 ? 's' : ''} above — the story lives there.
+                </div>
+              )}
+            </div>
+          )}
+          {events.length === 0 ? (
+            <div className="text-[12px]" style={{ color: 'var(--muted)' }}>
+              {hasRel ? 'No events recorded on this card directly.' : 'No recorded events yet.'}
+            </div>
+          ) : (
+            <ol className="flex flex-col gap-2">
+              {events.map(ev => (
+                <li key={ev.id} className="flex gap-2 text-[12px]">
+                  <span title={ev.actor} aria-hidden="true" className="flex-shrink-0 mt-0.5">{_ACTOR_GLYPH[ev.actor] || '•'}</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-baseline gap-1.5 flex-wrap">
+                      <span className="font-medium" style={{ color: ev.needs_human ? 'var(--warn)' : 'var(--text)' }}>
+                        {ev.needs_human && '🔴 '}{ev.headline}
+                      </span>
+                      {ev.cls === 'decision' && (
+                        <span className="text-[9px] px-1 rounded-full" style={{ color: 'var(--accent)', background: 'color-mix(in srgb, var(--accent) 14%, transparent)' }}>decision</span>
+                      )}
+                      <span className="ml-auto text-[9px]" style={{ color: 'var(--muted)' }}>
+                        {ev.at ? ev.at.replace('T', ' ').replace('Z', '') : ''}
+                      </span>
+                    </div>
+                    {ev.detail && (
+                      <div className="text-[10px] mt-0.5 leading-snug" style={{ color: 'var(--muted)' }}>{ev.detail}</div>
+                    )}
+                    <div className="text-[9px] mt-0.5" style={{ color: _ACTOR_COLOR[ev.actor] || 'var(--muted)' }}>
+                      {ev.actor}{ev.step ? ` · ${ev.step}` : ''}{ev.executor ? ` · ${ev.executor}` : ''}
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+      </section>
+    </div>
+  )
+}
+
 export default function SdlcPipeline() {
   const api = useAppApi()
   const navigate = useNavigate()
@@ -2982,6 +3219,33 @@ export default function SdlcPipeline() {
         card.id, card.stage, { type: 'interject', kind, text }, expectedRevision),
       onResolveDecision: (decisionId: string) => resolveDecision(card.id, decisionId),
       onOpenOrchestrator: () => openOrchestrator(card),
+      liveView: (() => {
+        // Join the card's CURRENT step session slot → the liveTail stream for it, so the card
+        // can render a peek of the working agent's output. Presentation-only (never state).
+        const slot = card.step_sessions?.[card.stage]?.slot_key
+        const tail = slot ? liveTails[slot] : undefined
+        const live = runStatus.some(row => row.cardId === card.id && row.step === card.stage && row.live)
+        if (!slot || (!tail?.active && !live)) return undefined
+        return {
+          stage: card.stage,
+          phase: tail?.phase || 'running',
+          tail: tail?.tail || '',
+          active: !!tail?.active && live,
+          seq: tail?.seq || 0,
+          slotKey: slot,
+          onOpen: () => navigate(`/chat?sid=${encodeURIComponent(slot)}`),
+        }
+      })(),
+      allCards: cards,
+      onOpenCard: (cardId: string) => {
+        const el = document.getElementById(`card-${cardId}`)
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+          const prev = el.style.outline
+          el.style.outline = '2px solid var(--accent)'
+          setTimeout(() => { el.style.outline = prev }, 1400)
+        }
+      },
     }
   }
 

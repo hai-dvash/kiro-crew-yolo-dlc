@@ -391,6 +391,22 @@ def _bootstrap() -> None:
             raise RuntimeError("explicit DLC-YOLO state path could not be published to the UI")
         return  # persistence already holds real work — authoritative, never clobber
 
+    # CLOBBER GUARD: seeding an empty board is only safe when the file is truly ABSENT or
+    # genuinely EMPTY. A file that EXISTS with bytes but did not parse into a populated dict
+    # is a TRANSIENT/corrupt read (locked, mid-os.replace, partial write) — NOT a first run.
+    # Treating that as "no state" is exactly how a live reconcile wiped a 13-card board.
+    # Refuse to seed over it: leave the bytes on disk for the next cycle to read cleanly.
+    if cur is None:
+        try:
+            exists_nonempty = STATE.exists() and STATE.stat().st_size > 0
+        except OSError:
+            exists_nonempty = True  # cannot even stat — assume present, never clobber
+        if exists_nonempty:
+            # Do not write. The file is there; a subsequent read will succeed once the
+            # transient condition clears. Publishing the pointer is still safe.
+            _publish_state_pointer()
+            return
+
     seed = {"config": {"trust": "assisted", "depth": "standard"}, "pipelines": [], "cards": []}
     # promote a legacy /tmp board ONLY when the durable tier is the resolved STATE (i.e. we
     # are on persistence, not already on /tmp) and /tmp actually has data.
@@ -7767,6 +7783,119 @@ def _process_orchestrator_triggers(ctx, state: dict, now: str) -> bool:
     return changed
 
 
+# --- Legibility: per-step human-readable summary (legibility-and-event-tree-spec §3b) -----
+_STEP_SUMMARY_SCHEMA = 1
+_STEP_HEADLINE_MAX = 80
+_STEP_DESCRIPTION_MAX = 280
+
+_STEP_VERB = {
+    "investigate": "Investigated the issue",
+    "requirements": "Produced requirements",
+    "design": "Produced the design",
+    "tasks": "Broke the design into tasks",
+    "implement": "Implemented the tasks",
+    "review": "Reviewed the implementation",
+    "pr": "Prepared the PR",
+    "intent": "Resolved the intent",
+}
+
+
+def _bounded_text(value: object, limit: int) -> str:
+    text = " ".join(str(value or "").split())
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
+def _step_executor(card: dict, step_id: str) -> str | None:
+    """The crew/agent that actually ran the step, for the summary's provenance line."""
+    ss = (card.get("step_sessions") or {}).get(step_id)
+    if isinstance(ss, dict):
+        for k in ("assigned_agent", "agent"):
+            if ss.get(k):
+                return str(ss[k])
+    runs = (card.get("child_runs") or {}).get(step_id)
+    if isinstance(runs, list) and runs:
+        first = runs[0]
+        if isinstance(first, dict) and first.get("executor"):
+            return str(first["executor"])
+    return None
+
+
+def _synthesize_step_summary(card: dict, step_id: str, status: str) -> dict:
+    """Deterministic plain-language summary FLOOR — used when the step agent did not write
+    its own card.step_summaries[step]. No ids/paths/internals; a human-readable headline +
+    one-sentence description derived from stable facts, so a step is NEVER shown as a raw blob."""
+    executor = _step_executor(card, step_id)
+    verb = _STEP_VERB.get(step_id, f"Ran the {step_id} step")
+    if status in _SCHEDULER_COMPLETE or status in ("done", "advanced"):
+        headline = verb
+        desc = f"{verb.lower()}"
+        if executor:
+            desc += f" (executor {executor})"
+        desc += ". Completed."
+        needs_human = False
+    elif status == "blocked":
+        reason = _bounded_text((card.get("block_reason") or {}).get(step_id) or "needs attention", 160)
+        headline = f"{step_id}: blocked"
+        desc = f"{verb} could not complete — {reason}"
+        needs_human = True
+    elif status == "error":
+        reason = _bounded_text((card.get("error_reason") or {}).get(step_id) or "retriable failure", 160)
+        headline = f"{step_id}: error"
+        desc = f"{verb} hit a retriable error — {reason}"
+        needs_human = False
+    else:
+        headline = f"{step_id}: {status or 'pending'}"
+        desc = f"{verb} is {status or 'in progress'}."
+        needs_human = False
+    return {
+        "schema_version": _STEP_SUMMARY_SCHEMA,
+        "step": step_id,
+        "status": status,
+        "headline": _bounded_text(headline, _STEP_HEADLINE_MAX),
+        "description": _bounded_text(desc, _STEP_DESCRIPTION_MAX),
+        "executor": executor,
+        "needs_human": needs_human,
+        "synthesized": True,
+        "at": card.get("updated_at"),
+    }
+
+
+def _synthesize_step_summaries(state: dict, now: str) -> bool:
+    """Ensure every terminal-status step has a human-readable card.step_summaries[step].
+
+    Prefer the step agent's own summary when present (agent-authored is richer); otherwise
+    synthesize the deterministic floor from stable facts. Zero-token, read-of-state only."""
+    changed = False
+    for card in state.get("cards") or []:
+        if not isinstance(card, dict):
+            continue
+        statuses = card.get("step_status")
+        if not isinstance(statuses, dict) or not statuses:
+            continue
+        summaries = card.get("step_summaries")
+        if not isinstance(summaries, dict):
+            summaries = {}
+        for step_id, status in statuses.items():
+            status = str(status or "")
+            if status in ("", "pending"):
+                continue  # transient — no durable summary yet
+            existing = summaries.get(step_id)
+            # Keep an agent-authored summary (has a headline and is not our synthesized floor)
+            # whose status still matches; only (re)synthesize when missing or stale.
+            if (isinstance(existing, dict) and existing.get("headline")
+                    and not existing.get("synthesized")
+                    and existing.get("status") == status):
+                continue
+            if (isinstance(existing, dict) and existing.get("synthesized")
+                    and existing.get("status") == status):
+                continue
+            summaries[step_id] = _synthesize_step_summary(card, step_id, status)
+            changed = True
+        if changed and card.get("step_summaries") is not summaries:
+            card["step_summaries"] = summaries
+    return changed
+
+
 def _run_advance_passes(ctx, state: dict, now: str, cycle: dict) -> bool:
     from datetime import datetime, timezone
 
@@ -7784,6 +7913,8 @@ def _run_advance_passes(ctx, state: dict, now: str, cycle: dict) -> bool:
     # ORDER 6 — enabled linked-chat responses are card events. The chat session writes the
     # marker at prompt arrival; this deterministic pass projects it into the card immediately.
     if _handle_chat_response_markers(state, now):
+        changed = True
+    if _synthesize_step_summaries(state, now):
         changed = True
     if _process_orchestrator_triggers(ctx, state, now):
         changed = True

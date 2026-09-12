@@ -32,8 +32,8 @@ test('status view uses one pure status projector rather than stage-only in-fligh
 
 test('cards surface recorded status, capability, SoT, lifecycle, and budget', () => {
   assert.match(app, /sot:\{card\.sot \|\| 'unknown'\}/)
-  assert.match(app, /life:\{card\.lifecycle\}/)
-  assert.match(app, /cap:\{effectiveCapability/)
+  assert.match(app, /\{card\.lifecycle\}/)   // lifecycle badge (rendered with a 🔄 glyph)
+  assert.match(app, /cap:\{effectiveCapability|\{effectiveCapability/)
   assert.match(app, /CardBudgetEditor/)
   assert.match(app, /delete card\.budget/)
 })

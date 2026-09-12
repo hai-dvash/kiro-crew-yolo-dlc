@@ -178,6 +178,20 @@ gateway's per-request `X-KiroCrew-Proxy` HMAC. Those control routes are not GitH
 do not add a public-auth bypass to KiroCrew or expose the dashboard, gateway, `/api/ws`, terminal,
 or general API.
 
+> **The tunnel is UNTRUSTED TRANSPORT, never authority — this is the security model.**
+> A public relay (Cloudflare quick tunnel, a named tunnel, ngrok, Tailscale Funnel, or your own
+> reverse proxy) only *carries bytes* to the loopback `/github` route; it can never *act*. Every
+> delivery must pass **HMAC-SHA256 signature verification** (constant-time, before JSON parse) +
+> the **exact repository/event/action allowlist** + an authoritative **`gh` refetch and
+> trusted-author ownership check** before any card is touched. So a world-reachable quick-tunnel URL
+> leaks nothing and drives nothing on its own. Because the tunnel is provider-agnostic, DLC-YOLO
+> defaults to the **zero-account, zero-domain Cloudflare quick tunnel** (anyone can run it, no
+> signup/token — its only cost is a URL that rotates on restart, which the opt-in **auto-sync**
+> self-heals). **Bring your own stable endpoint** any time via the env-var override
+> (`DLC_YOLO_GITHUB_WEBHOOK_*`) or by pointing GitHub at a named CF tunnel / ngrok reserved domain /
+> Tailscale Funnel — the app forces no provider and the security guarantees are identical regardless
+> of which relay fronts the one guarded route.
+
 Open **Pipeline Setup/Edit → Webhook · app-wide** in the DLC-YOLO UI to configure enablement,
 loopback port, repository allowlist, optional absolute inbox path, and the GitHub secret. The tab is
 inside pipeline configuration for discoverability, but its receiver settings are shared by every

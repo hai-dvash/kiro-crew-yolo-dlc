@@ -1,0 +1,40 @@
+{
+  "_comment": "TEMPLATE for the DLC-YOLO agent MCP policy, deployed to <app-data>/agent_mcp_policy.json by scripts/setup-crons.py. WHY IT EXISTS: the dlcyolo capability profiles + the orchestrator DECLARE kirocrew-core / kirocrew-cron tools (select_crew, spawn_run, task_run, ask_question, send_message, cron_trigger) in their agent templates, but a declared tool name is inert unless the MCP server providing it is launched for that agent's session. The app path (kiro_crew.apps.bridges._apply_agent_mcp_policy) does NOT auto-inject the host's managed MCP servers into an app agent; it grants them ONLY via this per-app policy. Without it, every crew-dispatching step (coordinator/builder) blocks with 'select_crew/spawn_run not in inventory' and no crew is ever dispatched. This policy grants the two managed servers (whose launch specs the host resolves via _managed_mcp_spec) to each profile that references them.",
+  "agents": {
+    "dlcyolo-coordinator": {
+      "servers": {
+        "kirocrew-core": {"autoApprove": ["spawn_run", "select_crew", "task_run", "ask_question", "send_message"]},
+        "kirocrew-cron": {"autoApprove": ["cron_trigger"]}
+      }
+    },
+    "dlcyolo-builder": {
+      "servers": {
+        "kirocrew-core": {"autoApprove": ["spawn_run", "ask_question", "send_message"]},
+        "kirocrew-cron": {"autoApprove": ["cron_trigger"]}
+      }
+    },
+    "dlcyolo-authoring": {
+      "servers": {
+        "kirocrew-core": {"autoApprove": ["ask_question", "send_message"]},
+        "kirocrew-cron": {"autoApprove": ["cron_trigger"]}
+      }
+    },
+    "dlcyolo-readonly": {
+      "servers": {
+        "kirocrew-core": {"autoApprove": ["ask_question", "send_message"]},
+        "kirocrew-cron": {"autoApprove": ["cron_trigger"]}
+      }
+    },
+    "pipeline-orchestrator": {
+      "servers": {
+        "kirocrew-core": {"autoApprove": ["spawn_run", "select_crew", "task_run", "ask_question", "send_message"]},
+        "kirocrew-cron": {"autoApprove": ["cron_add", "cron_trigger", "cron_pause", "cron_remove"]}
+      }
+    },
+    "intent-agent": {
+      "servers": {
+        "kirocrew-core": {"autoApprove": ["ask_question", "send_message", "web_search", "web_fetch"]}
+      }
+    }
+  }
+}

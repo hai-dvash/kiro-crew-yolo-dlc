@@ -74,6 +74,8 @@ def mod(tmp_path, monkeypatch):
     m = importlib.reload(m)  # re-resolve STATE against the tmp env var
     # STATE is resolved at import time from the env var; assert we're pointed at tmp
     assert str(tmp_path) in str(m.STATE)
+    m.STATE_POINTER = tmp_path / "home" / ".dlc-yolo" / ".statepath"
+    m.STATE_IS_EXPLICIT = True
     m._AUTH_USER_CACHE.clear()
     m._ISSUE_AUTHOR_CACHE.clear()
     return m
@@ -113,9 +115,14 @@ def _card(**over):
 
 
 def _state(cards, config=None, pipelines=None):
+    if pipelines is None:
+        pipelines = [{
+            "id": "pl-1", "repo": "owner/repo", "workspace": "default",
+            "trust": "assisted", "depth": "standard", "steps": [],
+        }]
     return {
         "config": config or {"trust": "assisted", "depth": "standard"},
-        "pipelines": pipelines or [],
+        "pipelines": pipelines,
         "cards": cards,
     }
 
@@ -203,7 +210,7 @@ def test_owner_ok_author_trusted_true(mod, monkeypatch):
                         lambda cmd, **kw: _FakeProc(0, _author_json("alice")))
     card = _card(trusted_authors=["alice"])
     state = _state([card])
-    assert mod._owner_ok(state, card, None) is True
+    assert mod._owner_ok(state, card, state["pipelines"][0]) is True
 
 
 def test_owner_ok_author_not_trusted_false(mod, monkeypatch):
@@ -211,7 +218,7 @@ def test_owner_ok_author_not_trusted_false(mod, monkeypatch):
                         lambda cmd, **kw: _FakeProc(0, _author_json("mallory")))
     card = _card(trusted_authors=["alice"])
     state = _state([card])
-    assert mod._owner_ok(state, card, None) is False
+    assert mod._owner_ok(state, card, state["pipelines"][0]) is False
 
 
 def test_owner_ok_gh_nonzero_fails_closed(mod, monkeypatch):
@@ -219,7 +226,7 @@ def test_owner_ok_gh_nonzero_fails_closed(mod, monkeypatch):
                         lambda cmd, **kw: _FakeProc(returncode=1, stdout=""))
     card = _card(trusted_authors=["alice"])
     state = _state([card])
-    assert mod._owner_ok(state, card, None) is False
+    assert mod._owner_ok(state, card, state["pipelines"][0]) is False
 
 
 def test_owner_ok_subprocess_raises_fails_closed(mod, monkeypatch):
@@ -229,7 +236,7 @@ def test_owner_ok_subprocess_raises_fails_closed(mod, monkeypatch):
     monkeypatch.setattr(subprocess, "run", boom)
     card = _card(trusted_authors=["alice"])
     state = _state([card])
-    assert mod._owner_ok(state, card, None) is False
+    assert mod._owner_ok(state, card, state["pipelines"][0]) is False
 
 
 def test_owner_ok_subprocess_timeout_fails_closed(mod, monkeypatch):
@@ -239,7 +246,7 @@ def test_owner_ok_subprocess_timeout_fails_closed(mod, monkeypatch):
     monkeypatch.setattr(subprocess, "run", boom)
     card = _card(trusted_authors=["alice"])
     state = _state([card])
-    assert mod._owner_ok(state, card, None) is False
+    assert mod._owner_ok(state, card, state["pipelines"][0]) is False
 
 
 def test_owner_ok_sot_local_true_no_gh(mod, monkeypatch):
@@ -248,7 +255,7 @@ def test_owner_ok_sot_local_true_no_gh(mod, monkeypatch):
                         lambda cmd, **kw: called.append(cmd) or _FakeProc(0, ""))
     card = _card(sot="local")
     state = _state([card])
-    assert mod._owner_ok(state, card, None) is True
+    assert mod._owner_ok(state, card, state["pipelines"][0]) is True
     assert called == []  # never invoked gh for a local card
 
 
@@ -260,7 +267,7 @@ def test_owner_ok_no_trusted_set_fails_closed(mod, monkeypatch):
                         lambda cmd, **kw: called.append(cmd) or _FakeProc(0, ""))
     card = _card()  # no trusted_authors anywhere
     state = _state([card], config={})
-    assert mod._owner_ok(state, card, None) is False
+    assert mod._owner_ok(state, card, state["pipelines"][0]) is False
     assert called == []  # short-circuits before the gh call
 
 
@@ -269,7 +276,7 @@ def test_owner_ok_missing_repo_or_issue_fails_closed(mod, monkeypatch):
                         lambda cmd, **kw: _FakeProc(0, _author_json("alice")))
     card = _card(trusted_authors=["alice"], source={"type": "github"})  # no repo/issue
     state = _state([card])
-    assert mod._owner_ok(state, card, None) is False
+    assert mod._owner_ok(state, card, state["pipelines"][0]) is False
 
 
 # --------------------------------------------------------------------------- #
@@ -286,8 +293,8 @@ def test_owner_ok_author_cache_avoids_second_gh_call(mod, monkeypatch):
     c1 = _card(id="card-1", trusted_authors=["alice"])
     c2 = _card(id="card-2", trusted_authors=["alice"])  # same repo+issue
     state = _state([c1, c2])
-    assert mod._owner_ok(state, c1, None) is True
-    assert mod._owner_ok(state, c2, None) is True
+    assert mod._owner_ok(state, c1, state["pipelines"][0]) is True
+    assert mod._owner_ok(state, c2, state["pipelines"][0]) is True
     assert len(calls) == 1  # cached (repo,issue) author -> one gh call total
 
 
@@ -408,8 +415,8 @@ def test_owner_ok_transient_exception_not_cached_retries(mod, monkeypatch):
     monkeypatch.setattr(subprocess, "run", flaky)
     card = _card(trusted_authors=["alice"])
     state = _state([card])
-    assert mod._owner_ok(state, card, None) is False   # transient failure -> fail closed
-    assert mod._owner_ok(state, card, None) is True     # retried, not cached from the failure
+    assert mod._owner_ok(state, card, state["pipelines"][0]) is False   # transient failure -> fail closed
+    assert mod._owner_ok(state, card, state["pipelines"][0]) is True     # retried, not cached from the failure
 
 
 if __name__ == "__main__":

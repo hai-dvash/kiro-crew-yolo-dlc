@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""DLC-YOLO sync & repair — idempotent post-sync deployment + cron reconcile.
+"""DLC-YOLO sync & repair — idempotent runtime and slash-discovery reconcile.
 
 WHY THIS EXISTS
 ---------------
@@ -7,33 +7,37 @@ WHY THIS EXISTS
   • `app enable` on an already-enabled app is a no-op — it does NOT re-scan crons,
   • `disable`→`enable` can drop the crons without cleanly re-registering the SCRIPT
     cron (the CLI/MCP `cron add` cannot create a script cron — only the manifest scan
-    can), and
-  • the runtime cron script under ~/.kiro/crew/crons/ drifts from the repo after edits.
+    can),
+  • the runtime cron script under ~/.kiro/crew/crons/ drifts from the repo after edits,
+    and
+  • app skills are registered under ~/.kiro/crew/skills, but Kiro's fresh-session slash
+    picker discovers global skills under ~/.kiro/skills.
 
-So an EDIT to the repo does not reliably reach the running gateway. This script closes
-that gap deterministically and idempotently:
+So an EDIT to the repo does not reliably reach the running gateway, and app registration alone
+cannot make `/dlc-yolo` fresh-session discoverable. This script closes both gaps deterministically:
 
-  1. DEPLOY   — copy crons/dlc_yolo_advance.py → ~/.kiro/crew/crons/ (the manifest
-                references this runtime path; install does not copy it for you).
-  2. RECONCILE— upsert the two DLC-YOLO cron jobs in ~/.kiro/crew/crons.json to match
-                the app manifest (app-crons.json). SCRIPT cron for advance, AGENT cron
-                (bound to pipeline-orchestrator) for backlog-intake.
-  3. VERIFY    — compile-check the deployed script; report drift it repaired.
+  1. DEPLOY   — copy the two zero-token cron scripts plus their secure webhook and ledger-projection
+                helpers into ~/.kiro/crew/crons/.
+  2. RECONCILE— upsert DLC-YOLO's three cron jobs in ~/.kiro/crew/crons.json.
+  3. PUBLISH  — link only the deployed/source DLC-YOLO command skill at
+                ~/.kiro/skills/dlc-yolo for fresh-session slash discovery.
+  4. VERIFY   — compile-check deployed scripts and report repaired drift.
 
 SAFETY
 ------
   • Backs up crons.json to crons.json.bak before writing.
-  • UPSERT-ONLY on jobs named `dlc-yolo-*` — every other app's jobs are preserved
-    byte-for-byte.
+  • UPSERT-ONLY on jobs named `dlc-yolo-*` — every other app's jobs are preserved.
+  • The producer-facing advance ID is deterministic; a foreign owner collision aborts without write.
+  • Slash publication never overwrites a real path or a foreign symlink.
   • Idempotent: re-running changes nothing once in sync.
-  • Never touches credentials, never force-pushes, never deletes another app's data.
+  • Never touches credentials, force-pushes, or deletes another app's data/skills.
 
 USAGE
 -----
-    python3 scripts/setup-crons.py            # deploy + reconcile + verify
+    python3 scripts/setup-crons.py            # deploy + reconcile + publish + verify
     python3 scripts/setup-crons.py --check     # report drift only, change nothing
 
-Run it after editing the cron script or the manifest crons, or after a UI/skill sync.
+Run it after editing a cron/skill, syncing app files, upgrading, or reinstalling.
 """
 
 from __future__ import annotations
@@ -52,6 +56,14 @@ REPO = Path(__file__).resolve().parent.parent
 CREW = Path(os.path.expanduser("~/.kiro/crew"))
 CRON_SRC = REPO / "crons" / "dlc_yolo_advance.py"
 CRON_DST = CREW / "crons" / "dlc_yolo_advance.py"
+# The advance entry (CRON_SRC) is a thin scannable shim that execs this bulk
+# implementation module; it MUST be deployed beside the entry or the exec fails.
+IMPL_SRC = REPO / "crons" / "_dlc_yolo_impl.py"
+IMPL_DST = CREW / "crons" / "_dlc_yolo_impl.py"
+WEBHOOK_SRC = REPO / "crons" / "dlc_yolo_webhook.py"
+WEBHOOK_DST = CREW / "crons" / "dlc_yolo_webhook.py"
+PROJECTION_SRC = REPO / "crons" / "dlc_yolo_projection.py"
+PROJECTION_DST = CREW / "crons" / "dlc_yolo_projection.py"
 CRONS_JSON = CREW / "crons.json"
 APP_CRONS = CREW / "apps" / "dlc-yolo" / "app-crons.json"
 
@@ -106,17 +118,22 @@ def _job_template(name: str) -> dict:
 
 
 def _desired_jobs() -> list[dict]:
-    """Build the two desired job records from the manifest (app-crons.json) if present,
-    else from known defaults. Script cron for advance, agent cron for backlog."""
+    """Build the three desired job records, preferring manifest values when available."""
     every_advance, every_backlog = 120, 200
     backlog_msg = (
-        "Backlog back-feed. Collect the distinct owned repos from state.json cards' "
-        "source.repo. For each repo, list open issues labeled dlc-backlog "
-        "(gh issue list --repo <repo> --label dlc-backlog --state open --json "
-        "number,title,url). For any such issue that does NOT already have a card "
-        "(match on source.issue/url), create a new card at stage 'intake' inheriting "
-        "config.trust/config.depth, linked to that issue. Only READ issues and CREATE "
-        "intake cards — never advance or execute here. Persist state."
+        "Backlog back-feed. Read state.pipelines and select only pipelines with a "
+        "syntactically valid non-empty repo whose backlog_intake is not false; those "
+        "pipeline repo identities are the only eligible repositories. Do not infer "
+        "repository eligibility from cards alone. For each eligible repo, list open "
+        "issues labeled dlc-backlog (gh issue list --repo <repo> --label dlc-backlog "
+        "--state open --json number,title,url). For any such issue that does NOT already "
+        "have a card (match on source.issue/url), FIRST apply the OWNERSHIP GUARD — gh "
+        "issue view <n> --repo <repo> --json author; only proceed if author.login is in "
+        "trusted_authors (card->pipeline->config.trusted_authors, default the "
+        "gh-authenticated user; empty never means allow-all; fail closed if "
+        "unverifiable). Only for a guard-passing issue, create a new card at stage "
+        "'intake' inheriting config.trust/config.depth, linked to that issue. Only READ "
+        "issues and CREATE intake cards — never advance or execute here. Persist state."
     )
     # Prefer the manifest's declared values if we can read them.
     try:
@@ -151,7 +168,9 @@ def _desired_jobs() -> list[dict]:
 def deploy_script(check: bool) -> bool:
     """Copy the cron script(s) to their runtime location if missing or stale. Returns True if changed."""
     changed = False
-    for src, dst in [(CRON_SRC, CRON_DST), (SPAWNS_SRC, SPAWNS_DST)]:
+    for src, dst in [
+            (CRON_SRC, CRON_DST), (IMPL_SRC, IMPL_DST), (SPAWNS_SRC, SPAWNS_DST),
+            (WEBHOOK_SRC, WEBHOOK_DST), (PROJECTION_SRC, PROJECTION_DST)]:
         if not src.exists():
             _log(f"WARN: repo cron script not found at {src}")
             continue
@@ -171,9 +190,45 @@ def deploy_script(check: bool) -> bool:
     return changed
 
 
+MCP_POLICY_SRC = REPO / "agents" / "agent_mcp_policy.template.json"
+MCP_POLICY_DST = CREW / "apps" / "dlc-yolo" / "data" / "agent_mcp_policy.json"
+
+
+def deploy_agent_mcp_policy(check: bool) -> bool:
+    """Install the agent MCP policy into the app data dir IF ABSENT.
+
+    The policy grants kirocrew-core/kirocrew-cron MCP servers to the dlcyolo
+    capability profiles + orchestrator, so their DECLARED crew-routing/spawn tools
+    (select_crew/spawn_run/task_run/cron_trigger) actually launch in a session —
+    without it every crew-dispatching step blocks 'tool not in inventory'. It lives
+    in user DATA (not the packaged app), so a fresh install has none and must be
+    seeded here. NEVER overwrites an existing file (the user may have customized
+    grants); only creates it when missing. Returns True if it created the file.
+    After creation the app must be re-materialized: `kirocrew app enable dlc-yolo`.
+    """
+    if not MCP_POLICY_SRC.exists():
+        _log(f"WARN: MCP policy template not found at {MCP_POLICY_SRC}")
+        return False
+    if MCP_POLICY_DST.exists():
+        _log(f"agent MCP policy already present: {MCP_POLICY_DST} (left as-is)")
+        return False
+    if check:
+        _log(f"DRIFT: agent MCP policy missing (would deploy → {MCP_POLICY_DST})")
+        return True
+    MCP_POLICY_DST.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(MCP_POLICY_SRC, MCP_POLICY_DST)
+    json.loads(MCP_POLICY_DST.read_text(encoding="utf-8"))  # validate JSON
+    _log(f"deployed agent MCP policy → {MCP_POLICY_DST} "
+         f"(run `kirocrew app enable dlc-yolo` to materialize it into the agents)")
+    return True
+
+
 def reconcile_crons(check: bool) -> bool:
-    """Upsert the two dlc-yolo jobs in crons.json by name. Other apps' jobs untouched.
-    Returns True if changed."""
+    """Upsert the three DLC-YOLO jobs by name without touching foreign jobs.
+
+    The advance job additionally converges to its deterministic producer-facing trigger ID.
+    Returns True if any drift exists (or was applied).
+    """
     try:
         store = json.loads(CRONS_JSON.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
@@ -240,15 +295,30 @@ def reconcile_crons(check: bool) -> bool:
         # Reconcile only the fields we own; preserve runtime stats (last_run_ts etc.).
         fields = ["script", "message", "agent_id"]
         drift = any(cur.get(f, "") != want.get(f, "") for f in fields)
+        # The mute flags (silent/hide_in_chat) must be part of drift detection too:
+        # the update branch below is the ONLY writer of these flags, so if they were
+        # excluded here a job that matches on script/message/agent/schedule/id but has
+        # silent:false in the live store would report "already in sync" and NEVER get
+        # muted — exactly why backlog-intake's silent:true stayed manifest-only across
+        # sessions. Compare against the desired template's boolean defaults.
+        flag_drift = any(bool(cur.get(f, False)) != bool(want.get(f, False))
+                         for f in ("silent", "hide_in_chat"))
         sched_drift = (cur.get("schedule", {}).get("every_secs")
                        != want["schedule"]["every_secs"])
-        # ID REPAIR: the gateway's cron trigger/remove CLI validates ids against
-        # ^[a-f0-9]{6,12}$ (cron_trigger._JOB_ID_RE). An older setup wrote non-hex ids
-        # (e.g. 'dlcadvance') that the CLI rejects as "Invalid job ID format". If the
-        # current id is non-conformant, rewrite it to the deterministic hex id so the
-        # job becomes manually triggerable/removable. Leave a valid id untouched.
-        id_drift = not re.fullmatch(r"[a-f0-9]{6,12}", str(cur.get("id", "")))
-        if drift or sched_drift or id_drift:
+        # ID CONTRACT: every malformed legacy ID is repaired. The advance job additionally uses
+        # the exact deterministic ID embedded in step-agent terminal-event seeds, so a valid-but-
+        # random manifest ID must converge too. Other valid app-job IDs remain untouched.
+        current_id = str(cur.get("id", ""))
+        if name == ADVANCE_NAME:
+            collision = next((job for job in jobs
+                              if job is not cur and str(job.get("id", "")) == want["id"]), None)
+            if collision is not None:
+                raise RuntimeError(
+                    f"advance cron id {want['id']} is already owned by foreign job "
+                    f"'{collision.get('name') or '<unnamed>'}'; refusing ambiguous trigger")
+        id_drift = (not re.fullmatch(r"[a-f0-9]{6,12}", current_id)
+                    or (name == ADVANCE_NAME and current_id != want["id"]))
+        if drift or sched_drift or id_drift or flag_drift:
             if check:
                 _log(f"DRIFT: cron '{name}' fields differ (would update)")
             else:
@@ -262,7 +332,7 @@ def reconcile_crons(check: bool) -> bool:
                 cur["hide_in_chat"] = True
                 if id_drift:
                     cur["id"] = want["id"]
-                    _log(f"repaired non-hex id for cron '{name}' → {want['id']}")
+                    _log(f"reconciled deterministic id for cron '{name}' → {want['id']}")
                 _log(f"updated cron '{name}'")
             changed = True
         else:
@@ -277,6 +347,88 @@ def reconcile_crons(check: bool) -> bool:
     return changed
 
 
+def reconcile_slash_skill(
+    check: bool,
+    *,
+    link: Path | None = None,
+    sources: tuple[Path, ...] | None = None,
+) -> tuple[bool, bool]:
+    """Publish ``/dlc-yolo`` into Kiro's fresh-session slash discovery path.
+
+    KiroCrew registers manifest skills below ``~/.kiro/crew/skills`` for agents,
+    while Kiro's default slash picker discovers global skills below
+    ``~/.kiro/skills``.  This bridge creates one directory symlink and never
+    replaces a real file/directory or a symlink not owned by this app.
+
+    Returns ``(drift, blocked)``.  ``--check`` reports drift without mutating.
+    """
+    if link is None:
+        kiro_home = Path(os.path.expanduser(os.environ.get("KIRO_HOME", "~/.kiro")))
+        link = kiro_home / "skills" / "dlc-yolo"
+    if sources is None:
+        sources = (
+            CREW / "apps" / "dlc-yolo" / "skills" / "dlc-yolo",
+            REPO / "skills" / "dlc-yolo",
+        )
+
+    candidates = tuple(path.expanduser().absolute() for path in sources)
+    source = next((path for path in candidates if (path / "SKILL.md").is_file()), None)
+    if source is None:
+        _log("ERROR: no DLC-YOLO slash skill source contains SKILL.md")
+        return True, True
+
+    def _target_of(path: Path) -> Path:
+        raw = Path(os.readlink(path))
+        if not raw.is_absolute():
+            raw = path.parent / raw
+        return raw.absolute()
+
+    exists = os.path.lexists(link)
+    if exists and not link.is_symlink():
+        _log(
+            f"ERROR: slash skill destination is user-managed; refusing to overwrite {link}"
+        )
+        return True, True
+
+    current_target: Path | None = None
+    if exists:
+        try:
+            current_target = _target_of(link)
+        except OSError as exc:
+            _log(f"ERROR: cannot inspect slash skill link {link}: {exc}")
+            return True, True
+
+        if current_target == source:
+            _log(f"slash command skill already discoverable: {link}")
+            return False, False
+
+        # Only a link to one of this checkout/app install's known skill directories
+        # is ours to repair. A foreign link is preserved exactly as found.
+        if current_target not in candidates:
+            _log(
+                f"ERROR: foreign slash skill symlink at {link}; refusing to replace it"
+            )
+            return True, True
+
+    if check:
+        state = "stale" if exists else "missing"
+        _log(f"DRIFT: slash command link is {state} (would publish {link} → {source})")
+        return True, False
+
+    link.parent.mkdir(parents=True, exist_ok=True)
+    temporary = link.with_name(f".{link.name}.dlc-yolo-{os.getpid()}.tmp")
+    if os.path.lexists(temporary):
+        temporary.unlink()
+    try:
+        temporary.symlink_to(source, target_is_directory=True)
+        os.replace(temporary, link)
+    finally:
+        if os.path.lexists(temporary):
+            temporary.unlink()
+    _log(f"published fresh-session slash command → {link} ({source})")
+    return True, False
+
+
 def main() -> int:
     check = "--check" in sys.argv
     _log("checking for drift (no changes will be made)" if check else "deploying + reconciling")
@@ -284,13 +436,30 @@ def main() -> int:
         _log(f"ERROR: KiroCrew dir not found at {CREW}")
         return 2
     d1 = deploy_script(check)
-    d2 = reconcile_crons(check)
+    dpol = deploy_agent_mcp_policy(check)
+    try:
+        d2 = reconcile_crons(check)
+    except RuntimeError as exc:
+        _log(f"ERROR: {exc}")
+        return 2
+    d3, blocked = reconcile_slash_skill(check)
+    if blocked:
+        print()
+        _log("INCOMPLETE — slash command publication was blocked; no conflicting path was changed")
+        return 2
     if check:
         print()
-        _log("DRIFT DETECTED — re-run without --check to repair" if (d1 or d2)
+        _log("DRIFT DETECTED — re-run without --check to repair" if (d1 or dpol or d2 or d3)
              else "everything in sync ✅")
-        return 1 if (d1 or d2) else 0
-    _log("done ✅  (verify: kirocrew cron list — advance=[script], backlog=[agent])")
+        return 1 if (d1 or dpol or d2 or d3) else 0
+    if dpol:
+        _log("NOTE: new agent MCP policy deployed — run `kirocrew app enable dlc-yolo` "
+             "so the profiles pick up their crew-routing/spawn MCP tools.")
+    _log(
+        "done ✅  (open a fresh native Kiro session for /dlc-yolo skill discovery; "
+        "KiroCrew 0.5.0's dashboard picker is host-static; verify crons with: "
+        "kirocrew cron list)"
+    )
     return 0
 
 

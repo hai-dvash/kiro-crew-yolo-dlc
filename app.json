@@ -1,6 +1,6 @@
 {
   "name": "dlc-yolo",
-  "version": "0.1.0",
+  "version": "2.0.0",
   "displayName": "DLC-YOLO",
   "description": "Automated software development lifecycle — intake issues, spec them, implement, review, and ship PRs with configurable human gates.",
   "author": "haid",
@@ -34,6 +34,7 @@
       "/apps/dlc-yolo/*",
       "/api/file-read",
       "/api/file-write",
+      "/api/ws",
       "/api/chat",
       "/api/chat/*"
     ],
@@ -46,8 +47,20 @@
       "kirocrew-core::ask_question",
       "kirocrew-core::task_run",
       "kirocrew-cron::cron_add",
-      "kirocrew-cron::cron_list"
+      "kirocrew-cron::cron_list",
+      "kirocrew-cron::cron_trigger",
+      "kirocrew-cron::cron_pause",
+      "kirocrew-cron::cron_resume",
+      "kirocrew-cron::cron_remove"
     ]
+  },
+  "dependencies": {
+    "optionalCommands": ["gh"]
+  },
+  "backend": {
+    "entryPoint": "backend/server.py",
+    "port": "auto",
+    "healthCheck": "/health"
   },
   "ui": {
     "entry": "dist/index.mjs",
@@ -76,7 +89,7 @@
       "every": 200,
       "agent": "pipeline-orchestrator",
       "silent": true,
-      "message": "Backlog back-feed. Collect the distinct owned repos from state.json cards' source.repo. For each repo, list open issues labeled dlc-backlog (gh issue list --repo <repo> --label dlc-backlog --state open --json number,title,url). For any such issue that does NOT already have a card (match on source.issue/url), FIRST apply the OWNERSHIP GUARD — gh issue view <n> --repo <repo> --json author; only proceed if author.login is in trusted_authors (card->pipeline->config.trusted_authors, default the gh-authenticated user; empty never means allow-all; fail closed if unverifiable). Only for a guard-passing issue, create a new card at stage 'intake' inheriting config.trust/config.depth, linked to that issue. Only READ issues and CREATE intake cards — never advance or execute here. Persist state."
+      "message": "Backlog back-feed. Read state.pipelines and select only pipelines with a syntactically valid non-empty repo whose backlog_intake is not false; those pipeline repo identities are the only eligible repositories. Do not infer repository eligibility from cards alone. For each eligible repo, list open issues labeled dlc-backlog (gh issue list --repo <repo> --label dlc-backlog --state open --json number,title,url). For any such issue that does NOT already have a card (match on source.issue/url), FIRST apply the OWNERSHIP GUARD — gh issue view <n> --repo <repo> --json author; only proceed if author.login is in trusted_authors (card->pipeline->config.trusted_authors, default the gh-authenticated user; empty never means allow-all; fail closed if unverifiable). Only for a guard-passing issue, create a new card at stage 'intake' inheriting config.trust/config.depth, linked to that issue. Only READ issues and CREATE intake cards — never advance or execute here. Persist state."
     }
   ]
 }

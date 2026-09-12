@@ -34,13 +34,22 @@ Steps are reorderable, renamable, and add/removable in the setup modal. The buil
 spec → design → tasks → implement → review → PR ladder is just the default the wizard
 seeds from.
 
-### Agent setup panel + `✨ Draft with /dlc-yolo`
+### Agent setup panel + UI-native crew routes
 
-Configuring an agent step opens an inline **agent setup panel** in the same modal: reuse
-an existing agent, or set name / role / tools / model. For a genuinely new agent, the
-panel's **✨ Draft with /dlc-yolo** button launches a real chat session (via the SDK chat
-launcher) that designs the agent with you conversationally and writes it back into the
-step.
+Configuring an agent step opens an inline **step-execution panel** in the same modal. Its
+role/prompt is the pipeline-local objective; requested tools and model remain declarations, while
+the capability profile controls the actual session template and an optional crew selects a global
+route. Choosing an installed profile loads that profile's distinct declared tools/model without
+overwriting the step objective. Agent name, objective, requested tools, model, capability, trust,
+depth, crew, and addenda are all edited and saved in this UI—there is no agent-authoring shortcut
+into the command session.
+
+The same **Agent config** catalog opens directly from the compact control row or from Pipeline
+Setup. It shows installed/referenced Kiro agent templates separately from global KiroCrew crew
+records (`name → kiro_agent + workspace + memory store + overrides`). Its authenticated global crew
+route form creates or updates the sanctioned routing fields through KiroCrew's public agent CLI;
+it does not create a parallel app registry. Profile prompts/tools remain source-managed declarations,
+and pipeline-local objectives remain in Pipeline Setup.
 
 ---
 
@@ -107,6 +116,21 @@ can override it. Resolution cascades **card → step → pipeline → global**.
 
 Per-step overrides mean "this step runs autonomous + deep, that gate stays manual."
 
+### Sync mode — webhook fast-path vs polling (per pipeline)
+
+`sync_mode` tunes how eagerly the always-on advance cron does a pipeline's **periodic GitHub
+reconciliation**. It never disables the poll — that is the missed-wake safety net — and a verified
+webhook receipt always reconciles immediately regardless of mode.
+
+| Level | Behavior |
+|-------|----------|
+| `poll` *(default)* | Reconcile the pipeline's GitHub stage every 120s cycle. Correct when no webhook is configured. |
+| `webhook` | The verified webhook wake is the fast path; the periodic poll for this pipeline is throttled to `webhook_reconcile_interval_secs` (default 900). **Auto-safety:** falls back to `poll` when the app-wide receiver is not actually enabled, so a pipeline with no working webhook is never starved. |
+
+Resolution cascades card → pipeline → global, like the other axes. For a full stop (webhook-only, no
+polling at all) pause the crons from the **Webhook · app-wide** tab — the *hard* lever `sync_mode`'s
+*soft* throttle complements.
+
 ### Adaptive model and pass controls
 
 Before dispatch, the runtime persists an immutable execution envelope. A card/step/role/pipeline/
@@ -116,8 +140,178 @@ envelope allocates bounded research and crew/addendum passes and target IDs; inf
 work blocks before dispatch, and terminal results cannot record more passes than allocated.
 Requested and observed model/effort remain separate provenance. KiroCrew's cron API currently has
 no per-run reasoning-effort field, so effort is seeded as a request and is never claimed as applied
-unless live session metadata reports it. Topology, live parallel scheduling, and event authority are
-not part of this control slice.
+unless live session metadata reports it. The app-owned bounded DAG scheduler now controls card-step
+ready sets, phase-subgraph contracts, layered permits, write-set/worktree mutexes, fan-out/fan-in,
+and cooperative cancellation. It never claims host-native in-flight turn cancellation or
+unobserved timing. Authenticated, privacy-minimized GitHub webhook facts enter this same bounded
+event vocabulary through the app-owned loopback receiver described below. Priority 11 separately
+makes only the privacy-minimized operational read projection ledger-replay authoritative after exact
+parity; rich/control state remains in `state.json`.
+
+### Local terminal event bridge
+
+A terminal step writes `done|blocked|error` and a compact schema-v1 `card.event_outbox` marker in
+the same `state.json` update. The marker contains identifiers/status only—never prompt, result, or
+artifact prose. After persistence, normal and replacement step sessions best-effort trigger the
+exact app-owned `dlc-yolo-advance` job ID reconciled by `scripts/setup-crons.py`; a failed or missing
+trigger leaves the marker intact for the regular 120-second poll.
+
+The zero-token advance script canonicalizes each marker to the same deterministic CloudEvent ID used
+by the append-only audit ledger, rejects malformed markers, and dispatches completed/blocked/errored
+facts through a priority-ordered in-process bus with event-ID deduplication and hard cascade/dispatch
+bounds. Stage-change follow-ons can activate a gate or successor agent in the same dispatch cycle;
+`MAX_MOVES` and `MAX_ESCALATIONS` still bound work. Consumed receipts retain bounded history, while
+pending records are never pruned. `state.json` remains authoritative and polling remains the repair
+path. GitHub webhook receipts use the same bounded bus through the separate ingress path below;
+neither producer path grants projection authority. The separate replay reconciler activates the
+minimized read model only after exact snapshot parity.
+
+### Secure GitHub webhook ingress
+
+Priority 10 adds an app-owned `aiohttp` receiver that is **disabled by default** and binds
+unconditionally to `127.0.0.1`. It exposes exactly `POST /github`. Separately, the app's own
+backend is a **spawned `entryPoint` subprocess** (`backend/server.py`, declared by
+`backend.entryPoint` in `app.json`), which the gateway reverse-proxies: the dashboard calls
+`/apps/dlc-yolo/api/webhook/status` and `GET|POST /apps/dlc-yolo/api/webhook/config`, which the
+proxy forwards to the backend as `/api/webhook/*`. Every forwarded request is authenticated with the
+gateway's per-request `X-KiroCrew-Proxy` HMAC. Those control routes are not GitHub ingress and
+do not add a public-auth bypass to KiroCrew or expose the dashboard, gateway, `/api/ws`, terminal,
+or general API.
+
+Open **Pipeline Setup/Edit → Webhook · app-wide** in the DLC-YOLO UI to configure enablement,
+loopback port, repository allowlist, optional absolute inbox path, and the GitHub secret. The tab is
+inside pipeline configuration for discoverability, but its receiver settings are shared by every
+pipeline. UI-managed settings apply immediately.
+The secret is write-only: it is never returned to the browser or placed in `state.json`, `app.json`,
+command arguments, logs, status responses, or projections. It lives in an exact-schema, bounded,
+no-symlink, atomic/fsynced mode-`0600` app-owned `webhook-config.json` beside the selected state
+authority. The UI can retain or rotate it, and can clear it only while the receiver is disabled.
+
+Gateway process environment remains the operator override:
+
+```bash
+export DLC_YOLO_GITHUB_WEBHOOK_PORT=8765       # 1024..65535
+export DLC_YOLO_GITHUB_WEBHOOK_REPOS=owner/repo[,owner/another-repo]
+read -rsp 'GitHub webhook secret: ' DLC_YOLO_GITHUB_WEBHOOK_SECRET; echo
+export DLC_YOLO_GITHUB_WEBHOOK_SECRET
+# Optional; when set, this must be absolute. Otherwise it lives beside DLC_YOLO_STATE/app data.
+export DLC_YOLO_WEBHOOK_INBOX=/absolute/path/to/github-webhook-inbox.json
+```
+
+If any of those four variables is present, the complete environment configuration wins atomically;
+the UI shows the effective values and status read-only, never mixes file and environment authority,
+and requires a gateway restart for environment changes. For either source, port, secret, a
+syntactically valid non-empty repository allowlist, app enablement, and an absolute explicit inbox
+path (when supplied) must pass before the receiver can operate.
+
+In GitHub, create a repository webhook whose payload URL is the public relay/tunnel URL ending in
+`/github`, content type is `application/json`, secret is the same process-injected secret, and events
+are limited to **Issues** plus **Labels**. Signed `ping` is accepted. Issue actions are exactly
+`opened`, `reopened`, `labeled`, `unlabeled`, and `closed`; repository-label actions are exactly
+`created`, `edited`, and `deleted`. Configure the tunnel/relay to forward **only** this one route to
+`127.0.0.1:<port>/github`. Never publish the loopback listener directly or tunnel the dashboard or
+general KiroCrew API.
+
+Admission streams at most 256 KiB, applies a bounded process-local rate limit, and verifies
+`X-Hub-Signature-256` as HMAC-SHA256 over the untouched request body with constant-time comparison
+before JSON decoding. It then enforces exact delivery/event/action/repository fields, reduces the
+payload to delivery/event/action/repo/issue/label/time/digest metadata, seals that normalized record,
+and appends it to a locked `0600`, fsync-and-atomic, bounded durable inbox. Raw payloads, issue prose,
+authors, and signatures are never persisted. `X-GitHub-Delivery` deduplication is durable and
+bounded; a full or unavailable inbox returns retriable `503` without evicting accepted work.
+
+The advance cron re-verifies each sealed receipt and uses `gh issue view` (or `gh repo view` for
+repository-label events) before any card mutation. Only the refetched repository identity, issue
+number/state/title/URL/labels/author can influence state. Exactly one pipeline must own that
+case-insensitive `owner/repo`, and the refetched author must pass the card → pipeline → global →
+authenticated-user trusted-author rule. Unknown, missing, or ambiguous stage labels hold/reject
+rather than guessing. External stage/close requests are queued; active producers first receive
+`writes_allowed:false` plus cooperative cancellation, and their permits/worktrees remain held until
+terminal host observation. Shared `MAX_MOVES=3` and `MAX_ESCALATIONS=2` remain unchanged.
+
+After state is durably saved, the inbox receipt is acknowledged; a crash or acknowledgement failure
+therefore replays idempotently. Accepted ingress best-effort triggers the deterministic advance job,
+while its 120-second poll remains reconciliation for a missed wake. `state.json` remains authoritative
+for rich/control state, and ordinary ledger observations remain payload-free. The projection snapshot
+and replay path below is separate from webhook/event authority.
+
+### Cloudflare tunnel + cron control (app-managed, optional)
+
+The receiver binds `127.0.0.1` only, so GitHub needs a public relay. The **Webhook · app-wide** tab
+can **start/stop a Cloudflare quick tunnel** for you (`cloudflared tunnel --url
+http://127.0.0.1:<port>`) and show the ready-to-paste `…/github` payload URL — or it shows the exact
+command so you can run it yourself. `cloudflared` is never auto-installed (the tab shows the install
+command when it is absent), the tunnel is a fixed-argv `exec` (no shell), and it **refuses to expose
+the port unless the receiver is enabled, secret-configured, and actually listening** on it — so a
+public URL can only ever front the guarded `/github` route, whose deliveries are all HMAC-verified.
+
+The same tab exposes **Automation crons** — pause/resume DLC-YOLO's three background jobs
+(advance · spawns · backlog-intake) from the UI, matched by name and acted on by their real ids via
+the sanctioned `kirocrew cron` CLI. Pausing is the *hard* lever for a webhook-only or maintenance
+setup (the receiver keeps accepting deliveries while paused; a verified delivery wakes advance again
+on resume). It complements the per-pipeline `sync_mode` *soft* throttle described under Operation
+modes. Both the tunnel and cron routes are served by the spawned `entryPoint` backend and gated by
+the gateway's per-request `X-KiroCrew-Proxy` HMAC.
+
+### Replay-parity-gated operational projection
+
+Priority 11 makes the append-only ledger authoritative for **one bounded read model only**. After each
+successful control-state save, the advance runtime independently derives a deterministic,
+privacy-minimized workspace projection from `state.json`, appends a complete
+`io.dlcyolo.projection.snapshot` event after the ordinary observations, durably fsyncs the ledger,
+then re-reads and strictly replays it. Authority is activated or refreshed only when the replayed
+object and SHA-256 digest exactly match the independently derived projection.
+
+For each workspace, the ledger directory contains:
+
+- `projections/runs.json` — the last verified ledger-replay authority for minimized pipeline, card,
+  session, gate, scheduler, worktree-lease, transition, outbox, and run status identifiers/facts;
+- `projections/status.json` — the current parity check, including whether authority is active,
+  verified, or blocked.
+
+These files live below
+`<state-base>/workspaces/<workspace>/data/ledger/`; both are atomic `0600` writes. A malformed,
+oversized, symlinked, conflicting, digest-mismatched, privacy-invalid, or parity-mismatched ledger
+fails closed: `status.json` reports blocked authority while an existing `runs.json` remains untouched
+as the last known-good projection. Projection append/replay failure is observational only and cannot
+move cards, answer gates, release permits/worktrees, cancel sessions, acknowledge commands, or alter
+pipeline control.
+
+`state.json` therefore remains authoritative for full pipelines/cards, prose, prompts, artifacts,
+decisions/interjections, gates and commands, active-session mutation, scheduling, webhook transport,
+and filesystem paths. The replay-owned model contains no secrets, raw webhook payloads/signatures,
+free-form prose, absolute paths, working directories, or artifact contents; artifact references are
+hashed. GitHub remains the source of truth for issue stage labels. This is a read-model migration,
+not reconstruction of all application state.
+
+### Bounded topology/DAG scheduler
+
+The orchestrator is the sole topology selector. Step agents may persist a proposal, but only a
+resolved orchestrator decision writes schema-v1 `card.topology` with one of `keep-unified`,
+`fan-out`, `fan-in`, `unify`, `back-step`, or `park`. Authorized fan-out declares required versus
+optional children, one integration owner, and a real integration step. Child cards retain distinct
+branches, worktrees, histories, artifacts, commits, decisions, and validation; unification links
+that provenance instead of flattening or deleting it.
+
+On each terminal event or reconciliation poll, the zero-token runtime builds the card-step ready set
+from stable dependencies and validates each seeded phase subgraph. Queue order is explicit priority,
+then oldest-ready, then remaining critical-path length. Dispatch is bounded by the existing per-cycle
+caps plus layered global, pipeline, class, model/provider, and network/research semaphores. Exclusive,
+same-branch, worktree, and overlapping write-set locks prevent unsafe concurrency; distinct card
+worktrees may run together. Cycles, missing required dependencies, infeasible envelopes, and fan-out
+budget breaches fail closed before dispatch. Fan-in starts only when every required child/pass is
+terminal; failed optional work needs an omission rationale.
+
+Cancellation is cooperative and truthful: park/back-step/cancel sets `writes_allowed:false` and
+`cancel_requested_at`, then best-effort pauses the cron-backed session. Producers re-read that marker
+before each tool call or mutable write. Because the host exposes no confirmed in-flight model-turn
+kill, the runtime retains the permit/worktree until terminal observation rather than claiming an
+instant stop. `card.execution_schedule` records only observed ready/queue/permit/session/terminal/
+event timestamps and derives only durations supported by those timestamps; missing first-output,
+model, tool, or research spans remain absent. `state.json` remains authoritative for control, while
+only the separately verified minimized operational projection is replay-owned. Verified GitHub events
+enter through the separate loopback receiver and the same bounded event vocabulary; they do not
+bypass projection parity or control-state authority.
 
 ### Backlog — parked ideas that can't be spec'd now
 
@@ -146,9 +340,17 @@ needs no history.)*
 ## GitHub as the source of truth
 
 A card's stage is a `dlc:<step>` **label** on its GitHub issue. Advancing/rejecting moves
-the label; external tools (or a human relabeling on GitHub) can move a card. If `gh`/the
-repo is unavailable, a pipeline runs **local-only** and **re-syncs to GitHub** when access
-returns. `state.json` holds the rich data; GitHub holds the stage.
+the label; external tools (or a human relabeling on GitHub) can move a card. The secure receiver
+wakes reconciliation immediately for verified deliveries, then the runtime authoritatively refetches
+with `gh` before changing a card. The regular poll remains the repair path for missed or failed wakes.
+If `gh`/the repo is unavailable, a pipeline runs **local-only**. On later reconciliation, an
+explicitly `sot: local` card that is already linked to an exact issue is re-synced deterministically:
+the advance runtime authoritatively refetches the owning repository and issue, requires the refetched
+author to pass the normal trusted-author rule, converges exactly one `dlc:<current-step>` label, then
+post-refetches before persisting `sot: github`. Unavailable, ambiguous, unauthorized, closed/nonterminal-conflicting, or
+post-verification-failed paths remain local for a later poll. An unlinked local card is never guessed
+or auto-filed by the zero-token runtime; issue creation stays with the coordinator-capability
+orchestrator. `state.json` holds the rich data; GitHub holds the stage.
 
 ---
 
@@ -160,8 +362,8 @@ returns. `state.json` holds the rich data; GitHub holds the stage.
    label it, and record a card the local pipeline triggers off.
 2. **Maintain an existing pipeline** — read a card's stage from its label and drive the
    next step (answer a gate, re-trigger a phase, park, back-step).
-3. **Author an agent for a custom step** — design a new step agent conversationally and
-   write it into the pipeline (this is where the panel's Draft button hands off).
+3. **Author an agent for a custom step** — still available when explicitly requested in the
+   command session; ordinary step-agent configuration stays in Pipeline Setup.
 
 ---
 
@@ -199,16 +401,25 @@ pause*; the lease governs *where mutable work may occur*.
 
 ## Architecture
 
-No backend process. The UI reads/writes pipeline state through the gateway's file API —
+The UI still reads/writes pipeline state through the gateway's file API —
 `GET /api/file-read?path=…` and `POST /api/file-write` — against the durable-first state file
 (`$DLC_YOLO_STATE` → `~/.dlc-yolo/state.json` → `/tmp/dlc-yolo/state.json` fallback), using the
-SDK's `api.get()` / `api.post()`. Three crons drive/observe agents (advance · spawns ·
-backlog-intake); specialist work goes through `spawn_run` / `task_run`.
+SDK's `api.get()` / `api.post()`. An explicit `DLC_YOLO_STATE` must be absolute and must not traverse
+a symlink. After bootstrap, the runtime publishes its resolved absolute authority as bounded JSON in
+an atomic, durable `0600` `~/.dlc-yolo/.statepath`; the UI validates and probes that target first.
+A missing, malformed, relative, or stale pointer leaves the established durable→scratch fallback
+unchanged, preventing UI/cron split-brain without granting the file API new state authority. The app
+backend owns receiver lifecycle plus authenticated status/config control routes; its write-only
+secret storage is separate from `state.json`. Direct GitHub traffic terminates on the separate
+loopback-only `/github` listener. Three crons drive/observe agents
+(advance · spawns · backlog-intake); specialist work goes through `spawn_run` / `task_run`.
 
-Native KiroCrew APIs used: `ask_question`, `spawn_run`, `task_run`, `send_message`,
-scheduled crons, `/api/file-read` + `/api/file-write`, the SDK chat launcher
-(`useChatLauncher`), and `gh` for issues/labels/backlog. The Pipeline Setup modal reads
-**Issue Radar**'s connected repos (read-only) as pipeline candidates.
+Native KiroCrew APIs used: `ask_question`, `spawn_run`, `task_run`, `send_message`, scheduled crons
+plus `cron_trigger` for the exact reconciled advance job and `cron_pause`/`cron_remove` for
+cooperative cancellation and cleanup, `/api/file-read` + `/api/file-write`, the SDK chat launcher
+(`useChatLauncher`), and `gh` for authoritative issues/labels/repositories/backlog refetches. The
+receiver uses app-hosted `aiohttp`; it does not alter KiroCrew authentication. The Pipeline Setup
+modal reads **Issue Radar**'s connected repos (read-only) as pipeline candidates.
 
 ### State shape
 
@@ -239,6 +450,24 @@ scheduled crons, `/api/file-read` + `/api/file-write`, the SDK chat launcher
         "branch": "dlc/<pipeline>/<card>/<slug>", "base_commit": "<sha>",
         "owner_card": "<card-id>", "locked": true, "status": "active"
       },
+      "topology": {
+        "schema_version": 1, "action": "fan-in", "authority": "orchestrator",
+        "status": "integration-ready", "integration_owner": "<card-id>",
+        "integration_step": "review", "children": [{"card_id": "…", "required": true}]
+      },
+      "execution_dag": {
+        "schema_version": 1,
+        "nodes": [{"id": "sched:…", "kind": "card-step", "depends_on": ["sched:…"]}]
+      },
+      "execution_schedule": {
+        "schema_version": 1, "current_node_id": "sched:…",
+        "nodes": {"sched:…": {"status": "running", "permit_id": "permit-…"}}
+      },
+      "event_outbox": [
+        { "schema_version": 1, "id": "evt-…", "type": "io.dlcyolo.step.completed",
+          "subject": "design", "run_id": "run-…", "terminal_status": "completed",
+          "delivery_status": "pending|consumed", "created_at": "<RFC3339>" }
+      ],
       "effort": { "total": 8, "scope": { "requirements": 8, "design": 9 } },
       "backstep_history": [ … ], "parked": [ … ],
       "artifacts": { … }, "gate_history": [ … ], "trigger_history": [ … ], "history": [ … ]
@@ -251,7 +480,7 @@ scheduled crons, `/api/file-read` + `/api/file-write`, the SDK chat launcher
 
 | Cron | Interval | Role |
 |------|----------|------|
-| `dlc-yolo-advance` | 120s | Walk each pipeline's own steps, honor per-step trust/depth/**capability**, provision/reconcile/release exclusive card worktree leases before mutable dispatch, escalate each agent step as a **persistent capability-profiled step-agent** (`keep=true`, records `step_sessions`), move `dlc:<step>` labels, deterministically flip a parent's `child_tickets` to `consumed` + retire, notify (deduped) on new waiting gates |
+| `dlc-yolo-advance` | 120s + terminal wake | Recover/canonicalize `card.event_outbox`, dispatch terminal/stage facts through the bounded local bus, compute topology-derived ready sets, enforce layered scheduler permits/mutexes/fan-in/cancellation, retain polling reconciliation, walk each pipeline's own steps, honor per-step trust/depth/**capability**, provision/reconcile/release exclusive card worktree leases, escalate agent steps as persistent capability-profiled cron-backed sessions, move `dlc:<step>` labels, deterministically consume/retire child cards, and notify (deduped) on new waiting gates |
 | `dlc-yolo-spawns` | 30s | Zero-token observability: poll `spawn_list`, write `live_spawns.json` so the UI subagents pane shows dead-vs-in-flight (read-only, never drives) |
 | `dlc-yolo-backlog-intake` | 200s | Back-feed open `dlc-backlog` issues as new intake cards (read + create only) |
 
@@ -261,7 +490,11 @@ scheduled crons, `/api/file-read` + `/api/file-write`, the SDK chat launcher
 
 - **Pipeline graph** — glowing, count-correlated nodes (circles = agent steps, diamonds = gates); click a node to scroll to its column
 - **Workspace rail** — multi-select repos to view several pipelines combined, plus **+ New Pipeline**
-- **Pipeline Setup modal** — pick a repo (Issue Radar / KiroCrew workspace / manual), set its local checkout path for deterministic card worktrees, configure trust/depth/backlog-intake, and edit custom steps with an inline agent setup panel
+- **Pipeline Setup modal** — the same config-first surface as `/dlc-yolo`: keep repository identity, workspace partition, and verified checkout distinct; configure trust/depth/budget/capability, ownership allowlist, result/log/backlog/self-enablement extras, custom steps with the inline agent setup panel, and the clearly app-wide webhook receiver from its own tab
+- **Command entry controls** — one compact AI-marked button opens the bare `/dlc-yolo` command session without preselecting an action; pipeline setup/edit and agent configuration remain compact UI-native controls directly below the card stats, while webhook configuration lives inside Pipeline Setup/Edit rather than as a separate launcher
+- **Agent config catalog** — switch among distinct installed/referenced agent-template declarations and global crew routes; inspect each crew's `kiro_agent`, workspace, memory store, model/source metadata, and linked authority profile; create/update the sanctioned global routing fields through the authenticated UI form
+- **Truthful card/status projection** — blocked/error/gate/observed-running/unconfirmed-pending/queued/ready/terminal are distinct; cancellation remains in progress until terminal observation, and cards expose recorded SoT/lifecycle/capability without inventing missing facts
+- **Webhook settings** — the Pipeline Setup/Edit **Webhook · app-wide** tab provides authenticated enable/disable, port, repository allowlist, inbox override, write-only secret rotation, effective-source/status, and durable queue counters
 - **Views** — Pipeline (by step) · Workspace (by repo) · Crew (by agent) · Status (blocked/in-flight/done) · Backlog (parked ideas)
 - **Mode pills** — click a card's trust/depth to override; ⚡ effort and ↩ back-step badges; theme-aware (adapts to the active dashboard theme)
 
@@ -275,8 +508,9 @@ scheduled crons, `/api/file-read` + `/api/file-write`, the SDK chat launcher
 kirocrew app install /path/to/kiro-crew-yolo-dlc
 kirocrew app enable dlc-yolo
 
-# 2. Deploy both zero-token cron scripts, reconcile DLC-YOLO's three cron jobs, and
-#    publish /dlc-yolo into Kiro's documented global slash-skill directory.
+# 2. Deploy both zero-token cron scripts plus their webhook and projection helpers, reconcile DLC-YOLO's
+#    three cron jobs (including the deterministic advance-job ID used by terminal producers),
+#    and publish /dlc-yolo into Kiro's documented global slash-skill directory.
 #    The script is idempotent, never overwrites a user-owned skill path or foreign
 #    symlink, and never touches another app's jobs. Use --check to preview drift.
 python3 scripts/setup-crons.py
@@ -298,8 +532,9 @@ python3 scripts/setup-crons.py
 >    an existing install, `app enable` does **not** reliably re-scan them. KiroCrew also
 >    registers app skills below `~/.kiro/crew/skills`, while Kiro's fresh-session slash
 >    picker scans `~/.kiro/skills`. After syncing, re-run the idempotent reconciler: it
->    deploys both scripts, upserts DLC-YOLO's three jobs, and publishes only the
->    `/dlc-yolo` command link, leaving other apps' jobs and user-owned skills untouched:
+>    deploys both cron scripts plus the webhook and projection helpers, upserts DLC-YOLO's three jobs, and
+>    publishes only the `/dlc-yolo` command link, leaving other apps' jobs and user-owned
+>    skills untouched:
 >
 >    ```bash
 >    python3 scripts/setup-crons.py            # deploy + reconcile + publish
@@ -339,6 +574,12 @@ ladder (the RPS-game fixtures live there), keeping this repo's own history clean
 ```
 kiro-crew-yolo-dlc/
 ├── app.json                          ← manifest (agents, skills, crons, permissions)
+├── backend/                          ← spawned entryPoint backend (gateway proxies /apps/dlc-yolo/api/*)
+│   ├── server.py                     ← aiohttp entryPoint: proxy-HMAC auth, mounts /api/* routes
+│   ├── routes.py                     ← webhook control handlers + loopback receiver lifecycle
+│   ├── tunnel.py                     ← cloudflared quick-tunnel supervisor (start/stop/status)
+│   ├── crons.py                      ← pause/resume the app's own automation crons
+│   └── orchestrator.py               ← orchestrator-session trigger writer (first-class-sessions §4)
 ├── agents/
 │   ├── pipeline-orchestrator.json    ← steps, triggers, gates, back-step, GH labels, backlog, self-enablement
 │   ├── intent-agent.json             ← front-door intent resolver (self-enabling pipelines)
@@ -353,6 +594,8 @@ kiro-crew-yolo-dlc/
 │   └── conversation-digest/SKILL.md  ← distill a pipeline log into a review-sized digest
 ├── crons/
 │   ├── dlc_yolo_advance.py           ← zero-token deterministic advance loop (deployed to ~/.kiro/crew/crons/)
+│   ├── dlc_yolo_webhook.py           ← HMAC admission + sealed bounded durable inbox shared by backend/cron
+│   ├── dlc_yolo_projection.py        ← strict snapshot replay, parity verification, and read-model authority
 │   └── dlc_yolo_spawns.py            ← zero-token live-spawn snapshot for the UI subagents pane
 ├── scripts/
 │   └── setup-crons.py                ← idempotent post-sync: deploy crons, reconcile jobs, publish /dlc-yolo globally

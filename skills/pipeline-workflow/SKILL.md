@@ -157,6 +157,14 @@ with zero cards, and holds the per-repo default modes that its cards inherit.
   "depth": "standard",
   "backlog_intake": true,            // opt in to the dlc-yolo-backlog-intake cron for this repo
   "sot": "github",                   // source of truth for stage: "github" | "local"
+  "sync_mode": "poll",               // "poll" (default): the advance cron reconciles this pipeline's
+                                     //   GitHub stage every 120s cycle. "webhook": the verified webhook
+                                     //   wake is the fast path, and the PERIODIC poll for this pipeline is
+                                     //   throttled to webhook_reconcile_interval_secs (default 900) — the
+                                     //   poll is NEVER disabled (it is the missed-wake safety net) and a
+                                     //   verified webhook receipt always reconciles immediately. Auto-safety:
+                                     //   webhook mode falls back to poll when the app-wide receiver is not
+                                     //   actually enabled. Resolution: card -> pipeline -> config -> "poll".
   "results_in_repo": false,          // false (default): phase results (requirements/design/…) live ONLY in
                                      //   the workspace-partitioned .dlc-yolo results area
                                      //   (<base>/workspaces/<ws>/data/results/<card-id>/); true: ALSO mirror
@@ -292,9 +300,87 @@ that don't want it can delete the step in the setup modal.
   `dlc:*`, add the new one) via `gh`, then reflects it into `state.json`. External tools
   (or a human relabeling on GitHub) can move a card by changing its label.
 - **`sot: "local"`** — used when `gh`/the repo is unavailable. The pipeline runs entirely
-  from `state.json`. When `gh` access returns, the orchestrator **re-syncs to GitHub as
-  SoT**: it files/updates the issue, applies the current `dlc:<step>` label, and flips the
-  card to `sot: "github"`.
+  from `state.json`. On every reconciliation poll, the zero-token runtime considers only cards
+  explicitly marked local and already linked to an exact positive issue number. It requires one
+  exact owning pipeline repository, authoritatively refetches the repository + issue, applies the
+  normal card → pipeline → global → authenticated-user trusted-author rule, converges exactly one
+  `dlc:<current-step>` label, and post-refetches before persisting `sot: "github"`. Retries are
+  idempotent and bounded by the existing per-cycle move cap. Unavailable, ambiguous, unauthorized,
+  malformed, closed/nonterminal-conflicting, or post-verification-failed cards stay local without
+  state churn. The runtime never
+  guesses or creates an issue; an unlinked card remains local until the coordinator-capability
+  orchestrator files and records its issue through the normal guarded agent path.
+
+### Secure GitHub ingress and reconciliation
+
+The app-owned receiver is disabled by default. Its preferred operator surface is **Pipeline
+Setup/Edit → Webhook · app-wide** in the DLC-YOLO UI: authenticated `GET|POST
+/apps/dlc-yolo/api/webhook/config` (proxied to the spawned backend as `/api/webhook/config`)
+controls enablement, loopback port, exact repository allowlist,
+optional absolute inbox path, and a write-only secret. The placement keeps configuration UI-native;
+the settings remain shared by every pipeline rather than becoming pipeline-local state.
+UI-managed values are stored beside the selected state authority in bounded exact-schema
+`webhook-config.json`, using no-follow reads and an atomic/fsynced mode-`0600` write; the secret is
+never returned or placed in `state.json`. Saving hot-reloads only the app-owned listener.
+
+Gateway process variables remain an all-or-nothing operator override:
+`DLC_YOLO_GITHUB_WEBHOOK_PORT` (1024..65535),
+`DLC_YOLO_GITHUB_WEBHOOK_SECRET`, a non-empty syntactically valid
+`DLC_YOLO_GITHUB_WEBHOOK_REPOS` allowlist, and optional absolute `DLC_YOLO_WEBHOOK_INBOX`.
+If any is present, environment authority wins without mixing sources; the UI becomes read-only and
+environment changes require a gateway restart. The receiver always binds `127.0.0.1`, exposes only
+`POST /github`, and is separate from the authenticated gateway status/config control routes. A
+relay/tunnel may expose only the one `/github` route; never expose the dashboard, gateway, websocket,
+terminal, or general API.
+
+Admission reads at most 256 KiB, rate-limits, and verifies GitHub's
+`X-Hub-Signature-256` HMAC-SHA256 over the untouched body with constant-time comparison before JSON
+parsing. It accepts signed `ping`; issue actions `opened|reopened|labeled|unlabeled|closed`; and
+repository-label actions `created|edited|deleted`, all for the exact repository allowlist. It
+persists no raw body, issue prose, sender, author, or signature—only bounded delivery/event/action/
+repo/issue/label/time/digest metadata sealed with a domain-separated receipt HMAC in a locked
+`0600`, fsync-and-atomic inbox. `X-GitHub-Delivery` dedupe is durable and bounded; a full or
+unavailable inbox returns retriable 503 and never evicts pending work.
+
+The advance runtime re-verifies the receipt and authoritatively runs `gh issue view` (or `gh repo
+view` for repository-label events) before mutation. Payload identity, author, state, labels, title,
+and URL are never authoritative. Exactly one pipeline must own the case-insensitive repository and
+the refetched author must pass card → pipeline → global → authenticated-user `trusted_authors`.
+Missing/unknown/ambiguous stage labels hold or reject; `dlc-backlog` does not create/move a normal
+card. External stage/close requests become `card.github_transition`; an active producer first gets
+`writes_allowed:false` and cooperative cancellation while its permit/worktree stays held until a
+terminal host observation. Shared `MAX_MOVES=3` and `MAX_ESCALATIONS=2` still bound the cycle.
+
+The runtime saves authoritative `state.json` before acknowledging the inbox, so replay is
+idempotent after a crash or failed acknowledgement. Accepted ingress best-effort wakes only the
+exact deterministic advance job; the 120-second poll repairs a missed wake. Ordinary event records
+remain payload-free; ingress and terminal producers do not themselves grant projection authority.
+
+### Replay-parity-gated operational read model
+
+After a successful `state.json` control-state save, `dlc-yolo-advance` independently derives one
+complete deterministic privacy-minimized projection per workspace, appends it as
+`io.dlcyolo.projection.snapshot` after ordinary observations, fsyncs the ledger, strictly replays the
+ledger, and compares both the reconstructed object and SHA-256 digest with the state-derived object.
+Only exact parity may activate or refresh ledger-replay authority.
+
+The authority is deliberately narrow:
+
+- `<state-base>/workspaces/<workspace>/data/ledger/projections/runs.json` is the last verified
+  minimized operational read model;
+- sibling `status.json` reports the current verified or blocked parity check;
+- `state.json` remains authoritative for rich pipelines/cards, prose, prompts, artifacts, decisions,
+  interjections, gate/command/session mutation, scheduler control, webhook transport, and paths;
+- GitHub remains authoritative for issue stage labels.
+
+Projection data may contain bounded operational IDs, statuses, timestamps, routing/capability facts,
+gate revisions, session/permit/lease facts, and hashed artifact references. It must not contain
+secrets, signatures, raw payloads, free-form prose, absolute/working paths, or artifact contents.
+Malformed, conflicting, oversized, symlinked, digest-invalid, privacy-invalid, or parity-mismatched
+ledgers fail closed. Failure writes blocked status when possible, preserves the prior `runs.json` as
+last known-good, and never moves cards, mutates gates/commands/sessions, releases permits/worktrees,
+or otherwise affects pipeline control. This is read-model authority, not replay of all application
+state.
 
 ### Step labels on GitHub
 
@@ -319,7 +405,8 @@ invoke it asks whether to:
 1. **Start a new pipeline conversation** — spec a feature/idea freely with the user, then
    **file it to GitHub as an issue** on the target pipeline's repo (`gh issue create`),
    apply the first `dlc:<step>` label, and record a card in `state.json` linked to that
-   issue (`sot: github`). The local advance cron then triggers off the labeled issue.
+   issue (`sot: github`). A verified webhook wakes the local advance cron immediately when ingress
+   is configured; its regular poll remains the fallback.
 2. **Maintain an existing pipeline** — pick an existing pipeline/card, review where it is
    (read its issue's `dlc:*` label), and drive the next step: answer a gate, re-spec,
    re-trigger a phase, or park/back-step.
@@ -363,34 +450,76 @@ same orchestrator runs; each agent (**intent**, spec, design, impl, review) runs
 The **Intent Agent** is the only genuinely new actor; everything else is orchestrator behavior
 plus the existing agents running enhanced-or-simplified.
 
+## Topology and bounded DAG scheduling
+
+Only the orchestrator selects topology. A step agent may write `topology_proposal`, but a live
+selection is schema-v1 `card.topology` with `authority: orchestrator|resolved-decision|autonomous-policy`
+and one action: `keep-unified`, `fan-out`, `fan-in`, `unify`, `back-step`, or `park`. Fan-out must
+name required/optional children, one integration owner, and a real non-gate integration step before
+child materialization. It never shares a branch/worktree or deletes child provenance. Optional failed
+work may be omitted only with a rationale; every required child/pass must be terminal before fan-in.
+
+The deterministic runtime validates stable `card.execution_dag` dependencies and the current
+step's `scheduler.phase_dag`, rejects cycles/unknown required nodes, and computes the card-step ready
+set on every local terminal event or poll. Queue order is lower explicit priority first, then
+oldest `ready_at`, then longer remaining critical path. Existing `MAX_ESCALATIONS`/`MAX_MOVES` remain
+hard per-cycle caps; configured global, pipeline, concurrency-class, model/provider, and
+network/research limits may narrow dispatch further. `exclusive`, same-branch, worktree, and
+overlapping `write_set` mutexes are acquired before launch. Distinct card worktrees may run in
+parallel; a shared branch/path never may.
+
+Each producer receives only its pre-authorized phase DAG. It starts a pass only after required
+predecessors are terminal, stays within `max_parallel_runs`, and records observed node/run/artifact
+IDs and timestamps under `card.pass_schedule[step]`. Missing timing stays missing. On park,
+back-step, cancel, or supersession the runtime writes `writes_allowed:false` and
+`cancel_requested_at` and best-effort pauses the cron-backed session. Producers re-read that marker
+before each tool call/write. The host does not expose a confirmed in-flight model-turn kill, so
+permits/worktrees remain held until terminal observation; never claim instant cancellation.
+`state.json` remains authoritative for scheduler/control mutation. Only the separately parity-verified
+privacy-minimized operational projection is ledger-replay authoritative. Verified GitHub receipts
+enter the same bounded event vocabulary through the separate loopback receiver; neither event source
+bypasses replay parity or control-state authority.
+
 ## Cron Behavior
 
 DLC-YOLO uses a **two-tier** model, deliberately splitting deterministic bookkeeping from
 agent reasoning:
 
-- **`dlc-yolo-advance` (every 120s) — a zero-token SCRIPT cron.** Moving a card between
-  steps is pure bookkeeping (read `state.json` → next step in the pipeline's `steps[]` →
-  move the `dlc:<step>` label → write state), so it is NOT an LLM turn. The script
-  (`~/.kiro/crew/crons/dlc_yolo_advance.py:advance`):
-  1. advances any card whose current agent step is marked done (`step_status[step]=="done"`),
-  2. auto-approves gate steps only under `trust: autonomous` (else leaves them waiting),
-  3. escalates ON DEMAND — when a card lands on an agent step not yet started, it fires a
-     single `spawn_run` for the orchestrator to run THAT step, then moves on,
-  4. stays SILENT on empty cycles, and notifies only on a real signal (a gate awaiting a
-     human).
-- **Agent tier (on demand only).** The real reasoning lives in the step agents
-  (spec/design/impl/review), spawned by the escalation above or by the `/dlc-yolo` command
-  — never as a standing loop. `dlc-yolo-backlog-intake` (every 900s) likewise only reads
-  `dlc-backlog` issues and creates intake cards.
+- **`dlc-yolo-advance` (every 120s) — a zero-token SCRIPT cron and local event
+  dispatcher.** `state.json` remains authoritative. On every wake the script first recovers/
+  canonicalizes compact terminal records in `card.event_outbox`, commits any missing pending
+  marker, then dispatches `step.completed|blocked|errored` through an explicit priority-ordered
+  in-process bus. Handlers reuse the same deterministic pass runner that owns gates, movement,
+  leases, budgets, cleanup, and notifications. Stage-change follow-ons may dispatch a successor
+  in the same bounded cycle; dispatch count, cascade depth, label moves, and escalations all retain
+  hard caps. Before launch it reconciles authorized topology and cancellation, computes dependency-
+  DAG ready sets, enforces layered permits and branch/worktree/write-set mutexes, and holds fan-in
+  until every required child/pass is terminal. It also consumes verified sealed GitHub receipts at
+  event priority 20, refetches authority with `gh`, and queues cancellation-safe external
+  transitions before terminal events at priority 30 and poll reconciliation at priority 50.
+  Consumed receipts are idempotent and bounded; pending records are never pruned.
+- **Immediate local bridge, polling reconciliation.** Every normal or replacement step seed
+  requires one atomic write containing terminal `step_status`, its result/gate data, and a minimal
+  provisional outbox marker. After that write succeeds, the producer may call `cron_trigger` only
+  for the exact deterministic advance-job ID supplied in the seed. Trigger failure never rewrites
+  terminal state or fabricates success: the 120-second poll recovers/consumes the marker. The setup
+  reconciler converges the app-owned advance job to that ID. This local producer path does not
+  authenticate remote requests; secure GitHub receipts arrive through the separate loopback receiver.
+  Neither producer path grants projection authority; after state persistence, the separate snapshot/
+  replay reconciler may activate only the minimized read model on exact parity.
+- **Agent tier (on demand only).** Agent steps run as one-shot persistent cron-backed capability
+  sessions, not inside the script. The script records `step_status='pending'` and the cron/session
+  pointer without waiting. `dlc-yolo-spawns` remains observation-only; backlog intake only reads
+  eligible backlog issues and creates intake cards.
 
-**Cron registration & reconcile.** Both crons are declared in the manifest (`app.json`), but
+**Cron registration & reconcile.** All three crons are declared in the manifest (`app.json`), but
 live registration drifts: on an existing install `kirocrew app enable` does NOT re-scan crons,
-the CLI/MCP `cron add` cannot create the zero-token **script** cron (only the manifest scan
+the CLI/MCP `cron add` cannot create the zero-token **script** crons (only the manifest scan
 can), and `kirocrew app uninstall` **removes the app's registered crons** (app data is kept).
-The supported fix is the idempotent `scripts/setup-crons.py` — it re-deploys the cron script
-and upserts both jobs to match the manifest (script cron for advance, `pipeline-orchestrator`
-agent cron for backlog), touching no other app's jobs (`--check` previews drift). Run it after
-a sync, an upgrade, or an uninstall→reinstall.
+The supported fix is the idempotent `scripts/setup-crons.py` — it re-deploys both cron scripts plus
+the shared webhook and projection helpers, upserts all three app-owned jobs, and converges `dlc-yolo-advance` to the
+exact deterministic ID used by terminal producers and accepted-ingress wakes, touching no other
+app's jobs (`--check` previews drift). Run it after a sync, an upgrade, or an uninstall→reinstall.
 
 ### Step Review Contract (agents own the judgment)
 
@@ -411,12 +540,16 @@ agent step, when it finishes its work, MUST:
    adaptive execution control packet and `card.intent_contract`; preserve the immutable raw intent
    reference and never silently turn qualitative wording into a universal hard requirement. The
    packet is authoritative for `questions`, `research_policy`, `skill_resolution`,
-   `intent_fidelity`, `result_scope`, the concrete `routing.requested_model` when present, and
-   `routing.pass_allocation`. The deterministic runtime binds a concrete model request through
+   `intent_fidelity`, `result_scope`, the concrete `routing.requested_model` when present,
+   `routing.pass_allocation`, `topology`, and `scheduler`. The deterministic runtime binds a
+   concrete model request through
    `cron_add` and verifies terminal pass ceilings. The host cron API has no per-run reasoning-effort
    parameter, so requested effort is not proof of applied effort; only live session metadata may
-   populate the applied value. Topology, scheduler/event authority, applied reasoning effort, and
-   stage movement stay with their existing owners.
+   populate the applied value. The local terminal-event bridge and stage movement stay with the
+   deterministic runtime. Topology, bounded scheduling, remote event admission/refetch, and projection
+   snapshot/replay/parity also stay with deterministic app-owned runtime, outside step-agent authority.
+   Applied reasoning effort and host-native in-flight cancellation remain unclaimed unless observed or
+   exposed by the host.
    - **Discover qualified forks at the configured depth:** quick finds blockers/contradictions/
      irreversible choices; standard also finds consequential scope, quality, technical, and
      integration forks; deep adversarially probes hidden assumptions, alternatives, failure modes,
@@ -442,8 +575,12 @@ agent step, when it finishes its work, MUST:
    - **Honor the active pass allocation:** never create more research records than
      `pass_allocation.research_passes`, never record more crew/addendum child runs than
      `pass_allocation.crew_passes`, and dispatch only the listed target IDs. Record each pass/run ID
-     as provenance. If required work cannot fit the allocation, end `blocked`; never exceed the cap,
-     invent a pass, or claim configured parallelism was applied when live scheduling is unobservable.
+     as provenance. If required work cannot fit the allocation, end `blocked`; never exceed the cap
+     or invent a pass. Follow `scheduler.phase_dag`: start only ready nodes, wait for every required
+     dependency, never exceed `max_parallel_runs`, serialize overlapping write sets, and record only
+     observed node/run/artifact IDs and timestamps in `card.pass_schedule[step]`. Before each tool
+     call or mutable write, re-read `writes_allowed`/`cancel_requested_at`; cancellation is
+     cooperative, never a fabricated host turn kill.
    - **Verify required skills from live state:** visual/frontend facets require the frontend-design
      workflow in addition to pipeline-workflow. Prompt text claiming a skill was followed is not
      proof; missing required skill means `blocked`.
@@ -482,6 +619,15 @@ agent step, when it finishes its work, MUST:
    never advance an EMPTY phase just by moving a label (produce the artifact or write
    `blocked`). Crews are spawned from WITHIN the step's agent session (which has the tools); a
    run that lacks crew-routing tools writes `blocked` rather than faking it.
+5. **Publish the terminal fact atomically, then trigger best-effort.** In the SAME `state.json`
+   write as `done|blocked|error` (and the envelope result/gate bundle when applicable), append one
+   schema-v1 provisional `card.event_outbox` record for this step with terminal outcome
+   `completed|blocked|errored`, `delivery_status:'pending'`, and the same RFC3339 timestamp. It is a
+   compact identifier/status marker: never copy prompts, prose, result content, artifacts, secrets,
+   or user data into it. After the write succeeds, call `kirocrew-cron::cron_trigger` exactly once
+   for the advance job ID in the task seed and never another job. If triggering is unavailable or
+   fails, leave terminal state and the marker intact; do not claim success. Polling canonicalizes,
+   deduplicates, dispatches, and consumes it later.
 
 `step_status` values: `pending` (spawn in flight — transient), `done` (artifact produced —
 safe to advance), `blocked` (awaits human; not re-escalated), `error` (retriable; re-escalated
@@ -520,27 +666,24 @@ See `docs/first-class-sessions-spec.md`. Steps and the orchestrator are **visibl
 interjectable SESSIONS** — not opaque fire-and-forget spawns — while the advance loop **NEVER
 blocks waiting on a persistent orchestrator**.
 
-- **Session pointers.** When a step's work is spawned (by the advance cron's escalation or by the
-  orchestrator directly), a pointer is recorded on the card:
-  `step_sessions[<step>] = {agent_id, session_key?, name:"dlc-yolo · <card> · <step>", at}`.
-  The UI joins this against `live_spawns.json` (on `agent_id`) to turn a subagents-pane row into a
-  **link that opens the session**; a later interjection uses the pointer to `spawn_continue` the
-  SAME conversation (keeping accumulated context) instead of a cold re-spawn. Best-effort — a
-  missing id just means no deep-link, never a block.
+- **Session pointers.** A dispatched step records its openable cron-backed session as
+  `step_sessions[<step>] = {cron_id, slot_key:'cron-<id>', session_key:'cron:<id>', agent,
+  assigned_agent, execution_envelope_id, pass_allocation, event_bridge:{outbox_schema_version,
+  advance_job_id}, at, kept:true}`. Applied model/effort/cwd remain separate observations. The UI
+  opens the recorded slot; retained gate revisions trigger the same cron/session, and only proven
+  unavailability permits a provenance-linked replacement.
 - **Orchestrator session + local trigger.** The orchestrator can be **triggered on demand**
   (`/dlc-yolo` or a pane control) as a NAMED session (`dlc-yolo · <pipeline> · orchestrator`,
   recorded in `card.orchestrator_session`) that a human can open to see its per-card reasoning,
   capability/profile assignments, and fan-out/back-step decisions — and interject. It is
   available + inspectable, NOT a standing daemon.
-- **Non-blocking invariant (load-bearing).** The advance loop escalates via a fire-and-forget
-  `spawn_run`, records `step_status='pending'` + `pending_at`, and **moves on in the same cycle**
-  — it never awaits completion. Completion is signalled by a TERMINAL status written to state
-  (done/blocked/error); the next tick reads it. A **warm** orchestrator session (kept open via
-  `monitor_start`/`register_hook`, `orchestrator_session.warm=true`) is an OPT-IN observer/driver
-  — the loop is correct whether it exists, is closed, or crashed, because the loop reads STATE,
-  never waits on a session. A `pending` step with no matching `live_spawns` entry past the
-  staleness window is a confirmed-dead spawn → reclaimed + re-escalated, so an abandoned session
-  never wedges the pipeline.
+- **Non-blocking invariant (load-bearing).** The advance loop registers a one-shot persistent
+  capability-profiled agent cron, records `step_status='pending'` + `pending_at` + its session
+  pointer, and never awaits the model turn. Completion is authoritative only when the producer
+  atomically writes `done|blocked|error` plus its provisional outbox marker. A successful exact-ID
+  `cron_trigger` wakes the local dispatcher promptly; a failed/missed trigger is harmless because
+  the regular poll recovers the same deterministic event. A stale pending/error is reclaimed under
+  the existing retry cap, so an abandoned session cannot wedge the pipeline.
 - **Steer vs interject.** A running step session can be **live-steered** (`spawn_steer`) for an
   in-flight correction; a finished/`blocked` one is resumed by **`spawn_continue`** from its
   `step_sessions` pointer; OR write a durable **`card.interjection[]`** the next run honors. None
@@ -549,12 +692,11 @@ blocks waiting on a persistent orchestrator**.
 
 ### Step agent = persistent scoped session that fans out from within (canon AND custom)
 
-**Invariant — STEP = SESSION, regardless of trigger:** if it's a step (canon OR custom
-`type:"agent"`), it is RUN by spawning a persistent step-agent (`keep=true` + record
-`card.step_sessions[step]`) — NEVER inline as the orchestrator itself. Crews + addenda are the
-opposite: ephemeral, spawned from WITHIN the step-agent's session, never persisted, never given a
-pointer. Persistence is a property of *being a step*, not of *which driver* (cron / `/dlc-yolo` /
-manual kick) spawned it — every driver runs a step the same persistent way.
+**Invariant — STEP = SESSION, regardless of trigger:** if it is a canon/custom agent step, it
+runs as a persistent capability-profiled one-shot **agent cron** whose first run materializes an
+openable `cron-<job-id>` slot/session. It never runs inline as the orchestrator and is not a
+slot-less `spawn_run` subagent. Crews/addenda are the opposite: bounded ephemeral child runs from
+within that step session. Persistence belongs to the step, regardless of which driver initiated it.
 
 See `docs/persistent-step-agent-sessions-spec.md`. Each agent step — built-in OR a pipeline's own
 **custom** `type:"agent"` step — escalates as a **persistent, capability-scoped agent** so it is
@@ -566,12 +708,14 @@ addenda from WITHIN itself**:
   `--agent` config's tools (verified: `kiro-cli --agent <name>`, MCP via per-session `mcpServers`),
   so a `coordinator`-profiled step agent genuinely holds `select_crew`/`spawn_run` and dispatches
   crews itself. **Custom steps resolve capability the SAME way** — no canon/custom distinction.
-- **`keep=true`** so the step agent persists → `spawn_continue` (resume/interject) / `spawn_steer`
-  (live); record `card.step_sessions[step]={agent_id,name,at,kept:true}`.
+- **Persistent cron-backed slot/session:** register the one-shot agent cron with
+  `persistent_session=true`, `hide_in_chat=false`, and the resolved capability profile; record
+  `card.step_sessions[step]={cron_id,slot_key,session_key,agent,at,kept:true,...}`.
 - **Crews + addenda spawn from WITHIN the step agent** (it holds the tools): the canon
-  `step.agent.crew` pass, then each matching `step.addenda[]` pass — uncapped per call,
-  artifact-only, owned-repo cwd. NEVER from the script cron (a zero-token script that cannot route
-  crews — it only fires the `keep=true` profiled spawn and reads terminal status back).
+  `step.agent.crew` pass, then each allocated matching `step.addenda[]` pass. They are bounded by
+  `routing.pass_allocation`, receive the same owned worktree when mutable, and remain artifact-only.
+  The script cron never routes a reasoning crew; it only registers/triggers profiled step sessions,
+  consumes terminal events, and applies deterministic state transitions.
 - **`coordinator` (crew-routing) only for steps that dispatch** (`step.agent.crew`/`addenda[]`
   set); producing steps default `authoring`/`builder`. No silent over-grant. If a step needs a
   wider capability it raises a `capability-gap` decision — it never fakes a crew run.

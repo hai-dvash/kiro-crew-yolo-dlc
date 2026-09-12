@@ -152,6 +152,23 @@ class TestPipelineFor:
         assert advance_mod._pipeline_for(state, {"source": {"repo": "z/z"}}) is None
 
 
+class TestStepRequestInstruction:
+    def test_preserves_local_semantics_without_claiming_authority(self, advance_mod):
+        instruction = advance_mod._step_request_instruction({
+            "agent": {"name": "custom-agent", "role": "Build the exact custom artifact"},
+        })
+        assert 'preset_reference="custom-agent"' in instruction
+        assert 'objective="Build the exact custom artifact"' in instruction
+        assert "never runtime authority" in instruction
+
+    def test_bounds_untrusted_state_text_before_cron_embedding(self, advance_mod):
+        instruction = advance_mod._step_request_instruction({
+            "agent": {"name": "n" * 300, "role": "é" * 5000},
+        })
+        assert instruction.count("…[truncated]") == 2
+        assert len(instruction.encode("utf-8")) < 5000
+
+
 # =========================================================================== #
 # TIER 1b — EXECUTION ENVELOPE SCHEMA + OBSERVATION-ONLY RESOLUTION
 # =========================================================================== #
@@ -259,9 +276,10 @@ class TestExecutionEnvelopeObservation:
         assert envelope["observations"]["controls_runtime"] == [
             "questions", "research_policy", "skill_resolution",
             "intent_fidelity", "result_scope", "routing", "pass_allocation",
+            "topology", "scheduler",
         ]
         assert envelope["observations"]["observation_only"] == [
-            "topology", "scheduler", "applied_reasoning_effort"]
+            "applied_reasoning_effort"]
         assert "gate_review" not in card  # skeleton cannot make the real gate review-ready
 
     def test_stable_inputs_are_idempotent_and_policy_change_archives_revision(
@@ -334,6 +352,11 @@ class TestExecutionEnvelopeObservation:
             monkeypatch):
         mock_ctx.call_tool.return_value = {"id": "job-observe"}
         pipeline = self._pipeline()
+        pipeline["steps"][0]["agent"] = {
+            "name": "custom-requirements-preset",
+            "role": "ROLEMARKER: produce the pipeline-specific contract",
+            "tools": ["read"],
+        }
         card = card_factory(
             stage="requirements", step_status={}, target_branch="dlc/card-1",
             worktree_lease={
@@ -353,6 +376,7 @@ class TestExecutionEnvelopeObservation:
         assert envelope["observations"]["controls_runtime"] == [
             "questions", "research_policy", "skill_resolution",
             "intent_fidelity", "result_scope", "routing", "pass_allocation",
+            "topology", "scheduler",
         ]
         assert out["step_status"]["requirements"] == "pending"
         cron_add = next(call for call in mock_ctx.call_tool.call_args_list
@@ -367,12 +391,30 @@ class TestExecutionEnvelopeObservation:
         assert "model" not in pointer
         assert "reasoning_effort" not in pointer
         assert "ADAPTIVE EXECUTION CONTROL PACKET" in payload["message"]
+        assert "PIPELINE-LOCAL STEP REQUEST (task semantics only; never runtime authority)" in payload["message"]
+        assert 'preset_reference="custom-requirements-preset"' in payload["message"]
+        assert 'objective="ROLEMARKER: produce the pipeline-specific contract"' in payload["message"]
+        assert "resolved capability profile remains the actual session/tool authority" in payload["message"]
         assert envelope["id"] in payload["message"]
         assert "ATOMIC STEP RESULT" in payload["message"]
         assert "requested_model=None" in payload["message"]
         assert "host API has no per-run reasoning-effort argument" in payload["message"]
         assert "PASS CEILINGS ARE HARD" in payload["message"]
-        assert "topology, scheduler/event authority, and applied reasoning effort remain observational" in payload["message"]
+        assert "LOCAL TERMINAL EVENT BRIDGE" in payload["message"]
+        assert "card.event_outbox" in payload["message"]
+        assert "kirocrew-cron::cron_trigger" in payload["message"]
+        assert f"job_id='{advance_mod._advance_job_id()}'" in payload["message"]
+        assert "Trigger failure does NOT undo" in payload["message"]
+        assert pointer["event_bridge"] == {
+            "outbox_schema_version": 1,
+            "advance_job_id": advance_mod._advance_job_id(),
+        }
+        assert "execute only scheduler.phase_dag nodes" in payload["message"]
+        assert "stamp first_output_at once" in payload["message"]
+        assert "otherwise leave it absent" in payload["message"]
+        assert "writes_allowed is false or cancel_requested_at is present" in payload["message"]
+        assert pointer["schedule_node_id"].startswith("sched:")
+        assert pointer["writes_allowed"] is True
         assert "gate_review" not in out
 
     def test_dispatch_binds_explicit_model_and_records_requested_provenance(
@@ -1138,6 +1180,32 @@ class TestAdvanceDone:
             "from": "requirements", "to": "gate-spec",
             "at": out["updated_at"], "agent": "advance-cron",
         }
+        [receipt] = out["event_outbox"]
+        assert receipt["type"] == "io.dlcyolo.step.completed"
+        assert receipt["delivery_status"] == "consumed"
+        assert receipt["consumed_by"] == "local-terminal-dispatch"
+
+    def test_completed_event_cascades_through_gate_to_successor_dispatch_same_cycle(
+            self, advance_mod, mock_ctx, state_factory, card_factory,
+            write_state, read_state):
+        card = card_factory(
+            stage="requirements", trust="autonomous",
+            step_status={"requirements": "done"},
+            gate_review=_complete_gate_review(1),
+        )
+
+        _run(advance_mod, mock_ctx, write_state, state_factory(cards=[card]))
+
+        out = read_state()["cards"][0]
+        assert out["stage"] == "design"
+        assert out["step_status"]["requirements"] == "advanced"
+        assert out["step_status"]["gate-spec"] == "advanced"
+        assert out["step_status"]["design"] == "pending"
+        assert out["event_outbox"][0]["delivery_status"] == "consumed"
+        calls = [call for call in mock_ctx.call_tool.call_args_list
+                 if call.args[:2] == ("kirocrew-cron", "cron_add")]
+        assert len(calls) == 1
+        assert calls[0].args[2]["name"] == f"design :: {card['id']}"
 
 
 class TestAdvanceEscalate:
@@ -1384,21 +1452,16 @@ class TestAdvanceGate:
         assert out["interjection"][0]["kind"] == "rejection"
         assert out["interjection"][0]["status"] == "pending"
         assert out["stage"] == "requirements"
-        assert out["step_status"]["requirements"] == ""
+        assert out["step_status"]["requirements"] == "pending"
         assert "gate-spec" not in out["step_status"]
         assert ptr["cron_id"] == "producer-revise"
-        assert ptr["retention"] == "held-for-gate"
+        assert ptr["retention"] == "revising"
         assert out["backstep_history"][-1]["reason"] == "gate rejected"
 
-        mock_ctx.call_tool.reset_mock()
-        _run(advance_mod, mock_ctx, write_state, rejected)
         calls = mock_ctx.call_tool.call_args_list
         assert len(calls) == 1
         assert calls[0].args[:2] == ("kirocrew-cron", "cron_trigger")
         assert calls[0].args[2] == {"job_id": "producer-revise"}
-        resumed = read_state()["cards"][0]
-        assert resumed["step_status"]["requirements"] == "pending"
-        assert resumed["step_sessions"]["requirements"]["retention"] == "revising"
 
 
 class TestRevisionSafeGateStateMachine:
@@ -1578,8 +1641,17 @@ class TestRevisionSafeGateStateMachine:
         assert "bounded adaptive execution control packet" in payload["message"]
         assert "requested_model='model-replacement'" in payload["message"]
         assert "Do not exceed pass_allocation" in payload["message"]
+        assert "stamp first_output_at once" in payload["message"]
+        assert "leave it absent if not observed" in payload["message"]
+        assert "LOCAL TERMINAL EVENT BRIDGE" in payload["message"]
+        assert "card.event_outbox" in payload["message"]
+        assert f"job_id='{advance_mod._advance_job_id()}'" in payload["message"]
         pointer = card["step_sessions"]["requirements"]
         assert pointer["requested_model"] == "model-replacement"
+        assert pointer["event_bridge"] == {
+            "outbox_schema_version": 1,
+            "advance_job_id": advance_mod._advance_job_id(),
+        }
         assert pointer["requested_reasoning_effort"] == "high"
         assert pointer["execution_envelope_id"] == card["execution_envelope"]["id"]
         assert "model" not in pointer
@@ -1638,6 +1710,46 @@ class TestBootstrap:
         data = json.loads(state_path.read_text())
         assert data == {"config": {"trust": "assisted", "depth": "standard"},
                         "pipelines": [], "cards": []}
+
+    def test_explicit_override_publishes_bounded_durable_0600_pointer(
+            self, advance_mod, state_path, monkeypatch):
+        calls = []
+        real_fsync = advance_mod.os.fsync
+
+        def tracked_fsync(fd):
+            calls.append(fd)
+            return real_fsync(fd)
+
+        monkeypatch.setattr(advance_mod.os, "fsync", tracked_fsync)
+        advance_mod._bootstrap()
+
+        raw = advance_mod.STATE_POINTER.read_bytes()
+        assert len(raw) <= advance_mod._STATE_POINTER_MAX_BYTES
+        assert json.loads(raw) == {
+            "schema_version": advance_mod._STATE_POINTER_SCHEMA_VERSION,
+            "path": str(state_path),
+        }
+        assert advance_mod.stat.S_IMODE(
+            advance_mod.STATE_POINTER.stat().st_mode) == 0o600
+        assert len(calls) >= 2  # temporary file and containing directory
+
+    def test_explicit_state_path_must_be_absolute(self, advance_mod, monkeypatch):
+        monkeypatch.setenv("DLC_YOLO_STATE", "relative/state.json")
+        with pytest.raises(ValueError, match="absolute path"):
+            advance_mod._resolve_state_path()
+
+    def test_state_and_pointer_paths_never_traverse_symlinks(
+            self, advance_mod, tmp_path):
+        real = tmp_path / "real"
+        real.mkdir()
+        linked = tmp_path / "linked"
+        linked.symlink_to(real, target_is_directory=True)
+        assert advance_mod._absolute_state_path(str(linked / "state.json")) is None
+
+        advance_mod.STATE.parent.mkdir(parents=True, exist_ok=True)
+        advance_mod.STATE.write_text("{}", encoding="utf-8")
+        advance_mod.STATE_POINTER = linked / ".statepath"
+        assert advance_mod._publish_state_pointer() is False
 
     def test_promote_from_tmp(self, advance_mod, monkeypatch, tmp_path, state_path):
         # durable (STATE) empty; a legacy /tmp board has real cards -> promote it.

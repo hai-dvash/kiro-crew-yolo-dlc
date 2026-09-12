@@ -1,20 +1,21 @@
-import { useAppApi, useChatLauncher, useNavigate } from '@kirocrew/app-sdk'
+import { useAppApi, useNavigate } from '@kirocrew/app-sdk'
 import { Card, CardTitle, PageHeader, StatCard } from '@kirocrew/app-sdk/ui'
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { appendLiveTail, beginLiveThinking, finishLiveTail } from './liveTail.js'
 import { buildGateInspection, gateValue } from './gateInspection.js'
+import { DURABLE_STATE, readCurrentState, resolveStateFile } from './statePath.js'
+import { DlcYoloControls, WebhookSettingsSection } from './WebhookSettings.js'
+import { CardBudgetEditor } from './CardBudgetEditor.js'
+import { CARD_STATUS_META, CARD_STATUS_ORDER, deriveCardStatus } from './cardStatus.js'
+import { AgentCrewCatalogModal, type AgentProfile, type CrewRecord, type CrewRouteDraft } from './AgentCrewCatalog.js'
+import { applyAgentProfileToDraft, catalogProfileNames, normalizeAgentProfile, normalizeCrewRecords, profileDeclarationPath } from './agentCatalog.js'
 
 // --- State file location ---------------------------------------------------
-// Persistence-authoritative, mirroring crons/dlc_yolo_advance.py:_resolve_state_path().
-// ~/.dlc-yolo/state.json is THE state home — when it exists it is the SOLE tier the UI
-// reads/writes (no /tmp mirror, so no split-brain). /tmp/dlc-yolo/state.json is used ONLY
-// as a last-resort scratch fallback when the durable file is genuinely absent (locked-down
-// env). The cron bootstraps + promotes the durable file (the UI's /api/file-write refuses
-// to CREATE files); the UI probes the durable path first and only falls to /tmp if that
-// read genuinely fails. resolveStatePath() runs once on mount.
-const DURABLE_STATE = '~/.dlc-yolo/state.json'
-const TMP_STATE = '/tmp/dlc-yolo/state.json'
-let STATE_PATH = DURABLE_STATE   // persistence-authoritative; only demoted to /tmp if durable is absent
+// The runtime publishes its validated absolute DLC_YOLO_STATE authority through a bounded,
+// atomic 0600 pointer. Missing, malformed, relative, or stale pointers retain the historical
+// durable→/tmp probes, so default installs behave exactly as before without split-brain under
+// an explicit override.
+let STATE_PATH = DURABLE_STATE
 
 // --- Types ---
 type Trust = 'manual' | 'assisted' | 'autonomous'
@@ -22,6 +23,7 @@ type Depth = 'quick' | 'standard' | 'deep'
 type BudgetMode = 'depth' | 'custom' | 'unlimited'
 type FeatureSize = 'S' | 'M' | 'L' | 'XL'
 type AddendaBudget = 'none' | 'obvious' | 'proactive'
+type Capability = 'readonly' | 'authoring' | 'builder' | 'coordinator'
 
 interface Budget {
   max_child_cards: number | 'unlimited'
@@ -66,6 +68,8 @@ interface StepSessionPointer {
   release_after?: string
   retention_handoff_at?: string
   retention_released_at?: string
+  writes_allowed?: boolean
+  cancel_requested_at?: string
 }
 
 interface GateResultBundle {
@@ -115,12 +119,18 @@ interface PipelineCard {
   trust?: Trust
   depth?: Depth
   budget?: Budget
+  capability?: Capability
+  sot?: 'github' | 'local'
   pipeline_id?: string
   source: { type?: string; repo?: string; issue?: number; url?: string }
   created_at: string
   updated_at: string
   artifacts: Record<string, unknown>
   step_status?: Record<string, string>
+  block_reason?: Record<string, string>
+  error_reason?: Record<string, string>
+  retry_count?: Record<string, number>
+  execution_schedule?: { schema_version?: number; current_node_id?: string; nodes?: Record<string, Record<string, unknown>> }
   pending_at?: Record<string, string>
   step_sessions?: Record<string, StepSessionPointer>
   successor_receipts?: Record<string, { producer_step?: string; successor_step?: string; received_at?: string }>
@@ -139,7 +149,7 @@ interface PipelineCard {
     scope?: Record<string, number>
   }
   backstep_history?: Array<{ from: string; to: string; reason: string; at: string }>
-  decisions?: Array<{ id: string; at: string; step?: string; raised_by?: string; kind?: string; question?: string; chosen?: string; rationale?: string; action?: string; confidence?: string }>
+  decisions?: Array<{ id: string; at: string; step?: string; raised_by?: string; kind?: string; question?: string; options?: Array<{ id?: string; note?: string; risk?: string }>; chosen?: string; rationale?: string; action?: string; enhancement?: { target_step?: string; add_step?: string; crew?: string }; resolved_at?: string; confidence?: string }>
   parked?: ParkedIdea[]
   history: Array<{ from: string; to: string; at: string; agent: string }>
 }
@@ -162,6 +172,7 @@ interface PipelineStep {
   agent?: StepAgent
   addenda?: Addendum[]
   trigger?: 'ask' | 'spec-builder' | 'task-runner' | 'inline' | 'skip'  // default engine for this phase (ask = prompt at runtime)
+  capability?: Capability
   trust?: Trust
   depth?: Depth
   label?: string
@@ -192,8 +203,12 @@ interface Pipeline {
   budget?: Budget
   backlog_intake?: boolean
   results_in_repo?: boolean
+  conversation_log?: boolean
+  trusted_authors?: string[]
   self_enabling?: boolean
   approach?: 'simplified' | 'enhanced'
+  sync_mode?: 'poll' | 'webhook'
+  webhook_reconcile_interval_secs?: number
   sot?: 'github' | 'local'
   steps?: PipelineStep[]
   created_at: string
@@ -210,9 +225,9 @@ type Stage = typeof STAGES[number]
 // Seed/demo repos shipped as sample data — surfaced as "Example: …" in the rail so
 // users know they are removable (and can delete them via the pipeline delete button).
 const EXAMPLE_REPOS = new Set([
-  'hai-dvash/webapp',
-  'hai-dvash/dashboard',
-  'hai-dvash/api-core',
+  'example-org/web-app',
+  'example-org/dashboard',
+  'example-org/api-core',
 ])
 
 const STAGE_LABELS: Record<Stage, string> = {
@@ -283,121 +298,6 @@ function Pill({ color, children, title, onClick, active }: {
     >
       {children}
     </button>
-  )
-}
-
-// --- SVG Pipeline Header ---
-function PipelineGraph({ steps, cardsByStage, onNodeClick }: {
-  steps: { id: string; name: string; type: 'agent' | 'gate' }[]
-  cardsByStage: Record<string, PipelineCard[]>
-  onNodeClick: (stage: string) => void
-}) {
-  const R = 16
-  const D = 18
-  const spacing = 76
-  const svgWidth = steps.length * spacing + 44
-  const svgHeight = 84
-  const cy = 38
-
-  const maxCount = Math.max(1, ...steps.map(s => cardsByStage[s.id]?.length || 0))
-  const isGate = (s: { id: string; type: string }) => s.type === 'gate' || s.id.startsWith('gate-')
-
-  const nodeColor = (s: { id: string; type: string }): string => {
-    const count = cardsByStage[s.id]?.length || 0
-    if (s.id === 'done' && count > 0) return 'var(--ok)'
-    if (isGate(s) && count > 0) return 'var(--warn)'
-    if (count > 0) return 'var(--accent)'
-    return 'var(--border-strong, var(--border))'
-  }
-
-  return (
-    <div className="w-full overflow-x-auto mb-5 -mx-1 px-1">
-      <svg
-        width={svgWidth}
-        height={svgHeight}
-        viewBox={`0 0 ${svgWidth} ${svgHeight}`}
-        className="mx-auto block"
-        style={{ minWidth: svgWidth }}
-      >
-        <defs>
-          <marker id="ah" markerWidth="7" markerHeight="7" refX="5.5" refY="3" orient="auto">
-            <polygon points="0 0, 6 3, 0 6" fill="var(--border-strong, var(--border))" />
-          </marker>
-          {steps.map(s => {
-            const count = cardsByStage[s.id]?.length || 0
-            if (count === 0) return null
-            const dev = 2 + (count / maxCount) * 5
-            return (
-              <filter key={`f-${s.id}`} id={`glow-${s.id}`} x="-80%" y="-80%" width="260%" height="260%">
-                <feGaussianBlur stdDeviation={dev} result="b" />
-                <feMerge>
-                  <feMergeNode in="b" />
-                  <feMergeNode in="SourceGraphic" />
-                </feMerge>
-              </filter>
-            )
-          })}
-        </defs>
-
-        {/* Connection lines */}
-        {steps.slice(0, -1).map((s, i) => {
-          const x1 = 22 + i * spacing + (isGate(s) ? D : R)
-          const x2 = 22 + (i + 1) * spacing - (isGate(steps[i + 1]) ? D : R)
-          return (
-            <line key={`l-${s.id}`} x1={x1} y1={cy} x2={x2} y2={cy}
-              stroke="var(--border-strong, var(--border))" strokeWidth={1.5} markerEnd="url(#ah)" />
-          )
-        })}
-
-        {/* Nodes */}
-        {steps.map((s, i) => {
-          const cx = 22 + i * spacing
-          const color = nodeColor(s)
-          const count = cardsByStage[s.id]?.length || 0
-          const gate = isGate(s)
-          const active = count > 0
-          const intensity = active ? 0.16 + (count / maxCount) * 0.30 : 0.05
-          const glow = active ? `url(#glow-${s.id})` : undefined
-          return (
-            <g key={s.id} onClick={() => onNodeClick(s.id)} style={{ cursor: 'pointer' }}>
-              {active && (
-                <circle cx={cx} cy={cy} r={R + 3} fill={color}
-                  style={{ filter: glow, opacity: 0.10 + (count / maxCount) * 0.22, transition: 'opacity .4s' }}>
-                  <animate attributeName="opacity"
-                    values={`${0.10 + (count / maxCount) * 0.22};${0.22 + (count / maxCount) * 0.28};${0.10 + (count / maxCount) * 0.22}`}
-                    dur="2.8s" repeatCount="indefinite" />
-                </circle>
-              )}
-
-              {gate ? (
-                <rect x={cx - D} y={cy - D} width={D * 2} height={D * 2}
-                  fill={color} stroke={color} strokeWidth={1.75} rx={3}
-                  transform={`rotate(45 ${cx} ${cy})`}
-                  style={{ fillOpacity: intensity, filter: glow, transition: 'fill-opacity .3s, stroke .3s' }} />
-              ) : (
-                <circle cx={cx} cy={cy} r={R} fill={color} stroke={color} strokeWidth={1.75}
-                  style={{ fillOpacity: intensity, filter: glow, transition: 'fill-opacity .3s, stroke .3s' }} />
-              )}
-
-              {/* count badge — glows with the node */}
-              {count > 0 && (
-                <>
-                  <circle cx={cx + (gate ? 13 : 12)} cy={cy - (gate ? 13 : 12)} r={8.5} fill={color}
-                    style={{ filter: glow }} />
-                  <text x={cx + (gate ? 13 : 12)} y={cy - (gate ? 13 : 12)}
-                    textAnchor="middle" dominantBaseline="central"
-                    fill="var(--bg)" fontSize={9.5} fontWeight={800}>{count}</text>
-                </>
-              )}
-
-              <text x={cx} y={cy + (gate ? 32 : 30)} textAnchor="middle"
-                fill={active ? 'var(--text)' : 'var(--muted)'} fontSize={9}
-                fontWeight={active ? 600 : 500}>{s.name}</text>
-            </g>
-          )
-        })}
-      </svg>
-    </div>
   )
 }
 
@@ -903,10 +803,12 @@ function GateInspectionDialog({ card, inspection, producerSession, onClose, onOp
 }
 
 // --- Card Component ---
-function PipelineCardItem({ card, config, isGate, producerStep, producerSession, onOpenProducer, onApprove, onReject, onCycleTrust, onCycleDepth, onInterject, onResolveDecision }: {
+function PipelineCardItem({ card, config, isGate, cardStatus, effectiveCapability, producerStep, producerSession, onOpenProducer, onApprove, onReject, onCycleTrust, onCycleDepth, onSetBudget, onInterject, onResolveDecision, onOpenOrchestrator }: {
   card: PipelineCard
   config: PipelineConfig
   isGate: boolean
+  cardStatus: { kind: string; label: string; color: string; reason?: string | null }
+  effectiveCapability: Capability | 'auto-derived'
   producerStep?: string
   producerSession?: { step: string; slotKey: string; retained: boolean }
   onOpenProducer?: () => void
@@ -914,10 +816,12 @@ function PipelineCardItem({ card, config, isGate, producerStep, producerSession,
   onReject?: (reason: string) => void
   onCycleTrust?: () => void
   onCycleDepth?: () => void
+  onSetBudget?: (budget?: Budget) => void
   onInterject?: (kind: string, text: string) => void
-  onResolveDecision?: (decisionId: string, choice: 'approve' | 'decline') => void
+  onResolveDecision?: (decisionId: string) => void
+  onOpenOrchestrator?: () => void
 }) {
-  const accent = isGate ? 'var(--warn)' : 'var(--border-strong, var(--border))'
+  const accent = isGate ? 'var(--warn)' : cardStatus.kind === 'idle' ? 'var(--border-strong, var(--border))' : cardStatus.color
   const effTrust = (card.trust || config.trust) as Trust
   const effDepth = (card.depth || config.depth) as Depth
   const parkedCount = card.parked?.length || 0
@@ -937,7 +841,7 @@ function PipelineCardItem({ card, config, isGate, producerStep, producerSession,
     if (reason?.trim() && onReject) onReject(reason.trim())
   }
   // Any decision still awaiting a human choice (e.g. a depth-driven addendum suggestion)
-  const pendingDecisions = (card.decisions || []).filter(d => !d.chosen && (d.action === 'add-addendum' || d.options))
+  const pendingDecisions = (card.decisions || []).filter(d => !d.chosen && !d.resolved_at && (!!d.action || !!d.options))
 
   return (
     <div
@@ -973,6 +877,21 @@ function PipelineCardItem({ card, config, isGate, producerStep, producerSession,
           title={`depth: ${effDepth}${card.depth ? ' (override)' : ' (inherited)'} — click to cycle`}>
           {effDepth}
         </Pill>
+        <Pill color={cardStatus.color} active={cardStatus.kind !== 'idle'}
+          title={`${cardStatus.label}${cardStatus.reason ? ` — ${cardStatus.reason}` : ''}`}>
+          {cardStatus.label}
+        </Pill>
+        <Pill color={effectiveCapability === 'coordinator' ? 'var(--warn)' : 'var(--info)'}
+          active={effectiveCapability !== 'auto-derived'}
+          title={`capability: ${effectiveCapability}; actual authority is runtime handshake-verified`}>
+          cap:{effectiveCapability === 'auto-derived' ? 'auto' : effectiveCapability}
+        </Pill>
+        <Pill color={card.sot === 'local' ? 'var(--warn)' : card.sot === 'github' ? 'var(--info)' : 'var(--muted)'} active={card.sot === 'local'}
+          title={card.sot === 'local' ? 'Local stage authority; linked cards retry guarded GitHub convergence' : card.sot === 'github' ? 'GitHub issue label is stage authority' : 'Source-of-truth field is unrecorded'}>
+          sot:{card.sot || 'unknown'}
+        </Pill>
+        {card.lifecycle && <Pill color="var(--muted)" title={`card lifecycle: ${card.lifecycle}`}>life:{card.lifecycle}</Pill>}
+        {onSetBudget && <CardBudgetEditor budget={card.budget} depth={effDepth} onSave={onSetBudget} />}
         {parkedCount > 0 && (
           <Pill color="var(--warn)" title={`${parkedCount} parked idea(s)`}>⏸ {parkedCount}</Pill>
         )}
@@ -1070,17 +989,16 @@ function PipelineCardItem({ card, config, isGate, producerStep, producerSession,
         </div>
       )}
 
-      {/* Pending decisions awaiting a human choice (e.g. depth-driven addendum-crew suggestion) */}
+      {/* Raised decisions are advisory until Slice B's structured action processor exists. */}
       {onResolveDecision && pendingDecisions.map(d => (
         <div key={d.id} className="mt-2 p-1.5 rounded-md text-[11px]"
           style={{ background: 'color-mix(in srgb, var(--accent) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--accent) 35%, var(--border))' }}>
           <div style={{ color: 'var(--text, var(--muted))' }}>⚖ {d.question || d.kind}</div>
-          <div className="mt-1 flex gap-1.5">
-            <button className="px-2 py-0.5 rounded font-semibold" style={{ background: 'var(--ok)', color: 'var(--bg)' }}
-              onClick={() => onResolveDecision(d.id, 'approve')}>Approve</button>
-            <button className="px-2 py-0.5 rounded font-semibold" style={{ background: 'var(--bg-hover, var(--border))', color: 'var(--muted)' }}
-              onClick={() => onResolveDecision(d.id, 'decline')}>Decline</button>
+          <div className="mt-1 text-[10px]" style={{ color: 'var(--muted)' }}>
+            This records acknowledgement only; it does not enact {d.action || 'the proposed pipeline change'}.
           </div>
+          <button className="mt-1 px-2 py-0.5 rounded font-semibold" style={{ background: 'var(--bg-hover, var(--border))', color: 'var(--accent)' }}
+            onClick={() => onResolveDecision(d.id)}>Acknowledge &amp; continue</button>
         </div>
       ))}
 
@@ -1103,6 +1021,16 @@ function PipelineCardItem({ card, config, isGate, producerStep, producerSession,
           <button className="mt-2 text-[10px] hover:underline" style={{ color: 'var(--muted)' }}
             onClick={() => setInterjectOpen(true)}>+ interject</button>
         )
+      )}
+
+      {onOpenOrchestrator && (
+        <button className="mt-2 ml-2 text-[10px] hover:underline" style={{ color: 'var(--muted)' }}
+          title={card.orchestrator_session?.slot_key
+            ? 'Open this pipeline\u2019s orchestrator session'
+            : 'Trigger an inspectable orchestrator session for this card'}
+          onClick={() => onOpenOrchestrator()}>
+          {card.orchestrator_session?.slot_key ? '\u2699 open orchestrator' : '\u2699 orchestrator'}
+        </button>
       )}
 
       {inspectionOpen && inspection && (
@@ -1345,29 +1273,42 @@ interface AgentDraft {
   model?: string         // '' / 'auto' → omit
   crew?: string          // optional KiroCrew crew (config.json agents key) to route this step to
   addenda?: Addendum[]   // optional addendum crews (Model 2) layered after the canon crew
+  capability?: Capability // omitted = runtime auto-derives; tools[] is not authority
   trust?: Trust          // step execution profile (DLC-YOLO)
   depth?: Depth
 }
 
-function AgentSetupPanel({ initial, knownAgents, crews, repo, stepName, onSave, onClose }: {
+function AgentSetupPanel({ initial, agentProfiles, crews, repo, stepName, onSave, onSaveCrew, onClose }: {
   initial: AgentDraft
-  knownAgents: string[]
-  crews: { name: string; description?: string }[]
+  agentProfiles: AgentProfile[]
+  crews: CrewRecord[]
   repo: string
   stepName: string
   onSave: (a: AgentDraft) => void
+  onSaveCrew: (draft: CrewRouteDraft) => Promise<void>
   onClose: () => void
 }) {
-  const { openChat } = useChatLauncher()
   const [name, setName] = useState(initial.name || '')
   const [role, setRole] = useState(initial.role || '')
   const [tools, setTools] = useState<string[]>(initial.tools || ['read'])
   const [model, setModel] = useState(initial.model || 'auto')
   const [crew, setCrew] = useState(initial.crew || '')
   const [addenda, setAddenda] = useState<Addendum[]>(initial.addenda || [])
+  const [capability, setCapability] = useState<Capability | ''>(initial.capability || '')
   const [trust, setTrust] = useState<Trust | ''>(initial.trust || '')
   const [depth, setDepth] = useState<Depth | ''>(initial.depth || '')
+  const [catalogOpen, setCatalogOpen] = useState(false)
+  const selectedProfile = agentProfiles.find(profile => profile.name === name)
+  const selectedCrew = crews.find(item => item.name === crew)
+  const visibleToolOptions = [...new Set([...AGENT_TOOL_OPTIONS, ...tools])]
 
+  const applyProfile = (profile: AgentProfile) => {
+    const next = applyAgentProfileToDraft({ name, role, tools, model, crew, addenda, capability, trust, depth }, profile)
+    setName(next.name)
+    setTools(next.tools || [])
+    setModel(next.model || 'auto')
+    if (next.capability) setCapability(next.capability as Capability)
+  }
   const toggleTool = (t: string) => setTools(prev => prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t])
   const addAddendum = () => setAddenda(prev => prev.length >= 3 ? prev : [...prev, { crew: crews[0]?.name || '', when: 'always', writes: '' }])
   const updateAddendum = (i: number, patch: Partial<Addendum>) => setAddenda(prev => prev.map((a, idx) => idx === i ? { ...a, ...patch } : a))
@@ -1379,39 +1320,41 @@ function AgentSetupPanel({ initial, knownAgents, crews, repo, stepName, onSave, 
         <div className="px-5 py-3 flex items-center gap-2" style={{ borderBottom: '1px solid var(--border)' }}>
           <button onClick={onClose} className="text-sm leading-none" style={{ color: 'var(--accent)' }}>← Steps</button>
           <div className="ml-1">
-            <div className="text-sm font-semibold" style={{ color: 'var(--text-strong, var(--text))' }}>Configure Agent</div>
-            <div className="text-[11px]" style={{ color: 'var(--muted)' }}>This step's agent (KiroCrew agent config)</div>
+            <div className="text-sm font-semibold" style={{ color: 'var(--text-strong, var(--text))' }}>Configure step execution</div>
+            <div className="text-[11px]" style={{ color: 'var(--muted)' }}>Step request + capability profile + optional global crew route</div>
           </div>
-          <button
-            onClick={() => openChat({ message:
-              `/dlc-yolo\n\nHelp me design a NEW agent for a custom pipeline step.\n` +
-              `Pipeline repo: ${repo || '(unset)'}\nStep: ${stepName || '(unnamed)'}\n\n` +
-              `Ask me what the step should do, then propose an agent config (name, role/prompt, tools, model). ` +
-              `When I'm happy, write it into this pipeline's step in the DLC-YOLO state file (~/.dlc-yolo/state.json, or /tmp/dlc-yolo/state.json if that's what exists) — the step's agent {name, role, tools} and any trust/depth — keeping GitHub as the source of truth.`
-            })}
-            className="ml-auto text-[11px] px-2.5 py-1 rounded-md font-semibold flex items-center gap-1"
-            style={{ background: 'color-mix(in srgb, var(--accent) 16%, transparent)', color: 'var(--accent)' }}
-            title="Author this agent in a /dlc-yolo chat session">
-            ✨ Draft with /dlc-yolo
-          </button>
+          <span className="ml-auto text-[10px] px-2 py-1 rounded font-semibold"
+            style={{ color: 'var(--accent)', background: 'color-mix(in srgb, var(--accent) 12%, transparent)' }}>
+            UI configuration
+          </span>
         </div>
 
         <div className="px-5 py-4 flex flex-col gap-3.5 flex-1 overflow-y-auto">
-          {/* Reuse existing agent */}
-          {knownAgents.length > 0 && (
+          {/* Installed agent presets are real configs; applying one copies only its declared request fields. */}
+          {agentProfiles.length > 0 && (
             <div>
-              <label className="text-[11px] uppercase tracking-wider" style={{ color: 'var(--muted)' }}>Reuse an existing agent</label>
+              <div className="flex items-center justify-between gap-2">
+                <label className="text-[11px] uppercase tracking-wider" style={{ color: 'var(--muted)' }}>Agent profile preset</label>
+                <button onClick={() => setCatalogOpen(true)} className="text-[10px] px-2 py-1 rounded-md font-semibold"
+                  style={{ color: 'var(--accent)', border: '1px solid var(--border)' }}>Browse agents &amp; crews</button>
+              </div>
               <div className="mt-1 flex flex-wrap gap-1.5">
-                {knownAgents.map(a => (
-                  <button key={a} onClick={() => setName(a)}
-                    className="text-[11px] px-2 py-1 rounded-md font-medium"
+                {agentProfiles.map(profile => (
+                  <button key={profile.name} onClick={() => applyProfile(profile)} disabled={profile.status !== 'loaded'}
+                    title={profile.description || profile.name}
+                    className="text-[11px] px-2 py-1 rounded-md font-medium disabled:opacity-40"
                     style={{
-                      background: name === a ? 'color-mix(in srgb, var(--accent) 16%, transparent)' : 'var(--bg-hover, var(--border))',
-                      color: name === a ? 'var(--accent)' : 'var(--muted-strong, var(--muted))',
-                      boxShadow: name === a ? 'inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent)' : 'none',
-                    }}>{a}</button>
+                      background: name === profile.name ? 'color-mix(in srgb, var(--accent) 16%, transparent)' : 'var(--bg-hover, var(--border))',
+                      color: name === profile.name ? 'var(--accent)' : 'var(--muted-strong, var(--muted))',
+                      boxShadow: name === profile.name ? 'inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent)' : 'none',
+                    }}>{profile.name}</button>
                 ))}
               </div>
+              {selectedProfile && (
+                <div className="text-[10px] mt-1.5 rounded-md px-2 py-1.5" style={{ color: 'var(--muted)', background: 'var(--bg-elevated, var(--bg))', border: '1px solid var(--border)' }}>
+                  Loaded config: model <code>{selectedProfile.model || 'auto'}</code> · {selectedProfile.tools.length} declared tool{selectedProfile.tools.length === 1 ? '' : 's'} · {selectedProfile.allowedTools.length} auto-approved. The step objective below remains pipeline-local.
+                </div>
+              )}
             </div>
           )}
 
@@ -1433,7 +1376,7 @@ function AgentSetupPanel({ initial, knownAgents, crews, repo, stepName, onSave, 
           <div>
             <label className="text-[11px] uppercase tracking-wider" style={{ color: 'var(--muted)' }}>Tools</label>
             <div className="mt-1 flex flex-wrap gap-1.5">
-              {AGENT_TOOL_OPTIONS.map(t => {
+              {visibleToolOptions.map(t => {
                 const on = tools.includes(t)
                 return (
                   <button key={t} onClick={() => toggleTool(t)}
@@ -1445,6 +1388,24 @@ function AgentSetupPanel({ initial, knownAgents, crews, repo, stepName, onSave, 
                     }}>{t}</button>
                 )
               })}
+            </div>
+          </div>
+
+          <div className="rounded-md p-2.5" style={{ background: 'var(--bg-elevated, var(--bg))', border: '1px solid var(--border)' }}>
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <label className="text-[11px] uppercase tracking-wider" style={{ color: 'var(--muted)' }}>Capability profile</label>
+                <div className="text-[10px] mt-0.5" style={{ color: 'var(--muted)' }}>Trust = when · depth = how much · capability = what authority</div>
+              </div>
+              <select value={capability} onChange={event => setCapability(event.target.value as Capability | '')}
+                className="w-40 px-2 py-1 rounded-md text-sm outline-none"
+                style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)' }}>
+                <option value="">auto-derived</option>
+                {(['readonly', 'authoring', 'builder', 'coordinator'] as Capability[]).map(value => <option key={value} value={value}>{value}</option>)}
+              </select>
+            </div>
+            <div className="text-[10px] mt-2" style={{ color: capability === 'coordinator' ? 'var(--warn)' : 'var(--muted)' }}>
+              The tools above are requested/declared—not proof of runtime access. Actual crew authority comes from its <code>kiro_agent</code> profile; widening remains trust-gated and handshake-verified.
             </div>
           </div>
 
@@ -1466,9 +1427,11 @@ function AgentSetupPanel({ initial, knownAgents, crews, repo, stepName, onSave, 
                 {crews.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
               </select>
             </div>
-            {crew && (
+            {selectedCrew && (
               <div className="text-[10px] mt-1 text-right" style={{ color: 'var(--muted)' }}>
-                {crews.find(c => c.name === crew)?.description || 'Runs this step via select_crew → spawn_run(agent=' + crew + ')'}
+                Global route <code>{selectedCrew.name}</code> → <code>{selectedCrew.kiroAgent || 'profile unknown'}</code>
+                {selectedCrew.workspace ? ` · workspace ${selectedCrew.workspace}` : ''}
+                {selectedCrew.description ? ` · ${selectedCrew.description}` : ''}
               </div>
             )}
           </div>
@@ -1555,11 +1518,21 @@ function AgentSetupPanel({ initial, knownAgents, crews, repo, stepName, onSave, 
               model: model.trim() && model.trim() !== 'auto' ? model.trim() : undefined,
               crew: crew || undefined,
               addenda: addenda.length ? addenda.filter(a => a.crew) : undefined,
+              capability: capability || undefined,
               trust: trust || undefined, depth: depth || undefined,
             })}
             className="text-xs px-3 py-1.5 rounded-md font-semibold transition-opacity disabled:opacity-40"
-            style={{ background: 'var(--accent)', color: 'var(--bg)' }}>Save Agent</button>
+            style={{ background: 'var(--accent)', color: 'var(--bg)' }}>Save step</button>
         </div>
+        {catalogOpen && <AgentCrewCatalogModal
+          profiles={agentProfiles}
+          crews={crews}
+          context={`${repo || 'unassigned pipeline'} · ${stepName || 'unnamed step'}`}
+          onSaveCrew={onSaveCrew}
+          onClose={() => setCatalogOpen(false)}
+          onSelectProfile={profile => { applyProfile(profile); setCatalogOpen(false) }}
+          onSelectCrew={record => { setCrew(record.name); setCatalogOpen(false) }}
+        />}
     </div>
   )
 }
@@ -1567,18 +1540,21 @@ function AgentSetupPanel({ initial, knownAgents, crews, repo, stepName, onSave, 
 // --- Pipeline Setup Modal ---
 interface RepoCandidate {
   repo: string
+  workspace?: string
+  label?: string
   source: 'issue-radar' | 'workspace' | 'manual'
   detail?: string
   path?: string
 }
 
-function PipelineSetupModal({ candidates, existingRepos, defaults, knownAgents, crews, onCreate, onClose, editPipeline, cardCount, isExample, onDelete }: {
+function PipelineSetupModal({ candidates, existingRepos, defaults, agentProfiles, crews, onCreate, onSaveCrew, onClose, editPipeline, cardCount, isExample, onDelete }: {
   candidates: RepoCandidate[]
   existingRepos: Set<string>
   defaults: PipelineConfig
-  knownAgents: string[]
-  crews: { name: string; description?: string }[]
-  onCreate: (p: { repo: string; repo_path?: string; source: RepoCandidate['source']; trust: Trust; depth: Depth; budget?: Budget; backlog_intake: boolean; results_in_repo: boolean; self_enabling: boolean; approach: 'simplified' | 'enhanced'; steps: PipelineStep[] }) => void
+  agentProfiles: AgentProfile[]
+  crews: CrewRecord[]
+  onCreate: (p: { repo: string; workspace: string; repo_path?: string; source: RepoCandidate['source']; trust: Trust; depth: Depth; budget?: Budget; backlog_intake: boolean; results_in_repo: boolean; conversation_log: boolean; trusted_authors: string[]; self_enabling: boolean; approach: 'simplified' | 'enhanced'; sync_mode?: 'poll' | 'webhook'; steps: PipelineStep[] }) => void
+  onSaveCrew: (draft: CrewRouteDraft) => Promise<void>
   onClose: () => void
   editPipeline?: Pipeline          // when set, the modal is in EDIT mode
   cardCount?: number               // cards in the pipeline (for the Danger Zone copy)
@@ -1587,6 +1563,7 @@ function PipelineSetupModal({ candidates, existingRepos, defaults, knownAgents, 
 }) {
   const isEdit = !!editPipeline
   const [repo, setRepo] = useState(editPipeline?.repo || '')
+  const [workspace, setWorkspace] = useState(editPipeline?.workspace || 'default')
   const [repoPath, setRepoPath] = useState(editPipeline?.repo_path || '')
   const [source, setSource] = useState<RepoCandidate['source']>(editPipeline?.source || 'manual')
   const [trust, setTrust] = useState<Trust>(editPipeline?.trust || defaults.trust)
@@ -1603,12 +1580,16 @@ function PipelineSetupModal({ candidates, existingRepos, defaults, knownAgents, 
   )
   const [backlog, setBacklog] = useState(editPipeline?.backlog_intake ?? true)
   const [resultsInRepo, setResultsInRepo] = useState(editPipeline?.results_in_repo ?? false)
+  const [conversationLog, setConversationLog] = useState(editPipeline?.conversation_log ?? false)
+  const [trustedAuthorsText, setTrustedAuthorsText] = useState((editPipeline?.trusted_authors || []).join('\n'))
   const [selfEnabling, setSelfEnabling] = useState(editPipeline?.self_enabling ?? false)
   const [approach, setApproach] = useState<'simplified' | 'enhanced'>(editPipeline?.approach || 'simplified')
+  const [syncMode, setSyncMode] = useState<'poll' | 'webhook'>(editPipeline?.sync_mode || 'poll')
   const [steps, setSteps] = useState<PipelineStep[]>(() => (editPipeline?.steps?.length ? editPipeline.steps.map(s => ({ ...s })) : DEFAULT_STEPS.map(s => ({ ...s }))))
   const [editingAgentIdx, setEditingAgentIdx] = useState<number | null>(null)
   const [confirmText, setConfirmText] = useState('')
-  const [modalView, setModalView] = useState<'settings' | 'danger'>('settings')
+  const [modalView, setModalView] = useState<'settings' | 'webhook' | 'danger'>('settings')
+  const [catalogOpen, setCatalogOpen] = useState(false)
 
   const slug = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'step'
   const updateStep = (i: number, patch: Partial<PipelineStep>) =>
@@ -1626,7 +1607,8 @@ function PipelineSetupModal({ candidates, existingRepos, defaults, knownAgents, 
   }])
 
   const pick = (c: RepoCandidate) => {
-    setRepo(c.repo)
+    setRepo(c.repo || '')
+    setWorkspace(c.workspace || 'default')
     setRepoPath(c.path || '')
     setSource(c.source)
   }
@@ -1644,7 +1626,14 @@ function PipelineSetupModal({ candidates, existingRepos, defaults, knownAgents, 
     setRepo(looksUrl ? normalizeRepoInput(raw) : raw)
     setSource(looksUrl ? 'manual' : 'manual')
   }
-  const valid = /^[^/\s]+\/[^/\s]+$/.test(normalizeRepoInput(repo)) || candidates.some(c => c.repo === repo)
+  const trustedAuthors = [...new Map(
+    trustedAuthorsText.split(/[\n,]/).map(value => value.trim()).filter(Boolean)
+      .map(value => [value.toLowerCase(), value] as const)
+  ).values()]
+  const trustedAuthorsValid = trustedAuthors.every(value =>
+    /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/.test(value))
+  const workspaceValid = /^[A-Za-z0-9_.-]{1,80}$/.test(workspace)
+  const valid = (/^[^/\s]+\/[^/\s]+$/.test(normalizeRepoInput(repo)) || candidates.some(c => c.repo && c.repo === repo)) && trustedAuthorsValid && workspaceValid
   const dup = !isEdit && existingRepos.has(normalizeRepoInput(repo))
 
   const Seg = <T extends string>({ value, options, tokens, onPick }: {
@@ -1669,6 +1658,7 @@ function PipelineSetupModal({ candidates, existingRepos, defaults, knownAgents, 
   const grouped: Record<string, RepoCandidate[]> = { 'issue-radar': [], workspace: [], manual: [] }
   candidates.forEach(c => { (grouped[c.source] ||= []).push(c) })
   const SOURCE_LABEL: Record<string, string> = { 'issue-radar': 'Issue Radar', workspace: 'KiroCrew Workspaces', manual: 'Manual' }
+  const modalTabs: Array<typeof modalView> = isEdit ? ['settings', 'webhook', 'danger'] : ['settings', 'webhook']
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
@@ -1677,6 +1667,13 @@ function PipelineSetupModal({ candidates, existingRepos, defaults, knownAgents, 
       <div className="w-full max-w-lg rounded-xl overflow-hidden flex flex-col"
         style={{ background: 'var(--card)', border: '1px solid var(--border-strong, var(--border))', boxShadow: '0 20px 60px rgba(0,0,0,0.4)', maxHeight: '82vh' }}
         onClick={e => e.stopPropagation()}>
+        {catalogOpen && <AgentCrewCatalogModal
+          profiles={agentProfiles}
+          crews={crews}
+          context={repo || workspace}
+          onSaveCrew={onSaveCrew}
+          onClose={() => setCatalogOpen(false)}
+        />}
         {editingAgentIdx !== null ? (
           <AgentSetupPanel
             initial={{
@@ -1686,18 +1683,21 @@ function PipelineSetupModal({ candidates, existingRepos, defaults, knownAgents, 
               model: steps[editingAgentIdx]?.agent?.model,
               crew: steps[editingAgentIdx]?.agent?.crew,
               addenda: steps[editingAgentIdx]?.addenda,
+              capability: steps[editingAgentIdx]?.capability,
               trust: steps[editingAgentIdx]?.trust,
               depth: steps[editingAgentIdx]?.depth,
             }}
-            knownAgents={knownAgents}
+            agentProfiles={agentProfiles}
             crews={crews}
             repo={repo}
             stepName={steps[editingAgentIdx]?.name || ''}
+            onSaveCrew={onSaveCrew}
             onClose={() => setEditingAgentIdx(null)}
             onSave={(a) => {
               updateStep(editingAgentIdx, {
                 agent: { name: a.name, role: a.role, tools: a.tools, model: a.model, crew: a.crew },
                 addenda: a.addenda,
+                capability: a.capability,
                 trust: a.trust, depth: a.depth,
               })
               setEditingAgentIdx(null)
@@ -1714,29 +1714,27 @@ function PipelineSetupModal({ candidates, existingRepos, defaults, knownAgents, 
           <button onClick={onClose} className="text-lg leading-none px-2" style={{ color: 'var(--muted)' }}>×</button>
         </div>
 
-        {/* Edit-mode tabs: Settings | Danger Zone (same modal, separate pages) */}
-        {isEdit && (
-          <div className="px-5 pt-3 flex gap-1" style={{ borderBottom: '1px solid var(--border)' }}>
-            {(['settings', 'danger'] as const).map(v => {
-              const on = modalView === v
-              const isDanger = v === 'danger'
-              return (
-                <button key={v} onClick={() => setModalView(v)}
-                  className="text-[12px] px-3 py-2 font-semibold transition-all"
-                  style={{
-                    color: on ? (isDanger ? 'var(--danger, #ef4444)' : 'var(--accent)') : 'var(--muted)',
-                    borderBottom: `2px solid ${on ? (isDanger ? 'var(--danger, #ef4444)' : 'var(--accent)') : 'transparent'}`,
-                    marginBottom: '-1px',
-                  }}>
-                  {v === 'settings' ? 'Settings' : 'Danger Zone'}
-                </button>
-              )
-            })}
-          </div>
-        )}
+        {/* Pipeline-local settings and app-wide webhook controls share this configuration surface. */}
+        <div className="px-5 pt-3 flex gap-1" style={{ borderBottom: '1px solid var(--border)' }}>
+          {modalTabs.map(v => {
+            const on = modalView === v
+            const isDanger = v === 'danger'
+            return (
+              <button key={v} onClick={() => setModalView(v)}
+                className="text-[12px] px-3 py-2 font-semibold transition-all"
+                style={{
+                  color: on ? (isDanger ? 'var(--danger, #ef4444)' : 'var(--accent)') : 'var(--muted)',
+                  borderBottom: `2px solid ${on ? (isDanger ? 'var(--danger, #ef4444)' : 'var(--accent)') : 'transparent'}`,
+                  marginBottom: '-1px',
+                }}>
+                {v === 'settings' ? 'Settings' : v === 'webhook' ? 'Webhook · app-wide' : 'Danger Zone'}
+              </button>
+            )
+          })}
+        </div>
 
         <div className="px-5 py-4 flex flex-col gap-4 overflow-y-auto flex-1"
-          style={{ display: isEdit && modalView === 'danger' ? 'none' : 'flex' }}>
+          style={{ display: modalView === 'settings' ? 'flex' : 'none' }}>
           {/* Repo picker */}
           <div>
             <label className="text-[11px] uppercase tracking-wider" style={{ color: 'var(--muted)' }}>Repository — paste a GitHub URL or owner/name</label>
@@ -1760,22 +1758,39 @@ function PipelineSetupModal({ candidates, existingRepos, defaults, knownAgents, 
                 <div key={src}>
                   <div className="text-[10px] uppercase tracking-wider mb-1" style={{ color: 'var(--muted)' }}>{SOURCE_LABEL[src]}</div>
                   <div className="flex flex-wrap gap-1.5">
-                    {grouped[src].map(c => (
-                      <button key={c.repo} onClick={() => pick(c)}
-                        disabled={existingRepos.has(c.repo)}
-                        title={c.detail || c.repo}
+                    {grouped[src].map(c => {
+                      const candidateKey = `${src}:${c.workspace || c.repo}:${c.path || ''}`
+                      const selected = c.source === 'workspace'
+                        ? workspace === c.workspace && repoPath === (c.path || '')
+                        : repo === c.repo
+                      return <button key={candidateKey} onClick={() => pick(c)}
+                        disabled={!!c.repo && existingRepos.has(c.repo)}
+                        title={c.detail || c.repo || c.workspace}
                         className="text-[11px] px-2 py-1 rounded-md font-medium transition-all disabled:opacity-40"
                         style={{
-                          background: repo === c.repo ? 'color-mix(in srgb, var(--accent) 16%, transparent)' : 'var(--bg-hover, var(--border))',
-                          color: repo === c.repo ? 'var(--accent)' : 'var(--muted-strong, var(--muted))',
-                          boxShadow: repo === c.repo ? 'inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent)' : 'none',
+                          background: selected ? 'color-mix(in srgb, var(--accent) 16%, transparent)' : 'var(--bg-hover, var(--border))',
+                          color: selected ? 'var(--accent)' : 'var(--muted-strong, var(--muted))',
+                          boxShadow: selected ? 'inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent)' : 'none',
                         }}>
-                        {c.repo.includes('/') ? c.repo.split('/')[1] : c.repo}
+                        {c.label || (c.repo.includes('/') ? c.repo.split('/')[1] : c.repo) || c.workspace}
                       </button>
-                    ))}
+                    })}
                   </div>
                 </div>
               ))}
+            </div>
+          </div>
+
+          {/* Workspace identity is the result/memory partition, not a repository alias. */}
+          <div>
+            <label className="text-[11px] uppercase tracking-wider" style={{ color: 'var(--muted)' }}>
+              Workspace partition
+            </label>
+            <input value={workspace} onChange={event => setWorkspace(event.target.value.trim())}
+              placeholder="default" className="mt-1 w-full px-3 py-2 rounded-md text-sm outline-none"
+              style={{ background: 'var(--bg-elevated, var(--bg))', border: `1px solid ${workspaceValid ? 'var(--border)' : 'var(--danger)'}`, color: 'var(--text)' }} />
+            <div className="text-[10px] mt-1" style={{ color: workspaceValid ? 'var(--muted)' : 'var(--danger)' }}>
+              Partitions results and ledgers. It is independent from <code>owner/name</code> and never inferred from a filesystem path.
             </div>
           </div>
 
@@ -1863,6 +1878,28 @@ function PipelineSetupModal({ candidates, existingRepos, defaults, knownAgents, 
             </div>
           )}
 
+          {/* Sync mode: how eagerly the poll reconciles GitHub */}
+          <div className="flex items-center justify-between">
+            <div className="min-w-0 pr-3">
+              <div className="text-sm" style={{ color: 'var(--text)' }}>GitHub sync mode</div>
+              <div className="text-[11px]" style={{ color: 'var(--muted)' }}>
+                {syncMode === 'webhook'
+                  ? 'Webhook is the fast path; the safety-net poll reconciles this pipeline on a longer window. Requires the app-wide webhook receiver enabled — falls back to polling if it is not.'
+                  : 'Poll reconciles this pipeline every cycle (default). Correct when no webhook is configured.'}
+              </div>
+            </div>
+            <div className="flex rounded-md overflow-hidden flex-shrink-0" style={{ border: '1px solid var(--border)' }}>
+              {(['poll', 'webhook'] as const).map(m => (
+                <button key={m} onClick={() => setSyncMode(m)}
+                  className="text-[11px] px-2.5 py-1 font-semibold"
+                  style={{ background: syncMode === m ? 'var(--accent)' : 'transparent',
+                           color: syncMode === m ? 'var(--bg)' : 'var(--muted)' }}>
+                  {m === 'poll' ? 'Poll' : 'Webhook'}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* Backlog intake */}
           <label className="flex items-center justify-between cursor-pointer">
             <div>
@@ -1890,6 +1927,34 @@ function PipelineSetupModal({ candidates, existingRepos, defaults, knownAgents, 
                 style={{ height: 18, width: 18, background: 'var(--bg)', left: resultsInRepo ? 20 : 2 }} />
             </button>
           </label>
+
+          {/* Optional presentation log */}
+          <label className="flex items-center justify-between cursor-pointer">
+            <div>
+              <div className="text-sm" style={{ color: 'var(--text)' }}>Pipeline conversation log</div>
+              <div className="text-[11px]" style={{ color: 'var(--muted)' }}>Opt in to the review-oriented command transcript; off means no log file is created</div>
+            </div>
+            <button onClick={() => setConversationLog(value => !value)}
+              className="w-10 h-5.5 rounded-full transition-all relative flex-shrink-0"
+              style={{ background: conversationLog ? 'var(--accent)' : 'var(--border-strong, var(--border))', height: 22, width: 40 }}>
+              <span className="absolute top-0.5 rounded-full transition-all"
+                style={{ height: 18, width: 18, background: 'var(--bg)', left: conversationLog ? 20 : 2 }} />
+            </button>
+          </label>
+
+          {/* Ownership guard */}
+          <div>
+            <label className="text-[11px] uppercase tracking-wider" style={{ color: 'var(--muted)' }}>
+              Trusted GitHub authors · optional
+            </label>
+            <textarea value={trustedAuthorsText} onChange={event => setTrustedAuthorsText(event.target.value)} rows={2}
+              placeholder="Defaults to the authenticated GitHub user"
+              className="mt-1 w-full px-3 py-2 rounded-md text-sm font-mono outline-none resize-y"
+              style={{ background: 'var(--bg-elevated, var(--bg))', border: `1px solid ${trustedAuthorsValid ? 'var(--border)' : 'var(--danger)'}`, color: 'var(--text)' }} />
+            <div className="text-[10px] mt-1" style={{ color: trustedAuthorsValid ? 'var(--muted)' : 'var(--danger)' }}>
+              One login per line. Empty never means allow-all; it falls back to the authenticated <code>gh</code> user.
+            </div>
+          </div>
 
           {/* Self-enablement */}
           <label className="flex items-center justify-between cursor-pointer">
@@ -1931,6 +1996,8 @@ function PipelineSetupModal({ candidates, existingRepos, defaults, knownAgents, 
             <div className="flex items-center justify-between mb-1.5">
               <span className="text-[11px] uppercase tracking-wider" style={{ color: 'var(--muted)' }}>Steps</span>
               <div className="flex gap-1">
+                <button onClick={() => setCatalogOpen(true)} className="text-[10px] px-1.5 py-0.5 rounded font-semibold"
+                  style={{ color: 'var(--muted)', border: '1px solid var(--border)' }}>Agents &amp; crews</button>
                 <button onClick={() => addStep('agent')} className="text-[10px] px-1.5 py-0.5 rounded font-semibold"
                   style={{ color: 'var(--accent)', border: '1px solid color-mix(in srgb, var(--accent) 40%, var(--border))' }}>+ agent</button>
                 <button onClick={() => addStep('gate')} className="text-[10px] px-1.5 py-0.5 rounded font-semibold"
@@ -1972,6 +2039,9 @@ function PipelineSetupModal({ candidates, existingRepos, defaults, knownAgents, 
                         <option value="inline">inline</option>
                         <option value="skip">skip</option>
                       </select>
+                      <span className="text-[10px]" style={{ color: s.capability ? 'var(--accent)' : 'var(--muted)' }} title="Actual authority is verified from the assigned capability profile at runtime">
+                        cap: {s.capability || 'auto'}
+                      </span>
                       {(s.trust || s.depth) && (
                         <span className="text-[10px]" style={{ color: 'var(--muted)' }}>
                           {[s.trust, s.depth].filter(Boolean).join(' · ')}
@@ -1999,6 +2069,12 @@ function PipelineSetupModal({ candidates, existingRepos, defaults, knownAgents, 
             </div>
           </div>
         </div>
+
+        {modalView === 'webhook' && (
+          <div className="px-5 py-4 overflow-y-auto flex-1">
+            <WebhookSettingsSection />
+          </div>
+        )}
 
         {/* Danger Zone tab (edit mode). Examples: one-click "Remove Example".
             Real pipelines: type-to-confirm delete. */}
@@ -2059,18 +2135,21 @@ function PipelineSetupModal({ candidates, existingRepos, defaults, knownAgents, 
 
         {/* Footer */}
         <div className="px-5 py-3 flex justify-end gap-2" style={{ borderTop: '1px solid var(--border)', background: 'var(--bg-elevated, var(--card))' }}>
-          <button onClick={onClose} className="text-xs px-3 py-1.5 rounded-md font-medium" style={{ color: 'var(--muted)' }}>Cancel</button>
-          {!(isEdit && modalView === 'danger') && (
+          <button onClick={onClose} className="text-xs px-3 py-1.5 rounded-md font-medium" style={{ color: 'var(--muted)' }}>{modalView === 'settings' ? 'Cancel' : 'Close'}</button>
+          {modalView === 'settings' && (
           <button
             disabled={!valid || (!isEdit && dup)}
             onClick={() => onCreate({
               repo: normalizeRepoInput(repo),
+              workspace,
               ...(repoPath.trim() ? { repo_path: repoPath.trim() } : {}),
               source, trust, depth,
               budget: budgetMode === 'depth' ? undefined : budgetMode === 'unlimited'
                 ? { max_child_cards: 'unlimited', effort_ceiling: 'unlimited', max_feature_size: 'XL', addenda: 'proactive' }
                 : customBudget,
-              backlog_intake: backlog, results_in_repo: resultsInRepo, self_enabling: selfEnabling, approach,
+              backlog_intake: backlog, results_in_repo: resultsInRepo,
+              conversation_log: conversationLog, trusted_authors: trustedAuthors,
+              self_enabling: selfEnabling, approach, sync_mode: syncMode,
               steps: steps.map(s => ({ ...s, label: `dlc:${s.id}` })),
             })}
             className="text-xs px-3 py-1.5 rounded-md font-semibold transition-opacity disabled:opacity-40"
@@ -2186,30 +2265,32 @@ export default function SdlcPipeline() {
   const [setupOpen, setSetupOpen] = useState(false)
   const [editRepo, setEditRepo] = useState<string | null>(null)
   const [candidates, setCandidates] = useState<RepoCandidate[]>([])
-  const [crews, setCrews] = useState<{ name: string; description?: string }[]>([])
+  const [crews, setCrews] = useState<CrewRecord[]>([])
+  const [agentProfiles, setAgentProfiles] = useState<AgentProfile[]>([])
+  const [agentCatalogOpen, setAgentCatalogOpen] = useState(false)
+  const [agentCatalogLoading, setAgentCatalogLoading] = useState(false)
   const [runPaneOpen, setRunPaneOpen] = useState(false)
   const [liveSpawns, setLiveSpawns] = useState<{ id: string; task: string; status?: string }[]>([])
   const kanbanRef = useRef<HTMLDivElement>(null)
   const liveSpawnsAbsent = useRef(false)  // suppress live_spawns polling once found absent (no cron yet)
+  const stateAuthorityResolved = useRef(false)
   const linkedSlotsRef = useRef<Set<string>>(new Set())
   const cardIdsRef = useRef<Set<string>>(new Set())
   const [liveTails, setLiveTails] = useState<Record<string, { buffer: string; tail: string; active: boolean; phase: 'thinking' | 'generating' | 'idle'; seq: number }>>({})
 
-  const fetchCards = useCallback(async () => {
+  const readAppFile = useCallback(
+    (path: string) => api.get('/api/file-read?path=' + encodeURIComponent(path)),
+    [api],
+  )
+
+  const fetchCards = useCallback(async (reconcileAuthority = false) => {
     try {
-      let data
-      try {
-        data = await api.get('/api/file-read?path=' + encodeURIComponent(STATE_PATH))
-      } catch (primaryErr) {
-        // durable file genuinely absent — demote to the last-resort /tmp scratch tier
-        // (persistence-authoritative; /tmp is used ONLY when durable can't be read).
-        if (STATE_PATH !== TMP_STATE) {
-          STATE_PATH = TMP_STATE
-          data = await api.get('/api/file-read?path=' + encodeURIComponent(STATE_PATH))
-        } else {
-          throw primaryErr
-        }
-      }
+      const resolved = !stateAuthorityResolved.current || reconcileAuthority
+        ? await resolveStateFile(readAppFile)
+        : await readCurrentState(readAppFile, STATE_PATH)
+      STATE_PATH = resolved.path
+      stateAuthorityResolved.current = true
+      const data = resolved.data
       setAllCards(data.cards || [])
       setPipelines(data.pipelines || [])
       setConfig({ ...DEFAULT_CONFIG, ...(data.config || {}) })
@@ -2218,7 +2299,7 @@ export default function SdlcPipeline() {
     } finally {
       setLoading(false)
     }
-  }, [api])
+  }, [readAppFile])
 
   // Repo list for the scroller: union of pipeline repos and any repo that has cards.
   const repoList = useMemo(() => {
@@ -2344,7 +2425,7 @@ export default function SdlcPipeline() {
   // openable so a later response can reactivate or route back into the card.
   const PENDING_STALE_MS = 600_000
   const runStatus = useMemo(() => {
-    const rows: { card: string; step: string; agent: string; stale: boolean; status: string; live: boolean; responsePending: boolean; agentId?: string; slotKey?: string; sessionKey?: string; sessionName?: string }[] = []
+    const rows: { cardId: string; card: string; step: string; agent: string; stale: boolean; status: string; live: boolean; responsePending: boolean; agentId?: string; slotKey?: string; sessionKey?: string; sessionName?: string }[] = []
     for (const c of cards) {
       const ss = c.step_status || {}
       const sessions = c.step_sessions || {}
@@ -2368,7 +2449,7 @@ export default function SdlcPipeline() {
           : inFlight && liveSpawns.some(ls => (ls.task || '').includes(c.id) || (ls.task || '').includes(c.title))
         const responsePending = !!sess?.last_response_at &&
           (!sess.last_response_handled_at || sess.last_response_handled_at < sess.last_response_at)
-        rows.push({ card: c.title || c.id, step, agent, stale, status: st, live, responsePending, agentId, slotKey, sessionKey, sessionName: sess?.name })
+        rows.push({ cardId: c.id, card: c.title || c.id, step, agent, stale, status: st, live, responsePending, agentId, slotKey, sessionKey, sessionName: sess?.name })
       }
     }
     return rows
@@ -2445,7 +2526,6 @@ export default function SdlcPipeline() {
   }, [producerStepFor])
 
   useEffect(() => {
-    fetchCards()
     const fetchLive = async () => {
       try {
         // Derive the snapshot path from the RESOLVED state dir (H1) — not a substring
@@ -2466,50 +2546,92 @@ export default function SdlcPipeline() {
         setLiveSpawns([])
       }
     }
-    fetchCards().then(fetchLive)
+    let pollCount = 0
+    void fetchCards(true).then(fetchLive)
     const interval = setInterval(() => {
-      fetchCards().then(() => { if (!liveSpawnsAbsent.current) fetchLive() })
+      pollCount += 1
+      const reconcileAuthority = pollCount % 12 === 0
+      void fetchCards(reconcileAuthority).then(() => { if (!liveSpawnsAbsent.current) fetchLive() })
     }, 10000)
     return () => clearInterval(interval)
   }, [fetchCards, api])
 
-  // Load the KiroCrew crew roster (config.json `agents` map) once, for the step Crew dropdown.
-  // The UI reads config.json directly (same pattern as workspaces); select_crew binds these at run time.
-  useEffect(() => {
-    (async () => {
+  // KiroCrew has two distinct layers: global crew routing records in config.json and
+  // installed agent templates in ~/.kiro/agents. Preserve both; never flatten a crew into
+  // a fake inline agent config or claim declarations are live runtime observations.
+  const loadAgentCatalog = useCallback(async () => {
+    setAgentCatalogLoading(true)
+    let roster: CrewRecord[] = []
+    try {
+      const cfg = await readAppFile('~/.kiro/crew/config.json')
+      roster = normalizeCrewRecords(cfg?.agents)
+      setCrews(roster)
+    } catch (e) {
+      console.warn('crew roster (config.json) unreadable:', e)
+      setCrews([])
+    }
+
+    const profiles = await Promise.all(catalogProfileNames(roster).map(async name => {
+      const candidate = profileDeclarationPath(name, roster)
+      if (!candidate) return normalizeAgentProfile(null, name) as AgentProfile
       try {
-        const cfg = await api.get('/api/file-read?path=~/.kiro/crew/config.json')
-        const agents = cfg?.agents || {}
-        const list = Object.entries(agents).map(([name, v]: [string, any]) => ({
-          name, description: v?.description || undefined,
-        }))
-        setCrews(list)
-      } catch (e) { console.warn('crew roster (config.json) unreadable:', e) }
-    })()
-  }, [api])
+        const raw = await readAppFile(candidate)
+        return normalizeAgentProfile(raw, name, candidate) as AgentProfile
+      } catch {
+        return normalizeAgentProfile(null, name, candidate) as AgentProfile
+      }
+    }))
+    setAgentProfiles(profiles)
+    setAgentCatalogLoading(false)
+  }, [readAppFile])
+
+  const openAgentCatalog = useCallback(() => {
+    setAgentCatalogOpen(true)
+    void loadAgentCatalog()
+  }, [loadAgentCatalog])
+
+  const openPipelineEditor = useCallback((repo: string) => {
+    void loadAgentCatalog().then(() => setEditRepo(repo))
+  }, [loadAgentCatalog])
+
+  const saveCrewRoute = useCallback(async (draft: CrewRouteDraft) => {
+    await api.post('/apps/dlc-yolo/api/agents/crew', {
+      mode: draft.mode,
+      name: draft.name,
+      kiro_agent: draft.kiroAgent,
+      workspace: draft.workspace || null,
+      memory_store: draft.memoryStore || null,
+    })
+    await loadAgentCatalog()
+  }, [api, loadAgentCatalog])
 
   const mutateState = useCallback(async (mutator: (state: { config?: PipelineConfig; pipelines?: Pipeline[]; cards: PipelineCard[] }) => void) => {
     try {
-      const state = await api.get('/api/file-read?path=' + encodeURIComponent(STATE_PATH))
-      state.cards = state.cards || []
-      mutator(state)
-      // H2 (reduce lost-update vs the 120s cron): re-read immediately before writing and
-      // re-apply the mutator onto the FRESH copy, so a cron write that landed during our
-      // edit is preserved and only our small field-set is layered on top — instead of
-      // overwriting the whole file with a stale snapshot. Mutators are idempotent field-sets.
+      const initial = await resolveStateFile(readAppFile)
+      STATE_PATH = initial.path
+      initial.data.cards = initial.data.cards || []
+      mutator(initial.data)
+      // H2 (reduce lost-update vs the 120s cron): re-resolve + re-read immediately before
+      // writing and re-apply the idempotent field-set. This preserves both concurrent cron
+      // updates and a runtime override pointer that changed after the first read.
+      let destination = initial
       try {
-        const fresh = await api.get('/api/file-read?path=' + encodeURIComponent(STATE_PATH))
-        fresh.cards = fresh.cards || []
-        mutator(fresh)
-        await api.post('/api/file-write', { path: STATE_PATH, content: JSON.stringify(fresh, null, 2) })
+        destination = await resolveStateFile(readAppFile)
+        STATE_PATH = destination.path
+        destination.data.cards = destination.data.cards || []
+        mutator(destination.data)
       } catch {
-        await api.post('/api/file-write', { path: STATE_PATH, content: JSON.stringify(state, null, 2) })
+        destination = initial
       }
+      await api.post('/api/file-write', {
+        path: destination.path,
+        content: JSON.stringify(destination.data, null, 2),
+      })
       fetchCards()
     } catch (e) {
       console.error('Failed to mutate state:', e)
     }
-  }, [api, fetchCards])
+  }, [api, fetchCards, readAppFile])
 
   const setPipelineConfig = useCallback((patch: Partial<PipelineConfig>) => {
     setConfig(prev => ({ ...prev, ...patch }))
@@ -2574,16 +2696,39 @@ export default function SdlcPipeline() {
     })
   }, [mutateState])
 
-  // Approve/decline a raised decision (e.g. a depth-driven addendum-crew suggestion).
-  const resolveDecision = useCallback((cardId: string, decisionId: string, choice: 'approve' | 'decline') => {
+  // Acknowledge a raised advisory decision without pretending its proposed action was enacted.
+  const resolveDecision = useCallback((cardId: string, decisionId: string) => {
     mutateState(state => {
       const card = state.cards.find(c => c.id === cardId)
       if (!card) return
       const d = (card.decisions || []).find(x => x.id === decisionId)
-      if (d) { d.chosen = choice; (d as { resolved_at?: string }).resolved_at = new Date().toISOString() }
+      if (d) {
+        d.chosen = 'acknowledged'
+        ;(d as { status?: string; resolved_at?: string }).status = 'acknowledged'
+        ;(d as { status?: string; resolved_at?: string }).resolved_at = new Date().toISOString()
+      }
       card.updated_at = new Date().toISOString()
     })
   }, [mutateState])
+
+  const openOrchestrator = useCallback(async (card: PipelineCard) => {
+    const existing = card.orchestrator_session?.slot_key
+    if (existing) { navigate(`/chat?sid=${encodeURIComponent(existing)}`); return }
+    try {
+      const res = await api.post('/apps/dlc-yolo/api/orchestrator/trigger', { card_id: card.id }) as { ok?: boolean; slot_key?: string }
+      if (res?.slot_key) { navigate(`/chat?sid=${encodeURIComponent(res.slot_key)}`); return }
+    } catch { /* fall through to poll for the cron-minted slot */ }
+    // The advance cron mints the openable session on its next wake; poll fresh state (~16s).
+    for (let i = 0; i < 8; i++) {
+      await new Promise(r => setTimeout(r, 2000))
+      try {
+        const fresh = await readCurrentState(readAppFile, STATE_PATH)
+        const slot = (fresh.data.cards || []).find(c => c.id === card.id)?.orchestrator_session?.slot_key
+        if (slot) { void fetchCards(); navigate(`/chat?sid=${encodeURIComponent(slot)}`); return }
+      } catch { /* keep polling */ }
+    }
+    void fetchCards()
+  }, [api, navigate, readAppFile, fetchCards])
 
   const cycleTrust = useCallback((cardId: string) => {
     mutateState(state => {
@@ -2605,6 +2750,16 @@ export default function SdlcPipeline() {
     })
   }, [mutateState])
 
+  const setCardBudget = useCallback((cardId: string, budget?: Budget) => {
+    mutateState(state => {
+      const card = state.cards.find(c => c.id === cardId)
+      if (!card) return
+      if (budget) card.budget = { ...budget }
+      else delete card.budget
+      card.updated_at = new Date().toISOString()
+    })
+  }, [mutateState])
+
   const toggleRepo = useCallback((repo: string) => {
     setRepoFilter(prev => {
       const next = new Set(prev)
@@ -2619,16 +2774,19 @@ export default function SdlcPipeline() {
   // Open the setup modal: discover candidate repos from KiroCrew workspaces
   // and Issue Radar (both READ-ONLY), then show the modal.
   const openSetup = useCallback(async () => {
+    const catalogLoad = loadAgentCatalog()
     const found: RepoCandidate[] = []
     // KiroCrew workspaces
     try {
       const cfg = await api.get('/api/file-read?path=~/.kiro/crew/config.json')
       const ws = cfg?.workspaces || {}
-      Object.entries(ws).forEach(([name, v]: [string, any]) =>
+      Object.entries(ws).forEach(([name, v]: [string, any]) => {
+        const declaredRepo = typeof v?.repo === 'string' && /^[^/\s]+\/[^/\s]+$/.test(v.repo) ? v.repo : ''
         found.push({
-          repo: name, source: 'workspace', detail: v?.dir || name,
+          repo: declaredRepo, workspace: name, label: name, source: 'workspace', detail: v?.dir || name,
           path: typeof v?.dir === 'string' ? v.dir : undefined,
-        }))
+        })
+      })
     } catch (e) { console.warn('workspaces registry unreadable:', e) }
     // Issue Radar connected repos (read-only — never write to its data dir)
     try {
@@ -2638,11 +2796,12 @@ export default function SdlcPipeline() {
       })
     } catch (e) { console.warn('issue-radar config unreadable (app may not be installed):', e) }
     setCandidates(found)
+    await catalogLoad
     setSetupOpen(true)
-  }, [api])
+  }, [api, loadAgentCatalog])
 
   const createPipeline = useCallback(async (p: {
-    repo: string; repo_path?: string; source: RepoCandidate['source']; trust: Trust; depth: Depth; budget?: Budget; backlog_intake: boolean; results_in_repo: boolean; self_enabling: boolean; approach: 'simplified' | 'enhanced'; steps: PipelineStep[]
+    repo: string; workspace: string; repo_path?: string; source: RepoCandidate['source']; trust: Trust; depth: Depth; budget?: Budget; backlog_intake: boolean; results_in_repo: boolean; conversation_log: boolean; trusted_authors: string[]; self_enabling: boolean; approach: 'simplified' | 'enhanced'; sync_mode?: 'poll' | 'webhook'; steps: PipelineStep[]
   }) => {
     const now = new Date().toISOString()
     const id = 'pl-' + Math.random().toString(36).slice(2, 10)
@@ -2652,6 +2811,7 @@ export default function SdlcPipeline() {
       if (existing) {
         // Edit mode: update the existing pipeline in place.
         existing.source = p.source
+        existing.workspace = p.workspace
         if (p.repo_path) existing.repo_path = p.repo_path
         else delete existing.repo_path
         existing.trust = p.trust
@@ -2660,17 +2820,25 @@ export default function SdlcPipeline() {
         else delete existing.budget
         existing.backlog_intake = p.backlog_intake
         existing.results_in_repo = p.results_in_repo
+        existing.conversation_log = p.conversation_log
+        if (p.trusted_authors.length) existing.trusted_authors = p.trusted_authors
+        else delete existing.trusted_authors
         existing.self_enabling = p.self_enabling
         existing.approach = p.approach
+        if (p.sync_mode) existing.sync_mode = p.sync_mode
+        else delete existing.sync_mode
         existing.steps = p.steps
       } else {
         state.pipelines.push({
-          id, repo: p.repo, ...(p.repo_path ? { repo_path: p.repo_path } : {}),
+          id, repo: p.repo, workspace: p.workspace, ...(p.repo_path ? { repo_path: p.repo_path } : {}),
           source: p.source,
           trust: p.trust, depth: p.depth, backlog_intake: p.backlog_intake,
           ...(p.budget ? { budget: p.budget } : {}),
           results_in_repo: p.results_in_repo,
+          conversation_log: p.conversation_log,
+          ...(p.trusted_authors.length ? { trusted_authors: p.trusted_authors } : {}),
           self_enabling: p.self_enabling, approach: p.approach,
+          ...(p.sync_mode && p.sync_mode !== 'poll' ? { sync_mode: p.sync_mode } : {}),
           sot: 'github', steps: p.steps,
           created_at: now,
         })
@@ -2715,14 +2883,17 @@ export default function SdlcPipeline() {
   }, [cards, stepAgent])
 
   const statusGroups = useMemo(() => {
-    const blocked: PipelineCard[] = [], inFlight: PipelineCard[] = [], done: PipelineCard[] = []
-    cards.forEach(c => {
-      if (c.stage === 'done') done.push(c)
-      else if (isGateStep(c.stage)) blocked.push(c)
-      else inFlight.push(c)
+    const grouped = Object.fromEntries(CARD_STATUS_ORDER.map(kind => [kind, [] as PipelineCard[]])) as Record<string, PipelineCard[]>
+    cards.forEach(card => {
+      const pipeline = pipelines.find(item => item.id === card.pipeline_id) || pipelines.find(item => item.repo === card.source?.repo)
+      const gate = pipeline?.steps?.find(step => step.id === card.stage)?.type === 'gate' || isGateStep(card.stage)
+      const liveObserved = runStatus.some(row => row.cardId === card.id && row.step === card.stage && row.live)
+      grouped[deriveCardStatus(card, { isGate: gate, liveObserved }).kind].push(card)
     })
-    return { 'Blocked at Gate': blocked, 'In-Flight (Auto)': inFlight, 'Done': done }
-  }, [cards, isGateStep])
+    return Object.fromEntries(CARD_STATUS_ORDER
+      .filter(kind => grouped[kind].length > 0)
+      .map(kind => [CARD_STATUS_META[kind].label, grouped[kind]])) as Record<string, PipelineCard[]>
+  }, [cards, pipelines, isGateStep, runStatus])
 
   const activeCount = cards.filter(c => c.stage !== 'done').length
   const gatedCount = cards.filter(c => isGateStep(c.stage)).length
@@ -2747,10 +2918,16 @@ export default function SdlcPipeline() {
     const expectedRevision = gate ? (card.gate_review?.result_revision ?? null) : undefined
     const producerStep = gate ? producerStepFor(card) : undefined
     const producerSession = gate ? producerSessionFor(card) : undefined
+    const liveObserved = runStatus.some(row => row.cardId === card.id && row.step === card.stage && row.live)
+    const cardStatus = deriveCardStatus(card, { isGate: gate, liveObserved })
+    const step = pipeline?.steps?.find(item => item.id === card.stage)
+    const effectiveCapability = card.capability || step?.capability || 'auto-derived'
     return {
       card,
       config,
       isGate: gate,
+      cardStatus,
+      effectiveCapability,
       producerStep,
       producerSession,
       onOpenProducer: producerSession
@@ -2764,15 +2941,26 @@ export default function SdlcPipeline() {
         : undefined,
       onCycleTrust: () => cycleTrust(card.id),
       onCycleDepth: () => cycleDepth(card.id),
+      onSetBudget: (budget?: Budget) => setCardBudget(card.id, budget),
       onInterject: (kind: string, text: string) => submitCardCommand(
         card.id, card.stage, { type: 'interject', kind, text }, expectedRevision),
-      onResolveDecision: (decisionId: string, choice: 'approve' | 'decline') => resolveDecision(card.id, decisionId, choice),
+      onResolveDecision: (decisionId: string) => resolveDecision(card.id, decisionId),
+      onOpenOrchestrator: () => openOrchestrator(card),
     }
   }
 
   return (
     <>
       <PageHeader title="DLC-YOLO" subtitle="Autonomous SDLC pipeline with human gates" />
+      {agentCatalogOpen && <AgentCrewCatalogModal
+        profiles={agentProfiles}
+        crews={crews}
+        loading={agentCatalogLoading}
+        context={repoFilter.size === 1 ? [...repoFilter][0] : undefined}
+        onRefresh={() => { void loadAgentCatalog() }}
+        onSaveCrew={saveCrewRoute}
+        onClose={() => setAgentCatalogOpen(false)}
+      />}
       {runPaneOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
           style={{ background: 'rgba(0,0,0,0.48)', backdropFilter: 'blur(3px)' }}
@@ -2838,9 +3026,10 @@ export default function SdlcPipeline() {
           candidates={candidates}
           existingRepos={new Set(pipelines.map(p => p.repo))}
           defaults={config}
-          knownAgents={['spec-agent', 'design-agent', 'impl-agent', 'review-agent', 'orchestrator']}
+          agentProfiles={agentProfiles}
           crews={crews}
           onCreate={createPipeline}
+          onSaveCrew={saveCrewRoute}
           onClose={() => setSetupOpen(false)}
         />
       )}
@@ -2849,7 +3038,7 @@ export default function SdlcPipeline() {
           candidates={candidates}
           existingRepos={new Set(pipelines.map(p => p.repo))}
           defaults={config}
-          knownAgents={['spec-agent', 'design-agent', 'impl-agent', 'review-agent', 'orchestrator']}
+          agentProfiles={agentProfiles}
           crews={crews}
           editPipeline={
             pipelines.find(p => p.repo === editRepo) ||
@@ -2859,6 +3048,7 @@ export default function SdlcPipeline() {
           cardCount={allCards.filter(c => (c.source?.repo || 'unlinked') === editRepo).length}
           isExample={EXAMPLE_REPOS.has(editRepo)}
           onCreate={createPipeline}
+          onSaveCrew={saveCrewRoute}
           onDelete={deletePipeline}
           onClose={() => setEditRepo(null)}
         />
@@ -2866,12 +3056,20 @@ export default function SdlcPipeline() {
       <div className="px-6 pb-8 overflow-y-auto flex-1 min-h-0">
         <PipelineWorld steps={activeSteps} cardsByStage={cardsByStage} onNodeClick={scrollToStage} />
 
-        <div className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(120px,1fr))] mb-5">
+        <div className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(120px,1fr))] mb-3">
           <StatCard label="Active" value={String(activeCount)} accent />
           <StatCard label="Gated" value={String(gatedCount)} />
           <StatCard label="Done" value={String(doneCount)} />
           <StatCard label="Parked" value={String(parkedTotal)} />
         </div>
+
+        <DlcYoloControls
+          repos={repoList.map(item => item.name)}
+          selectedRepos={[...repoFilter]}
+          onNewPipeline={() => { void openSetup() }}
+          onConfigure={openPipelineEditor}
+          onOpenAgents={openAgentCatalog}
+        />
 
         {/* Sidebar + board */}
         <div className="flex gap-4 items-start">
@@ -2881,7 +3079,7 @@ export default function SdlcPipeline() {
             onToggle={toggleRepo}
             onClear={clearRepos}
             onAddWorkspace={openSetup}
-            onEdit={setEditRepo}
+            onEdit={openPipelineEditor}
           />
 
           <div className="flex-1 min-w-0">

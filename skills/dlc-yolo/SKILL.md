@@ -33,10 +33,13 @@ When the target repo is already known, ask at most these four questions:
 2. **Depth** — quick | **standard (default)** | deep.
 3. **Budget** — **follow depth (default)** | custom | unlimited. If custom is chosen, collect its
    numeric/enum fields in one follow-up only after this form.
-4. **Pipeline extras** (multi-select) — save results in repo; disable backlog auto-intake; enable
-   self-enabling simplified; enable self-enabling enhanced. No selections means the defaults:
-   results-in-repo OFF, backlog auto-intake ON, self-enabling OFF, approach simplified,
-   conversation log OFF.
+4. **Pipeline extras** (multi-select) — save results in repo; enable conversation log; disable
+   backlog auto-intake; enable self-enabling simplified; enable self-enabling enhanced; use a
+   non-default trusted-author allowlist. No selections means the defaults: results-in-repo OFF,
+   conversation log OFF, backlog auto-intake ON, self-enabling OFF, approach simplified, and
+   ownership restricted to the authenticated `gh` user. If custom budget and/or a non-default
+   trusted-author allowlist is selected, collect all requested numeric/enum fields and GitHub logins
+   in one follow-up after this form; do not add separate setup cards.
 
 When the target repo is not known, question 1 selects a known pipeline/workspace or accepts a custom
 `owner/repo`; combine trust+depth into question 2 as execution presets (default =
@@ -107,8 +110,8 @@ CONSOLE, not that brain.** Your job is narrow and you HAND OFF the rest:
 > the cron/orchestrator owns every `step_status` transition from there.
 
 The remaining sections below are your CONSOLE procedures + reference for the two cases where you
-DO author inline **only on explicit user request** (the UI "✨ Draft with /dlc-yolo" crew/agent
-authoring). Everything else is hand-off.
+DO author inline **only on an explicit typed user request**. UI agent and crew-route configuration
+stays in the app and does not launch this command session. Everything else is hand-off.
 
 ### State + SoT (unchanged)
 
@@ -202,16 +205,15 @@ with one `ask_question` call when the arguments did not already choose it:
 
 1. **Start a new pipeline conversation**
 2. **Maintain an existing pipeline**
-3. **Author an agent for a custom step** — if the seed prompt mentions designing a NEW
-   agent for a step (the UI's "✨ Draft with /dlc-yolo" hands off here), go straight to it.
+3. **Author an agent for a custom step** — only when the user explicitly types that request, go straight to it.
 4. **Create / assign a crew** — author a NEW globally-reusable crew (canon or addendum) and
    register it, or assign an existing crew to a step. See "Crew creation & assignment".
 
 ## Crew creation & assignment
 
 > **Lane note (single-orchestrator-role-lanes-spec):** this section is CONSOLE authoring you run
-> ONLY on an EXPLICIT user request — the UI "✨ Draft with /dlc-yolo" button, or the user asking
-> you to design/assign a crew. It is NOT the autonomous bootstrap path: when a *pipeline*
+> ONLY on an EXPLICIT typed user request. The app's Agent config form handles ordinary global
+> crew-route create/update without entering this command session. This is NOT the autonomous bootstrap path: when a *pipeline*
 > self-enables, the ORCHESTRATOR infers the crew lineup and runs `kirocrew agent create` during
 > bootstrap — you do not. Here you are helping a human hand-author one crew; there the orchestrator
 > does it as part of driving the pipeline. Same CLI + registry, different caller.
@@ -221,11 +223,9 @@ binds). Crews created here are **GLOBAL** — usable across ALL of KiroCrew (Spe
 routing, other apps, plain chat), not siloed in this app. There is ONE registry and ONE
 creation mechanism; reuse it, never build a parallel store.
 
-**Create a crew (global):** design it conversationally — ask for its purpose (canon phase
-worker vs cross-cutting addendum like `research` / `secure-design`), then propose a name,
-role/prompt, model, target workspace, and memory store. On approval, register it GLOBALLY
-by running the existing CLI (the app UI CANNOT write `config.json`, but you — an agent —
-can run the CLI):
+**Create a crew (global):** the app's authenticated Agent config form submits only the sanctioned
+name, `kiro_agent`, workspace, and memory-store fields to its backend, which invokes the public CLI
+without a shell. For an explicit typed console request, you may use that same CLI directly:
 ```
 kirocrew agent create --name <crew-name> --kiro-agent <kiro-agent> \
   --workspace <workspace> --memory-store <memory-store>
@@ -344,8 +344,11 @@ agent-setup panel's handoff). Do this conversationally:
    pipeline → config, default the gh-authenticated user; empty ≠ allow-all; fail closed if
    unverifiable). Do NOT create/drive a card for an untrusted-authored issue. An issue you file
    yourself in this flow is authored by you, so it passes.
-5. If `gh` or the repo is unavailable, create the card with `sot:"local"` and tell the user
-   it will **re-sync to GitHub** when access returns. Never block on GitHub.
+5. If `gh` or the repo is unavailable, create the card with `sot:"local"` and never block on
+   GitHub. If an exact issue link already exists, the advance poll will authoritatively verify and
+   converge its label when access returns. If no issue was created, tell the user the card stays
+   local until the coordinator-capability orchestrator files and records one; the zero-token runtime
+   never guesses identity or creates issues.
 
 ## 2. Maintain an existing pipeline
 

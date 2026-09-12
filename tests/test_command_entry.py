@@ -58,6 +58,8 @@ def test_fresh_pipeline_form_accepts_all_documented_defaults():
         "backlog auto-intake ON",
         "self-enabling OFF",
         "approach simplified",
+        "conversation log OFF",
+        "trusted-author allowlist",
     ):
         assert expected in text
 

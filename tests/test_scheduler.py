@@ -243,6 +243,43 @@ class TestPhaseDag:
         assessment = advance_mod._result_scope_assessment(card, pipeline, "requirements")
         assert "required phase node s" in assessment["required_missing"]
 
+    def test_terminal_status_nodes_count_complete(
+            self, advance_mod, state_factory, card_factory):
+        """A phase node the agent recorded status='terminal' (the vocabulary the code's own
+        terminal_at/reconcile helpers use) MUST satisfy the completion check — otherwise an
+        otherwise-successful crew step self-blocks on 'result scope: required phase node ...'
+        purely on a status-word mismatch. Also: a node with only terminal_at (unknown status)
+        is complete (defensive)."""
+        pipeline = _pipeline()
+        pipeline["steps"][0]["pass_dag"] = {"nodes": [
+            {"id": "grounding", "required": True},
+            {"id": "crew-x", "required": True},
+            {"id": "synthesis", "depends_on": ["grounding", "crew-x"], "required": True},
+        ]}
+        card = card_factory(step_status={"requirements": "done"})
+        state = state_factory(cards=[card], pipelines=[pipeline])
+        step = advance_mod._step_def(pipeline, "requirements")
+        advance_mod._ensure_execution_envelope(
+            state, card, step, pipeline, "2026-09-06T00:00:00Z")
+        envelope = card["execution_envelope"]
+        card["step_results"] = {"requirements": {
+            "envelope_id": envelope["id"], "status": "completed",
+            "bundle": {"summary": "result", "artifacts": [{"ref": "result.md"}]},
+        }}
+        card["pass_schedule"] = {"requirements": {"nodes": {
+            # status='terminal' — the exact word the agent records
+            "grounding": {"id": "grounding", "status": "terminal",
+                          "terminal_at": "2026-09-06T00:00:10Z"},
+            "crew-x": {"id": "crew-x", "status": "terminal",
+                       "terminal_at": "2026-09-06T00:00:20Z"},
+            # unknown status but a terminal_at timestamp — must still count (defensive)
+            "synthesis": {"id": "synthesis", "status": "wrapped-up",
+                          "terminal_at": "2026-09-06T00:00:30Z"},
+        }}}
+
+        assessment = advance_mod._result_scope_assessment(card, pipeline, "requirements")
+        assert assessment["required_missing"] == [], assessment["required_missing"]
+
 
 class TestTopologyAndCancellation:
     def test_fan_in_waits_for_every_required_child_then_activates_integration(

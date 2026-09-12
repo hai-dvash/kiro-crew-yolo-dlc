@@ -106,8 +106,10 @@ interface GateCommand {
   expected_revision: number | null
   actor: string
   at: string
-  status: 'pending'
+  status: 'pending' | 'applied' | 'approved' | 'rejected' | 'consumed'
   reason?: string
+  rejection_reason?: string
+  processed_at?: string
   kind?: string
   text?: string
 }
@@ -945,20 +947,54 @@ function PipelineCardItem({ card, config, isGate, cardStatus, effectiveCapabilit
 
       {isGate && onApprove && onReject && (
         <div className="mt-2.5 flex gap-1.5 items-center flex-wrap">
-          <button
-            className="text-[11px] px-2.5 py-1 rounded-md font-semibold transition-opacity hover:opacity-85"
-            style={{ background: 'var(--ok)', color: 'var(--bg)' }}
-            onClick={onApprove}
-          >
-            Approve
-          </button>
-          <button
-            className="text-[11px] px-2.5 py-1 rounded-md font-semibold transition-opacity hover:opacity-85"
-            style={{ background: 'var(--danger)', color: 'var(--bg)' }}
-            onClick={requestReject}
-          >
-            Reject
-          </button>
+          {(() => {
+            // Reflect the LATEST gate command for this gate so the buttons are responsive:
+            // a click writes a pending gate_command that the cron resolves ASYNCHRONOUSLY —
+            // without this the buttons look dead even while the command is being processed,
+            // and a rejected command (e.g. "gate-review-missing") failed silently.
+            const cmds = (card.gate_commands || []).filter(c => c.gate === card.stage)
+            const latest = cmds.length ? cmds[cmds.length - 1] : undefined
+            const pending = latest?.status === 'pending'
+            const rejected = latest?.status === 'rejected'
+            const applied = latest?.status === 'applied' || latest?.status === 'approved'
+            return (
+              <>
+                <button
+                  disabled={pending}
+                  className="text-[11px] px-2.5 py-1 rounded-md font-semibold transition-opacity hover:opacity-85 disabled:opacity-50 disabled:cursor-wait"
+                  style={{ background: 'var(--ok)', color: 'var(--bg)' }}
+                  onClick={onApprove}
+                  title={pending ? 'A gate command is being processed…' : 'Approve this gate'}
+                >
+                  {pending && latest?.action === 'approve' ? 'Approving…' : 'Approve'}
+                </button>
+                <button
+                  disabled={pending}
+                  className="text-[11px] px-2.5 py-1 rounded-md font-semibold transition-opacity hover:opacity-85 disabled:opacity-50 disabled:cursor-wait"
+                  style={{ background: 'var(--danger)', color: 'var(--bg)' }}
+                  onClick={requestReject}
+                >
+                  {pending && latest?.action === 'reject' ? 'Rejecting…' : 'Reject'}
+                </button>
+                {pending && (
+                  <span className="text-[10px]" style={{ color: 'var(--muted)' }}>
+                    ⏳ {latest?.action} sent — the runtime is processing it…
+                  </span>
+                )}
+                {rejected && (
+                  <span className="text-[10px]" style={{ color: 'var(--danger)' }}
+                    title={latest?.rejection_reason || 'rejected'}>
+                    ⚠ {latest?.action} rejected: {latest?.rejection_reason || 'see gate result'}
+                  </span>
+                )}
+                {applied && (
+                  <span className="text-[10px]" style={{ color: 'var(--ok)' }}>
+                    ✓ {latest?.action} applied
+                  </span>
+                )}
+              </>
+            )
+          })()}
           {producerSession && onOpenProducer && (
             <button
               className="text-[11px] px-2.5 py-1 rounded-md font-semibold transition-opacity hover:opacity-85 inline-flex items-center gap-1"

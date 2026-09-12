@@ -716,7 +716,14 @@ _SCHEDULER_CLASSES = {
     "read-only", "artifact-isolated", "card-worktree",
     "same-branch-writer", "exclusive",
 }
-_SCHEDULER_COMPLETE = {"done", "advanced", "completed", "succeeded", "waived", "omitted"}
+# A phase-DAG node counts as COMPLETE under any of these status words. NOTE: 'terminal'
+# and 'complete' are included because that is the vocabulary the step agents (and the
+# code's own terminal_at / node-reconcile helpers) use for a finished node — a node
+# recorded status='terminal' (with a terminal_at timestamp) must satisfy the completion
+# check, or an otherwise-successful crew step self-blocks on 'result scope: required
+# phase node ...' purely on a status-word mismatch.
+_SCHEDULER_COMPLETE = {"done", "advanced", "completed", "succeeded", "waived", "omitted",
+                       "terminal", "complete"}
 _SCHEDULER_CANCEL_LIFECYCLES = {"cancelled", "canceled", "superseded", "parked"}
 _SCHEDULER_TERMINAL_LIFECYCLES = {"retired", "merged"}
 _SCHEDULER_DEFAULT_GLOBAL_LIMIT = 4
@@ -3246,9 +3253,15 @@ def _scheduler_phase_assessment(card: dict, step_id: str, envelope: dict) -> lis
                 if isinstance(item, dict) and item.get("id")}
     for node_id, item in declared.items():
         observed_node = observed_nodes.get(node_id)
-        if item.get("required") and (not isinstance(observed_node, dict)
-                                     or str(observed_node.get("status") or "").lower()
-                                     not in _SCHEDULER_COMPLETE):
+        _obs_status = (str(observed_node.get("status") or "").lower()
+                       if isinstance(observed_node, dict) else "")
+        # A node is complete if its status is a known completion word OR it carries a
+        # terminal_at timestamp (defensive: the producer records terminal_at for a finished
+        # node, so a future/unknown status word can never silently re-block a done node).
+        _node_complete = isinstance(observed_node, dict) and (
+            _obs_status in _SCHEDULER_COMPLETE
+            or bool(observed_node.get("terminal_at")))
+        if item.get("required") and not _node_complete:
             errors.append(f"required phase node {node_id}")
             continue
         if not isinstance(observed_node, dict):

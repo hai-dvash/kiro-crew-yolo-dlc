@@ -80,11 +80,18 @@ def _write_trigger(card_id: str) -> dict:
     target = next((c for c in cards if isinstance(c, dict) and c.get("id") == card_id), None)
     if target is None:
         return {"ok": False, "error": "card-not-found"}
-    existing = target.get("orchestrator_session")
+    # Single orchestrator: the live session lives on the PIPELINE, not the card (the card holds only
+    # a back-ref {pipeline_id, session_key, ref} with no cron_id/slot_key). Resolve the pipeline
+    # session for the already-open short-circuit; derive slot_key (cron-<id>) from session_key
+    # (cron:<id>) when the pipeline object doesn't carry it.
+    pipelines = state.get("pipelines") if isinstance(state.get("pipelines"), list) else []
+    pl = next((p for p in pipelines if isinstance(p, dict) and p.get("id") == target.get("pipeline_id")), None)
+    existing = (pl or {}).get("orchestrator_session") if isinstance(pl, dict) else None
     if isinstance(existing, dict) and existing.get("cron_id") and not existing.get("released"):
+        sk = existing.get("session_key") or ""
         return {"ok": True, "status": "already-open",
-                "session_key": existing.get("session_key"),
-                "slot_key": existing.get("slot_key")}
+                "session_key": sk,
+                "slot_key": existing.get("slot_key") or (sk.replace("cron:", "cron-") if sk else None)}
     target["orchestrator_trigger"] = {"status": "requested", "at": _now()}
     # Atomic, fsync'd write beside the state file (mirror the cron's durability).
     tmp_fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=".state-", suffix=".tmp")

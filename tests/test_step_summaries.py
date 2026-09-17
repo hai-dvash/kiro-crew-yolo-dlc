@@ -71,6 +71,17 @@ def test_transient_pending_step_gets_no_summary():
     assert "investigate" not in (card.get("step_summaries") or {})
 
 
+def test_stale_summary_pruned_when_step_reverts_to_pending():
+    # A block was cleared → step is pending again; the old terminal summary must be dropped so the
+    # glanceable line doesn't lie ("tasks: blocked" on a pending step).
+    card = _card(step_status={"tasks": "pending"},
+                 step_summaries={"tasks": {"schema_version": 1, "step": "tasks", "status": "blocked",
+                                           "headline": "tasks: blocked", "synthesized": True}})
+    state = {"cards": [card]}
+    assert advance._synthesize_step_summaries(state, "t1") is True
+    assert "tasks" not in (card.get("step_summaries") or {})
+
+
 def test_stale_synthesized_summary_is_refreshed_on_status_change():
     card = _card(step_status={"investigate": "blocked"},
                  block_reason={"investigate": "missing input"},

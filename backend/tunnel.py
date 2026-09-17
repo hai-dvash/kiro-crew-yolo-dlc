@@ -187,7 +187,25 @@ async def start(state: _TunnelState, port: int) -> dict:
                 return status(state)
             await asyncio.sleep(0.2)
         if state.url is None:
+            # R4: a URL-less tunnel is useless AND a lingering relay to the loopback port.
+            # Tear it down rather than leaving cloudflared running with no announced URL.
+            # Kill INLINE (we already hold state._lock; calling stop() would re-acquire it and
+            # deadlock, and _cleanup alone only drops the ref — it does not terminate the proc).
             state.last_error = "no-url-within-timeout"
+            if proc.returncode is None:
+                try:
+                    os.killpg(proc.pid, signal.SIGTERM)
+                except (ProcessLookupError, PermissionError):
+                    proc.terminate()
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=_STOP_GRACE)
+                except asyncio.TimeoutError:
+                    with contextlib.suppress(ProcessLookupError, PermissionError):
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    with contextlib.suppress(Exception):
+                        await proc.wait()
+            await _cleanup(state)
+            state.last_error = "no-url-within-timeout"  # preserve reason through _cleanup
         return status(state)
 
 

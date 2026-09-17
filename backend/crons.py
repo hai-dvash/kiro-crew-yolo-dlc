@@ -5,10 +5,11 @@ webhook-only deployment that wants no polling, or pausing all automation during
 maintenance — and bring it back, without leaving the dashboard.
 
 Boundaries:
-* Acts ONLY on DLC-YOLO's own three jobs, matched by basename
-  (``dlc-yolo-advance`` / ``dlc-yolo-spawns`` / ``dlc-yolo-backlog-intake``),
-  whether registered bare (setup-crons) or namespaced (``dlc-yolo/...`` via the
-  manifest scan). It never touches another app's or a user's cron.
+* Acts ONLY on DLC-YOLO's own two jobs, matched by basename
+  (``dlc-yolo-advance`` / ``dlc-yolo-spawns``), whether registered bare
+  (setup-crons) or namespaced (``dlc-yolo/...`` via the manifest scan). It never
+  touches another app's or a user's cron. (The former ``dlc-yolo-backlog-intake``
+  agent cron is retired — its discovery scan folded into the zero-token advance loop.)
 * Discovers each job's REAL current id from ``kirocrew cron list`` — ids are
   gateway-assigned and the name format is mixed, so nothing is assumed/hashed.
 * Runs the sanctioned ``kirocrew cron {list,pause,resume}`` CLI via
@@ -24,12 +25,11 @@ import shutil
 
 CLI_TIMEOUT_SECONDS = 15
 
-# The three app-owned job basenames. A registered name is either bare
+# The two app-owned job basenames. A registered name is either bare
 # (``dlc-yolo-advance``) or namespaced (``dlc-yolo/dlc-yolo-advance``); matching
-# on the basename covers both. Ordered longest-first so 'dlc-yolo-backlog-intake'
-# is tested before any shorter prefix could mis-match.
+# on the basename covers both. Both are zero-token scripts — no agent-backed cron
+# exists (the backlog-intake LLM cron was retired; its scan runs inside advance).
 _JOB_BASENAMES = (
-    "dlc-yolo-backlog-intake",
     "dlc-yolo-advance",
     "dlc-yolo-spawns",
 )

@@ -14,7 +14,16 @@ test('one AI-marked button is the only command-session shortcut', () => {
   assert.doesNotMatch(controls, /`\/dlc-yolo \$\{target\}`/)
   assert.equal((controls.match(/openChat\(/g) || []).length, 1)
   assert.doesNotMatch(controls, /Start work|Maintain in chat|launch\('Start|launch\('Maintain/)
-  assert.doesNotMatch(app, /useChatLauncher|openChat\(|Draft with \/dlc-yolo/)
+  // App.tsx may open /dlc-yolo ONLY as a §9 self-enablement HANDOFF that carries explicit
+  // pipeline/card/action context — never a bare competing command-session launcher. Assert every
+  // openChat in App.tsx passes a '/dlc-yolo …' message with context, and none is the bare shortcut.
+  const appOpenChats = app.match(/openChat\(\{ message:[^}]*\}\)/g) || []
+  for (const call of appOpenChats) {
+    assert.match(call, /\/dlc-yolo /, `App openChat must carry a /dlc-yolo action: ${call}`)
+    assert.match(call, /\$\{/, `App openChat must interpolate context (card/pipeline): ${call}`)
+  }
+  assert.doesNotMatch(app, /openChat\(\{ message: command \}\)/)  // no bare command shortcut in App
+  assert.doesNotMatch(app, /Draft with \/dlc-yolo/)
   assert.doesNotMatch(catalog, /useChatLauncher|openChat\(|Create \/ update in chat/)
 })
 

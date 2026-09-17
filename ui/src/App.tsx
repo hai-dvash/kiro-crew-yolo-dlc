@@ -1,4 +1,4 @@
-import { useAppApi, useNavigate } from '@kirocrew/app-sdk'
+import { useAppApi, useNavigate, useChatLauncher } from '@kirocrew/app-sdk'
 import { Card, CardTitle, PageHeader, StatCard } from '@kirocrew/app-sdk/ui'
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { appendLiveTail, beginLiveThinking, finishLiveTail } from './liveTail.js'
@@ -8,6 +8,9 @@ import { DlcYoloControls, WebhookSettingsSection } from './WebhookSettings.js'
 import { CardBudgetEditor } from './CardBudgetEditor.js'
 import { CARD_STATUS_META, CARD_STATUS_ORDER, deriveCardStatus } from './cardStatus.js'
 import { projectCardTimeline, resolveChildren, resolveParentId } from './cardTimeline.js'
+import { projectPipelineEvents, ACTOR_GLYPH } from './pipelineEventTree.js'
+import { REQUEST_META, newRequestId, buildRequest, appendRequest } from './maintenanceRequests.js'
+import { aggregateRuntime, projectionStatusView, RUNTIME_BUCKETS } from './operationsProjection.js'
 import { AgentCrewCatalogModal, type AgentProfile, type CrewRecord, type CrewRouteDraft } from './AgentCrewCatalog.js'
 import { applyAgentProfileToDraft, catalogProfileNames, normalizeAgentProfile, normalizeCrewRecords, profileDeclarationPath } from './agentCatalog.js'
 
@@ -142,7 +145,7 @@ interface PipelineCard {
   gate_commands?: GateCommand[]
   runtime_handshakes?: Record<string, Record<string, unknown>>
   runtime_handshake?: Record<string, unknown>
-  orchestrator_session?: { agent_id?: string; session_key?: string; slot_key?: string; cron_id?: string; name?: string; at?: string; warm?: boolean }
+  orchestrator_session?: { agent_id?: string; session_key?: string; slot_key?: string; cron_id?: string; name?: string; at?: string; warm?: boolean; pipeline_id?: string; ref?: boolean }
   lifecycle?: string
   interjection?: Array<{ id?: string; at: string; step?: string; kind: string; text: string; by?: string; status?: string; result_revision?: number }>
   gate_history: Array<{ gate: string; decision: string; at: string; notes: string; command_id?: string; actor?: string; result_revision?: number }>
@@ -215,6 +218,7 @@ interface Pipeline {
   webhook_reconcile_interval_secs?: number
   sot?: 'github' | 'local'
   steps?: PipelineStep[]
+  orchestrator_session?: { session_key?: string; slot_key?: string; cron_id?: string; name?: string; at?: string; released?: boolean }
   created_at: string
 }
 
@@ -280,7 +284,7 @@ const DEPTH_TOKEN: Record<Depth, string> = {
   deep: 'var(--warn)',
 }
 
-type ViewMode = 'pipeline' | 'workspace' | 'crew' | 'status' | 'backlog'
+type ViewMode = 'pipeline' | 'workspace' | 'crew' | 'status'
 
 // Small pill helper using theme tokens.
 function Pill({ color, children, title, onClick, active }: {
@@ -547,7 +551,6 @@ function ViewTabs({ active, onChange, counts }: {
     { id: 'workspace', label: 'Workspace' },
     { id: 'crew', label: 'Crew' },
     { id: 'status', label: 'Status' },
-    { id: 'backlog', label: 'Backlog' },
   ]
   return (
     <div className="flex gap-0.5 p-0.5 rounded-lg w-fit"
@@ -807,7 +810,352 @@ function GateInspectionDialog({ card, inspection, producerSession, onClose, onOp
 }
 
 // --- Card Component ---
-function PipelineCardItem({ card, config, isGate, cardStatus, effectiveCapability, producerStep, producerSession, onOpenProducer, onApprove, onReject, onCycleTrust, onCycleDepth, onSetBudget, onInterject, onResolveDecision, onOpenOrchestrator, liveView, allCards, onOpenCard }: {
+// Native maintenance controls (ui-parity §8.2/§8.3): a small menu that appends a bounded
+// request:* interjection (consumed by the deterministic runtime handler). Never moves a stage.
+// Self-enablement surface (ui-parity §9): four phases (read-only) + HANDOFF buttons that open
+// /dlc-yolo with exact context. The browser NEVER creates crews/issues or mutates terminal markers.
+function SelfEnablementSurface({ card, openChat }: {
+  card: PipelineCard
+  openChat: (opts: { message: string }) => void
+}) {
+  const boot = (card as { bootstrap?: Record<string, unknown> }).bootstrap
+  const intent = (card as { intent_contract?: Record<string, unknown>; intent?: Record<string, unknown> }).intent_contract
+    || (card as { intent?: Record<string, unknown> }).intent
+  if (!boot && !intent) return null
+  const ctx = `pipeline ${card.pipeline_id || ''} card ${card.id} (${card.title})`
+  const handoff = (action: string, verb: string) => (
+    <button className="text-[10px] px-2 py-0.5 rounded hover:opacity-80"
+      style={{ color: 'var(--accent)', border: '1px solid var(--border)' }}
+      title="Opens /dlc-yolo with this context — nothing is created in the browser"
+      onClick={() => openChat({ message: `/dlc-yolo ${action} for ${ctx}` })}>
+      {verb}
+    </button>
+  )
+  const bstatus = boot ? String(boot.status || 'not-run') : 'n/a'
+  const crews = Array.isArray(boot?.crews_created) ? (boot!.crews_created as unknown[]) : []
+  const issues = Array.isArray(boot?.issues_opened) ? (boot!.issues_opened as unknown[]) : []
+  return (
+    <div className="mt-2 pt-2" style={{ borderTop: '1px dashed var(--border)' }}>
+      <div className="text-[10px] uppercase tracking-wider mb-1" style={{ color: 'var(--muted)' }}>🌱 self-enablement</div>
+      <div className="flex flex-col gap-1 text-[10px]">
+        {/* 1 setup · 2 intent · 3 per-step · 4 bootstrap */}
+        <div className="flex items-center gap-2">
+          <span style={{ color: 'var(--text)' }}>① setup</span>
+          <span style={{ color: 'var(--muted)' }}>{String((card as { self_enable_mode?: string }).self_enable_mode || 'default')}</span>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <span style={{ color: 'var(--text)' }}>② intent</span>
+          <span style={{ color: 'var(--muted)' }}>{intent ? String((intent as { classification?: string; status?: string }).classification || (intent as { status?: string }).status || 'present') : 'not run'}</span>
+          {handoff('resolve intent', 'Resolve intent')}
+          {handoff('skip intent', 'Skip intent')}
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <span style={{ color: 'var(--text)' }}>③ per-step</span>
+          {handoff(`elaborate step ${card.stage}`, 'Elaborate step')}
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <span style={{ color: 'var(--text)' }}>④ bootstrap</span>
+          <span style={{ color: bstatus === 'done' ? 'var(--ok)' : 'var(--muted)' }}>{bstatus}</span>
+          {crews.length > 0 && <span style={{ color: 'var(--muted)' }}>· crews {crews.length}</span>}
+          {issues.length > 0 && <span style={{ color: 'var(--muted)' }}>· issues {issues.length}</span>}
+          {boot?.blocking_reason ? <span style={{ color: 'var(--warn)' }}>· {String(boot.blocking_reason)}</span> : null}
+          {handoff('resume bootstrap', 'Resume bootstrap')}
+        </div>
+        {bstatus === 'done' && (
+          <div className="text-[9px]" style={{ color: 'var(--muted)' }}>Replaying bootstrap is idempotent intent, not a promise.</div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// Operations panel (ui-parity §10): one read-only surface, four sections.
+function OperationsPanel({ cards, schedulerState, statePath, readAppFile, onClose }: {
+  cards: PipelineCard[]
+  schedulerState: unknown
+  statePath: string
+  readAppFile: (path: string) => Promise<{ content?: string }>
+  onClose: () => void
+}) {
+  const runtime = useMemo(() => aggregateRuntime(cards, schedulerState), [cards, schedulerState])
+  const [projStatus, setProjStatus] = useState<ReturnType<typeof projectionStatusView>>(projectionStatusView(null))
+  const [sessions, setSessions] = useState<Array<{ card: string; step: string; slot?: string }>>([])
+  const [leases, setLeases] = useState<Array<{ card: string; branch?: string; status?: string }>>([])
+
+  useEffect(() => {
+    // §10.2 derive projections/status.json from the CURRENTLY RESOLVED state path. Re-resolve on open.
+    const base = statePath.replace(/\/state\.json$/, '')
+    // default workspace layout; unavailable (not "healthy") on any miss.
+    const statusPath = `${base}/workspaces/default/data/ledger/projections/status.json`
+    let cancelled = false
+    readAppFile(statusPath)
+      .then(r => { if (!cancelled) { try { setProjStatus(projectionStatusView(JSON.parse(r.content || 'null'))) } catch { setProjStatus(projectionStatusView(null)) } } })
+      .catch(() => { if (!cancelled) setProjStatus(projectionStatusView(null)) })
+    return () => { cancelled = true }
+  }, [statePath, readAppFile])
+
+  useEffect(() => {
+    // §10.4 sessions + worktrees from recorded card state (observed facts only)
+    const ss: Array<{ card: string; step: string; slot?: string }> = []
+    const ls: Array<{ card: string; branch?: string; status?: string }> = []
+    for (const c of cards) {
+      const stepSessions = (c as { step_sessions?: Record<string, { slot_key?: string }> }).step_sessions
+      if (stepSessions) for (const [step, p] of Object.entries(stepSessions)) ss.push({ card: c.id, step, slot: p?.slot_key })
+      const lease = (c as { worktree_lease?: { branch?: string; status?: string } }).worktree_lease
+      if (lease) ls.push({ card: c.id, branch: lease.branch, status: lease.status })
+    }
+    setSessions(ss.slice(0, 60)); setLeases(ls.slice(0, 60))
+  }, [cards])
+
+  const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
+    <div className="mb-4">
+      <div className="text-[10px] uppercase tracking-wider mb-1.5" style={{ color: 'var(--muted)' }}>{title}</div>
+      {children}
+    </div>
+  )
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.48)', backdropFilter: 'blur(3px)' }}
+      onMouseDown={e => { if (e.currentTarget === e.target) onClose() }}>
+      <section role="dialog" aria-modal="true" aria-label="Operations" className="flex flex-col rounded-xl overflow-hidden"
+        style={{ width: 'min(760px, calc(100vw - 32px))', maxHeight: 'min(88vh, 880px)', background: 'var(--bg-elevated, var(--bg))', border: '1px solid var(--border-strong, var(--border))', boxShadow: '0 28px 90px rgba(0,0,0,0.5)' }}>
+        <header className="px-5 py-3 flex items-center gap-3" style={{ borderBottom: '1px solid var(--border)' }}>
+          <h2 className="text-[15px] font-semibold flex-1" style={{ color: 'var(--text-strong, var(--text))' }}>🛠 Operations</h2>
+          <button onClick={onClose} className="text-[13px] px-2 py-0.5 rounded hover:opacity-80" style={{ color: 'var(--muted)' }} aria-label="Close">✕</button>
+        </header>
+        <div className="px-5 py-3 overflow-y-auto text-[11px]">
+          <Section title="Runtime / scheduler">
+            <div className="flex flex-wrap gap-2">
+              {RUNTIME_BUCKETS.map(b => (
+                <span key={b} className="px-2 py-0.5 rounded-full" style={{ background: 'color-mix(in srgb, var(--accent) 10%, transparent)', color: (runtime.counts as Record<string, number>)[b] ? 'var(--text)' : 'var(--muted)' }}>
+                  {b} {(runtime.counts as Record<string, number>)[b]}
+                </span>
+              ))}
+            </div>
+            {runtime.waitReasons.length > 0 && (
+              <div className="mt-2">
+                {runtime.waitReasons.map((w, i) => (
+                  <div key={i} style={{ color: 'var(--muted)' }}>⛔ {w.card}: {w.reason}</div>
+                ))}
+              </div>
+            )}
+          </Section>
+          <Section title="Projection parity">
+            {!projStatus.available ? (
+              <div style={{ color: 'var(--muted)' }}>unavailable</div>
+            ) : (
+              <div>
+                <div style={{ color: projStatus.verified ? 'var(--ok)' : 'var(--warn)' }}>
+                  {projStatus.label} · authority {projStatus.authority_active ? 'active' : 'inactive'}
+                </div>
+                {projStatus.digest_match !== null && <div style={{ color: 'var(--muted)' }}>digest match: {String(projStatus.digest_match)}</div>}
+                {projStatus.failure_code && <div style={{ color: 'var(--warn)' }}>failure: {projStatus.failure_code}</div>}
+                <div className="text-[9px]" style={{ color: 'var(--muted)' }}>last-known-good runs.json preserved when blocked</div>
+              </div>
+            )}
+          </Section>
+          <Section title="Webhook">
+            <WebhookSettingsSection />
+          </Section>
+          <Section title="Sessions & worktrees">
+            <div className="mb-1" style={{ color: 'var(--muted)' }}>{sessions.length} session(s) · {leases.length} lease(s)</div>
+            {sessions.slice(0, 12).map((s, i) => (
+              <div key={i} style={{ color: 'var(--text)' }}>{s.card} · {s.step}{s.slot ? ` · ${s.slot}` : ''}</div>
+            ))}
+            {leases.slice(0, 12).map((l, i) => (
+              <div key={`l${i}`} style={{ color: 'var(--muted)' }}>🌿 {l.card} · {l.branch || '—'} · {l.status || '—'}</div>
+            ))}
+          </Section>
+        </div>
+      </section>
+    </div>
+  )
+}
+
+// Card details drawer (ui-parity §7): four READ-ONLY tabs. No mutation, no fabricated
+// model/tool/effort/timing, explicit http URLs as links, local refs shown as file references.
+function _kv(label: string, value: unknown) {
+  if (value === undefined || value === null || value === '') return null
+  return (
+    <div className="flex gap-2 text-[11px] py-0.5">
+      <span className="flex-shrink-0" style={{ color: 'var(--muted)', minWidth: '110px' }}>{label}</span>
+      <span className="min-w-0 break-words" style={{ color: 'var(--text)' }}>{String(value)}</span>
+    </div>
+  )
+}
+function _isHttp(s: unknown): s is string { return typeof s === 'string' && /^https?:\/\//i.test(s) }
+
+function CardDrawer({ card, cardStatus, effectiveCapability, onClose }: {
+  card: PipelineCard
+  cardStatus: { kind: string; label: string; reason?: string | null }
+  effectiveCapability: string
+  onClose: () => void
+}) {
+  const [tab, setTab] = useState<'overview' | 'results' | 'history' | 'execution'>('overview')
+  const tabs: Array<[typeof tab, string]> = [
+    ['overview', 'Overview'], ['results', 'Results'],
+    ['history', 'Decisions & history'], ['execution', 'Execution'],
+  ]
+  const sched = card.execution_schedule as { current_node_id?: string; nodes?: Record<string, Record<string, unknown>> } | undefined
+  const curNode = sched?.current_node_id ? sched?.nodes?.[sched.current_node_id] : undefined
+  const lease = card.worktree_lease as Record<string, unknown> | undefined
+  const topo = card.topology as Record<string, unknown> | undefined
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.58)', backdropFilter: 'blur(4px)' }}
+      onMouseDown={e => { if (e.currentTarget === e.target) onClose() }}>
+      <section role="dialog" aria-modal="true" aria-label="Card details" className="flex flex-col rounded-xl overflow-hidden"
+        style={{ width: 'min(760px, calc(100vw - 32px))', maxHeight: 'min(88vh, 860px)', background: 'var(--bg-elevated, var(--bg))', border: '1px solid var(--border-strong, var(--border))', boxShadow: '0 28px 90px rgba(0,0,0,0.5)' }}>
+        <header className="px-5 py-3 flex items-start gap-3" style={{ borderBottom: '1px solid var(--border)' }}>
+          <div className="min-w-0 flex-1">
+            <div className="text-[14px] font-semibold truncate" style={{ color: 'var(--text-strong, var(--text))' }}>{card.title}</div>
+            <div className="text-[11px] mt-0.5" style={{ color: 'var(--muted)' }}>{card.stage} · {cardStatus.label}</div>
+          </div>
+          <button onClick={onClose} className="text-[13px] px-2 py-0.5 rounded hover:opacity-80" style={{ color: 'var(--muted)' }} aria-label="Close">✕</button>
+        </header>
+        <nav className="flex gap-1 px-3 pt-2" style={{ borderBottom: '1px solid var(--border)' }}>
+          {tabs.map(([id, label]) => (
+            <button key={id} onClick={() => setTab(id)}
+              className="text-[11px] px-2.5 py-1 rounded-t-md"
+              style={{ color: tab === id ? 'var(--accent)' : 'var(--muted)',
+                borderBottom: tab === id ? '2px solid var(--accent)' : '2px solid transparent' }}>
+              {label}
+            </button>
+          ))}
+        </nav>
+        <div className="px-5 py-3 overflow-y-auto text-[11px]">
+          {tab === 'overview' && (
+            <div>
+              {card.source?.url && _isHttp(card.source.url)
+                ? _kv('source', null) || <div className="text-[11px] py-0.5"><span style={{ color: 'var(--muted)', minWidth: 110, display: 'inline-block' }}>source</span><a href={card.source.url} target="_blank" rel="noreferrer" className="hover:underline" style={{ color: 'var(--accent)' }}>{card.source.repo}{card.source.issue ? `#${card.source.issue}` : ''}</a></div>
+                : _kv('source', card.source?.repo)}
+              {_kv('pipeline', card.pipeline_id)}
+              {_kv('workspace', (card as { workspace?: string }).workspace)}
+              {_kv('stage', card.stage)}
+              {_kv('lifecycle', card.lifecycle)}
+              {_kv('SoT', card.sot)}
+              {_kv('status', `${cardStatus.label}${cardStatus.reason ? ` — ${cardStatus.reason}` : ''}`)}
+              {_kv('trust', card.trust ? `${card.trust} (override)` : 'inherited')}
+              {_kv('depth', card.depth ? `${card.depth} (override)` : 'inherited')}
+              {_kv('capability', effectiveCapability)}
+              {_kv('effort', card.effort ? JSON.stringify(card.effort) : null)}
+              {_kv('writes_allowed', card.writes_allowed === false ? 'false (cancel requested)' : null)}
+            </div>
+          )}
+          {tab === 'results' && (
+            <div>
+              {Object.entries((card.step_summaries as Record<string, { headline?: string; description?: string; executor?: string }>) || {}).map(([step, s]) => (
+                <div key={step} className="mb-2">
+                  <div className="font-medium" style={{ color: 'var(--text)' }}>{step}: {s?.headline || '—'}</div>
+                  {s?.description && <div style={{ color: 'var(--muted)' }}>{s.description}</div>}
+                  {s?.executor && <div className="text-[9px]" style={{ color: 'var(--muted)' }}>executor {s.executor}</div>}
+                </div>
+              ))}
+              {Object.entries((card.artifacts as Record<string, unknown>) || {}).map(([k, v]) => (
+                <div key={k} className="py-0.5">
+                  {_isHttp(v)
+                    ? <a href={v} target="_blank" rel="noreferrer" className="hover:underline" style={{ color: 'var(--accent)' }}>{k}</a>
+                    : <span style={{ color: 'var(--text)' }}>{k}: <code style={{ color: 'var(--muted)' }}>{String(v)}</code></span>}
+                </div>
+              ))}
+              {!card.step_summaries && !card.artifacts && <div style={{ color: 'var(--muted)' }}>No results recorded.</div>}
+            </div>
+          )}
+          {tab === 'history' && (
+            <div>
+              <div className="text-[10px] uppercase tracking-wider mt-1 mb-1" style={{ color: 'var(--muted)' }}>Decisions</div>
+              {((card.decisions as Array<Record<string, unknown>>) || []).map((d, i) => (
+                <div key={i} className="py-0.5" style={{ color: 'var(--text)' }}>
+                  {String(d.status) === 'open' ? '🔴 ' : '✓ '}{String(d.kind)} — {String(d.question || d.chosen || d.action || '')}
+                </div>
+              ))}
+              <div className="text-[10px] uppercase tracking-wider mt-2 mb-1" style={{ color: 'var(--muted)' }}>Stage history</div>
+              {((card.history as Array<Record<string, unknown>>) || []).map((h, i) => (
+                <div key={i} className="py-0.5" style={{ color: 'var(--muted)' }}>{String(h.from)} → {String(h.to)} · {String(h.agent || '')} · {String(h.at || '')}</div>
+              ))}
+              {((card.gate_history as Array<Record<string, unknown>>) || []).length > 0 && <>
+                <div className="text-[10px] uppercase tracking-wider mt-2 mb-1" style={{ color: 'var(--muted)' }}>Gates</div>
+                {((card.gate_history as Array<Record<string, unknown>>) || []).map((g, i) => (
+                  <div key={i} className="py-0.5" style={{ color: 'var(--muted)' }}>{String(g.decision)} {String(g.gate)} · {String(g.actor || '')}</div>
+                ))}
+              </>}
+              {((card.interjection as Array<Record<string, unknown>>) || []).length > 0 && <>
+                <div className="text-[10px] uppercase tracking-wider mt-2 mb-1" style={{ color: 'var(--muted)' }}>Requests / interjections</div>
+                {((card.interjection as Array<Record<string, unknown>>) || []).map((it, i) => (
+                  <div key={i} className="py-0.5" style={{ color: 'var(--muted)' }}>{String(it.kind)} · {String(it.status)}{it.reason ? ` (${String(it.reason)})` : ''}</div>
+                ))}
+              </>}
+            </div>
+          )}
+          {tab === 'execution' && (
+            <div>
+              {_kv('current node', sched?.current_node_id)}
+              {_kv('node status', curNode?.status as string)}
+              {_kv('permit', curNode?.permit_id as string)}
+              {_kv('concurrency class', curNode?.concurrency_class as string)}
+              {_kv('model (requested)', (card as { model_request?: string }).model_request)}
+              {_kv('model (applied)', (card as { model_applied?: string }).model_applied)}
+              {topo && <>
+                {_kv('topology', topo.action as string)}
+                {_kv('integration owner', topo.integration_owner as string)}
+                {_kv('children', Array.isArray(topo.children) ? `${topo.children.length}` : null)}
+              </>}
+              {lease && <>
+                {_kv('worktree branch', lease.branch as string)}
+                {_kv('lease status', lease.status as string)}
+                {_kv('lease locked', lease.locked ? 'true' : null)}
+              </>}
+              {_kv('cancel requested', card.cancel_requested_at as string)}
+              {card.writes_allowed === false && _kv('terminal observed', 'pending (cooperative cancel in progress)')}
+            </div>
+          )}
+        </div>
+        <footer className="px-5 py-2 text-[9px]" style={{ borderTop: '1px solid var(--border)', color: 'var(--muted)' }}>
+          Read-only view. Use 🔧 maintain to request changes; gate actions use the gate controls.
+        </footer>
+      </section>
+    </div>
+  )
+}
+
+function MaintenanceMenu({ onRequest }: { onRequest: (kind: string, text: string) => void }) {
+  const [open, setOpen] = useState(false)
+  const act = (kind: string) => {
+    const meta = REQUEST_META[kind]
+    let text = ''
+    if (meta.reasonRequired) {
+      const r = window.prompt(meta.confirm)          // reason required (back-step/park)
+      if (!r || !r.trim()) return
+      text = r.trim()
+    } else if (!window.confirm(meta.confirm)) {        // concise confirm / cancel warning
+      return
+    }
+    onRequest(kind, text)
+    setOpen(false)
+  }
+  return (
+    <div className="relative inline-block">
+      <button className="text-[10px] hover:underline" style={{ color: 'var(--muted)' }}
+        title="Request re-spec / retry / back-step / park / cancel" onClick={() => setOpen(o => !o)}>
+        🔧 maintain
+      </button>
+      {open && (
+        <div className="absolute z-20 mt-1 rounded-md py-1 text-[11px]"
+          style={{ background: 'var(--bg-elevated, var(--bg))', border: '1px solid var(--border-strong, var(--border))', boxShadow: '0 8px 28px rgba(0,0,0,0.4)', minWidth: '120px' }}>
+          {Object.entries(REQUEST_META).map(([kind, meta]) => (
+            <button key={kind} className="block w-full text-left px-3 py-1 hover:opacity-80"
+              style={{ color: kind === 'request:cancel' ? 'var(--danger, #e66)' : 'var(--text)' }}
+              onClick={() => act(kind)}>
+              {meta.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function PipelineCardItem({ card, config, isGate, cardStatus, effectiveCapability, producerStep, producerSession, onOpenProducer, onApprove, onReject, onCycleTrust, onCycleDepth, onSetBudget, onInterject, onResolveDecision, onOpenOrchestrator, liveView, allCards, onOpenCard, onRequest, onOpenStepSession, onCancelCard }: {
   card: PipelineCard
   config: PipelineConfig
   isGate: boolean
@@ -827,6 +1175,9 @@ function PipelineCardItem({ card, config, isGate, cardStatus, effectiveCapabilit
   liveView?: { stage: string; phase: string; tail: string; active: boolean; seq: number; slotKey: string; onOpen: () => void }
   allCards?: PipelineCard[]
   onOpenCard?: (cardId: string) => void
+  onRequest?: (kind: string, text: string) => void
+  onOpenStepSession?: Array<{ step: string; open: () => void }>
+  onCancelCard?: () => void
 }) {
   const accent = isGate ? 'var(--warn)' : cardStatus.kind === 'idle' ? 'var(--border-strong, var(--border))' : cardStatus.color
   const effTrust = (card.trust || config.trust) as Trust
@@ -840,6 +1191,8 @@ function PipelineCardItem({ card, config, isGate, cardStatus, effectiveCapabilit
   const [interjectText, setInterjectText] = useState('')
   const [inspectionOpen, setInspectionOpen] = useState(false)
   const [timelineOpen, setTimelineOpen] = useState(false)
+  const [detailsOpen, setDetailsOpen] = useState(false)
+  const { openChat } = useChatLauncher()
   const timelineEvents = useMemo(() => projectCardTimeline(card), [card])
   const relChildren = useMemo(() => resolveChildren(card, allCards || []), [card, allCards])
   const relParentId = useMemo(() => resolveParentId(card), [card])
@@ -871,9 +1224,28 @@ function PipelineCardItem({ card, config, isGate, cardStatus, effectiveCapabilit
         borderLeft: `2px solid ${accent}`,
       }}
     >
-      <div className="text-[13px] font-medium leading-snug truncate" style={{ color: 'var(--text-strong, var(--text))' }}>
-        {card.title}
-      </div>
+      {(() => {
+        // The title is the click target for the CURRENT step's session (session-first-spec: the
+        // most natural affordance). Styled distinctly (hover underline + pointer + ↗) so it reads
+        // as clickable; falls back to plain text when the current step has no session.
+        const cur = (onOpenStepSession || []).find(s => s.step === card.stage)
+        if (cur) {
+          return (
+            <button onClick={() => cur.open()}
+              className="text-[13px] font-medium leading-snug truncate text-left w-full hover:underline inline-flex items-center gap-1 group"
+              title={`Open the ${card.stage} step session`}
+              style={{ color: 'var(--text-strong, var(--text))', cursor: 'pointer' }}>
+              <span className="truncate">{card.title}</span>
+              <span className="opacity-40 group-hover:opacity-100 flex-shrink-0" style={{ color: 'var(--accent)' }} aria-hidden="true">↗</span>
+            </button>
+          )
+        }
+        return (
+          <div className="text-[13px] font-medium leading-snug truncate" style={{ color: 'var(--text-strong, var(--text))' }}>
+            {card.title}
+          </div>
+        )
+      })()}
       {card.source?.repo && (
         <a
           href={card.source.url || undefined}
@@ -1088,8 +1460,10 @@ function PipelineCardItem({ card, config, isGate, cardStatus, effectiveCapabilit
       {/* ── Zone: LIVE (streaming peek of the working agent's output — in-card-live-view-spec) ── */}
       {liveView && <LiveMiniPane live={liveView} />}
 
+      <SelfEnablementSurface card={card} openChat={openChat} />
+
       {/* ── Zone: ACTIONS (mutating controls only — visually separated from the descriptive tags above) ── */}
-      {(onInterject || onOpenOrchestrator) && (
+      {(onInterject || onOpenOrchestrator || (onOpenStepSession && onOpenStepSession.length) || onCancelCard) && (
         <div className="mt-2 flex items-center gap-2 flex-wrap"
           style={{ borderTop: '1px dashed var(--border)', paddingTop: '6px' }}>
           <span className="text-[9px] uppercase tracking-wider select-none" style={{ color: 'var(--muted)' }}>⚡ actions</span>
@@ -1114,11 +1488,11 @@ function PipelineCardItem({ card, config, isGate, cardStatus, effectiveCapabilit
           )}
           {onOpenOrchestrator && (
             <button className="text-[10px] hover:underline" style={{ color: 'var(--muted)' }}
-              title={card.orchestrator_session?.slot_key
+              title={(card.orchestrator_session?.slot_key || card.orchestrator_session?.session_key)
                 ? 'Open this pipeline\u2019s orchestrator session'
                 : 'Trigger an inspectable orchestrator session for this card'}
               onClick={() => onOpenOrchestrator()}>
-              {card.orchestrator_session?.slot_key ? '\u2699 open orchestrator' : '\u2699 orchestrator'}
+              {(card.orchestrator_session?.slot_key || card.orchestrator_session?.session_key) ? '\u2699 open orchestrator' : '\u2699 orchestrator'}
             </button>
           )}
           {hasTimeline && (
@@ -1128,12 +1502,34 @@ function PipelineCardItem({ card, config, isGate, cardStatus, effectiveCapabilit
               📜 timeline{timelineEvents.some(e => e.needs_human) ? ' 🔴' : ''}{relChildren.length > 0 ? ` 🌿${relChildren.length}` : ''}
             </button>
           )}
+          {onRequest && <MaintenanceMenu onRequest={onRequest} />}
+          {(onOpenStepSession || []).map(s => (
+            <button key={s.step} className="text-[10px] hover:underline" style={{ color: 'var(--accent)' }}
+              title={`Open the ${s.step} step session`} onClick={() => s.open()}>
+              ⚙ {s.step}
+            </button>
+          ))}
+          {onCancelCard && !['cancelled', 'canceled', 'retired', 'merged'].includes(String(card.lifecycle || '')) && (
+            <button className="text-[10px] hover:underline" style={{ color: 'var(--danger, #e66)' }}
+              title="Cancel this card (cooperative — revokes writes, retains worktree until terminal)"
+              onClick={() => onCancelCard()}>
+              ⏹ cancel
+            </button>
+          )}
+          <button className="text-[10px] hover:underline" style={{ color: 'var(--muted)' }}
+            title="Card details (read-only)" onClick={() => setDetailsOpen(true)}>
+            🔍 details
+          </button>
         </div>
       )}
 
       {timelineOpen && (
         <CardTimelineDrawer card={card} events={timelineEvents} children={relChildren} parent={relParent}
           onOpenCard={onOpenCard} onClose={() => setTimelineOpen(false)} />
+      )}
+      {detailsOpen && (
+        <CardDrawer card={card} cardStatus={cardStatus} effectiveCapability={String(effectiveCapability)}
+          onClose={() => setDetailsOpen(false)} />
       )}
 
       {inspectionOpen && inspection && (
@@ -1221,6 +1617,63 @@ function ModeBar({ config, onSet }: {
 }
 
 // --- Backlog view ---
+// --- Pipeline-wide Event Tree view (pipeline-event-tree-spec) ---
+const _KIND_COLOR: Record<string, string> = {
+  'step-completed': 'var(--ok)', 'completed': 'var(--ok)', 'step-running': 'var(--info)',
+  'step-blocked': 'var(--warn)', 'blocked': 'var(--warn)', 'errored': 'var(--danger, #e66)',
+  'decision-open': 'var(--warn)', 'decision-resolved': 'var(--accent)',
+  'gate-approved': 'var(--ok)', 'gate-rejected': 'var(--danger, #e66)', 'promoted': 'var(--muted)',
+}
+function PipelineEventTree({ pipeline, cards, extras, onOpenCard }: {
+  pipeline?: Pipeline
+  cards: PipelineCard[]
+  extras: { github_webhook_history?: any[]; scheduler_state?: any }
+  onOpenCard?: (cardId: string) => void
+}) {
+  const { events, actors, now } = useMemo(
+    () => projectPipelineEvents(pipeline, cards, extras),
+    [pipeline, cards, extras])
+  if (!pipeline) return <div className="text-sm p-3" style={{ color: 'var(--muted)' }}>No pipeline selected.</div>
+  if (events.length === 0) return <div className="text-sm p-3" style={{ color: 'var(--muted)' }}>No recorded events for this pipeline yet.</div>
+  return (
+    <div className="w-full overflow-x-auto pb-4">
+      {now && (
+        <div className="text-[10px] mb-2 flex flex-wrap gap-2" style={{ color: 'var(--muted)' }}>
+          <span>now:</span>
+          <span>▶ running {(now.running_node_ids || []).length}</span>
+          <span>◷ ready {(now.ready_node_ids || []).length}</span>
+          <span style={{ color: 'var(--warn)' }}>⛔ blocked {(now.blocked_node_ids || []).length}</span>
+        </div>
+      )}
+      <div className="text-[10px] mb-2 flex flex-wrap gap-3" style={{ color: 'var(--muted)' }}>
+        {actors.map(a => <span key={a}>{ACTOR_GLYPH[a] || '•'} {a}</span>)}
+      </div>
+      <ol className="flex flex-col gap-1.5" style={{ borderLeft: '1px solid var(--border)', paddingLeft: '10px' }}>
+        {events.map(ev => {
+          const color = _KIND_COLOR[ev.kind] || 'var(--text)'
+          return (
+            <li key={ev.id} className="flex items-start gap-2 text-[11px]">
+              <span className="text-[9px] flex-shrink-0 mt-0.5 tabular-nums" style={{ color: 'var(--muted)', minWidth: '62px' }}>
+                {ev.at ? ev.at.replace('T', ' ').replace('Z', '').slice(5) : ''}
+              </span>
+              <span aria-hidden="true" className="flex-shrink-0 mt-0.5" title={ev.actor}>{ev.glyph}</span>
+              <div className="min-w-0 flex-1">
+                <button className="text-left hover:underline" onClick={() => ev.cardId && onOpenCard?.(ev.cardId)}
+                  title={ev.cardId ? 'Open card' : undefined} style={{ color }}>
+                  {ev.headline}
+                  {ev.inferred && <span className="ml-1 text-[8px] px-1 rounded-full" style={{ color: 'var(--muted)', border: '1px solid var(--border)' }}>~inferred</span>}
+                  {ev.needs_human && <span className="ml-1">🔴</span>}
+                </button>
+                {ev.detail && <div className="text-[9px]" style={{ color: 'var(--muted)' }}>{ev.detail}{ev.cardId ? ` · ${ev.cardId}` : ''}</div>}
+              </div>
+            </li>
+          )
+        })}
+      </ol>
+    </div>
+  )
+}
+
 function BacklogView({ cards }: { cards: PipelineCard[] }) {
   const parked = cards.flatMap(c =>
     (c.parked || []).map(p => ({ ...p, cardTitle: c.title, repo: c.source?.repo }))
@@ -2531,6 +2984,7 @@ export default function SdlcPipeline() {
   const navigate = useNavigate()
   const [allCards, setAllCards] = useState<PipelineCard[]>([])
   const [pipelines, setPipelines] = useState<Pipeline[]>([])
+  const [stateExtras, setStateExtras] = useState<{ github_webhook_history?: any[]; scheduler_state?: any }>({})
   const [config, setConfig] = useState<PipelineConfig>(DEFAULT_CONFIG)
   const [loading, setLoading] = useState(true)
   const [view, setView] = useState<ViewMode>('pipeline')
@@ -2543,6 +2997,9 @@ export default function SdlcPipeline() {
   const [agentCatalogOpen, setAgentCatalogOpen] = useState(false)
   const [agentCatalogLoading, setAgentCatalogLoading] = useState(false)
   const [runPaneOpen, setRunPaneOpen] = useState(false)
+  const [treeModalOpen, setTreeModalOpen] = useState(false)
+  const [backlogModalOpen, setBacklogModalOpen] = useState(false)
+  const [operationsOpen, setOperationsOpen] = useState(false)
   const [liveSpawns, setLiveSpawns] = useState<{ id: string; task: string; status?: string }[]>([])
   const kanbanRef = useRef<HTMLDivElement>(null)
   const liveSpawnsAbsent = useRef(false)  // suppress live_spawns polling once found absent (no cron yet)
@@ -2566,6 +3023,7 @@ export default function SdlcPipeline() {
       const data = resolved.data
       setAllCards(data.cards || [])
       setPipelines(data.pipelines || [])
+      setStateExtras({ github_webhook_history: data.github_webhook_history || [], scheduler_state: data.scheduler_state || null })
       setConfig({ ...DEFAULT_CONFIG, ...(data.config || {}) })
     } catch (e) {
       console.error('Failed to fetch cards:', e)
@@ -2969,6 +3427,38 @@ export default function SdlcPipeline() {
     })
   }, [mutateState])
 
+  // Native maintenance requests (§8.2): append one bounded request:* interjection consumed by the
+  // deterministic _process_maintenance_requests cron pass. UI never writes stage/label/topology.
+  const submitMaintenanceRequest = useCallback((cardId: string, kind: string, text: string) => {
+    const now = new Date().toISOString()
+    const id = newRequestId()  // generated ONCE before the read/re-read (dedupe by id)
+    mutateState(state => {
+      const card = state.cards.find(c => c.id === cardId)
+      if (!card) return
+      let req
+      try { req = buildRequest({ id, kind, text, card, now }) }
+      catch { return }  // validation failure (e.g. missing required reason) — no-op
+      card.interjection = appendRequest(card.interjection, req)
+      card.updated_at = now
+    })
+  }, [mutateState])
+
+  // Cooperative cancel from the card (lightweight killswitch): writes the same markers the
+  // deterministic runtime already honors (writes_allowed:false + cancel_requested_at) and parks the
+  // lifecycle. The runtime stops advancing it; a live producer re-reads the flag and stands down.
+  const cancelCard = useCallback((cardId: string) => {
+    if (!window.confirm('Cancel this card? Writes are revoked cooperatively — a live turn may not stop immediately, and its worktree is retained until terminal observation.')) return
+    const now = new Date().toISOString()
+    mutateState(state => {
+      const card = state.cards.find(c => c.id === cardId)
+      if (!card) return
+      card.lifecycle = 'cancelled'
+      card.writes_allowed = false
+      card.cancel_requested_at = now
+      card.updated_at = now
+    })
+  }, [mutateState])
+
   // Acknowledge a raised advisory decision without pretending its proposed action was enacted.
   const resolveDecision = useCallback((cardId: string, decisionId: string) => {
     mutateState(state => {
@@ -2985,7 +3475,17 @@ export default function SdlcPipeline() {
   }, [mutateState])
 
   const openOrchestrator = useCallback(async (card: PipelineCard) => {
-    const existing = card.orchestrator_session?.slot_key
+    // Single orchestrator: the session lives on the PIPELINE; the card holds a back-ref
+    // ({pipeline_id, session_key, ref}). Resolve the openable slot from the card's own slot_key
+    // (legacy), its back-ref session_key (cron:<id> → cron-<id>), or the owning pipeline session.
+    const slotFrom = (c?: PipelineCard): string | undefined => {
+      const os = c?.orchestrator_session
+      if (os?.slot_key) return os.slot_key
+      if (os?.session_key) return os.session_key.replace(/^cron:/, 'cron-')
+      const plSess = pipelines.find(p => p.id === c?.pipeline_id)?.orchestrator_session
+      return plSess?.slot_key || (plSess?.session_key ? plSess.session_key.replace(/^cron:/, 'cron-') : undefined)
+    }
+    const existing = slotFrom(card)
     if (existing) { navigate(`/chat?sid=${encodeURIComponent(existing)}`); return }
     try {
       const res = await api.post('/apps/dlc-yolo/api/orchestrator/trigger', { card_id: card.id }) as { ok?: boolean; slot_key?: string }
@@ -2996,7 +3496,11 @@ export default function SdlcPipeline() {
       await new Promise(r => setTimeout(r, 2000))
       try {
         const fresh = await readCurrentState(readAppFile, STATE_PATH)
-        const slot = (fresh.data.cards || []).find(c => c.id === card.id)?.orchestrator_session?.slot_key
+        const freshCard = (fresh.data.cards || []).find(c => c.id === card.id)
+        const plSess = (fresh.data.pipelines || []).find((p: Pipeline) => p.id === freshCard?.pipeline_id)?.orchestrator_session
+        const slot = freshCard?.orchestrator_session?.slot_key
+          || (freshCard?.orchestrator_session?.session_key || plSess?.session_key || '').replace(/^cron:/, 'cron-')
+          || plSess?.slot_key
         if (slot) { void fetchCards(); navigate(`/chat?sid=${encodeURIComponent(slot)}`); return }
       } catch { /* keep polling */ }
     }
@@ -3133,11 +3637,23 @@ export default function SdlcPipeline() {
   }, [mutateState])
 
   const cardsByStage = useMemo(() => {
+    // Active step columns exclude terminal cards — those go to the dedicated Done/Cancelled
+    // columns (rendered at the end of the board) so finished work is visible + separated, not
+    // lingering in the working columns.
+    const TERMINAL = new Set(['retired', 'cancelled', 'canceled', 'merged', 'superseded'])
     return stepIds.reduce((acc, id) => {
-      acc[id] = cards.filter(c => c.stage === id)
+      acc[id] = cards.filter(c => c.stage === id && !TERMINAL.has(String(c.lifecycle || '')))
       return acc
     }, {} as Record<string, PipelineCard[]>)
   }, [cards, stepIds])
+
+  // Terminal cards grouped by outcome for the dedicated end-of-board columns.
+  const doneCards = useMemo(
+    () => cards.filter(c => ['retired', 'merged'].includes(String(c.lifecycle || ''))),
+    [cards])
+  const cancelledCards = useMemo(
+    () => cards.filter(c => ['cancelled', 'canceled', 'superseded'].includes(String(c.lifecycle || ''))),
+    [cards])
 
   const scrollToStage = useCallback((stage: string) => {
     document.getElementById(`stage-col-${stage}`)?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' })
@@ -3168,9 +3684,10 @@ export default function SdlcPipeline() {
       .map(kind => [CARD_STATUS_META[kind].label, grouped[kind]])) as Record<string, PipelineCard[]>
   }, [cards, pipelines, isGateStep, runStatus])
 
-  const activeCount = cards.filter(c => c.stage !== 'done').length
-  const gatedCount = cards.filter(c => isGateStep(c.stage)).length
-  const doneCount = cards.filter(c => c.stage === 'done').length
+  const TERMINAL_LC = new Set(['retired', 'merged', 'cancelled', 'canceled', 'superseded'])
+  const activeCount = cards.filter(c => !TERMINAL_LC.has(String(c.lifecycle || ''))).length
+  const gatedCount = cards.filter(c => isGateStep(c.stage) && !TERMINAL_LC.has(String(c.lifecycle || ''))).length
+  const doneCount = cards.filter(c => TERMINAL_LC.has(String(c.lifecycle || ''))).length
   const parkedTotal = cards.reduce((n, c) => n + (c.parked?.length || 0), 0)
 
   const tabCounts: Record<string, number> = {
@@ -3186,8 +3703,14 @@ export default function SdlcPipeline() {
   const cardProps = (card: PipelineCard) => {
     const pipeline = pipelines.find(item => item.id === card.pipeline_id) ||
       pipelines.find(item => item.repo === card.source?.repo)
-    const gate = pipeline?.steps?.find(step => step.id === card.stage)?.type === 'gate' ||
+    const gateStage = pipeline?.steps?.find(step => step.id === card.stage)?.type === 'gate' ||
       isGateStep(card.stage)
+    // A terminal-lifecycle card (cancelled/retired/merged) is DONE — it must never present an
+    // actionable gate (Approve/Reject), even if it happens to sit on a gate stage. Otherwise a
+    // cancelled card shows gate buttons that can only ever refuse (e.g. gate-review-missing).
+    const terminalLifecycle = ['cancelled', 'canceled', 'retired', 'merged', 'superseded']
+      .includes(String(card.lifecycle || ''))
+    const gate = gateStage && !terminalLifecycle
     const expectedRevision = gate ? (card.gate_review?.result_revision ?? null) : undefined
     const producerStep = gate ? producerStepFor(card) : undefined
     const producerSession = gate ? producerSessionFor(card) : undefined
@@ -3237,6 +3760,21 @@ export default function SdlcPipeline() {
         }
       })(),
       allCards: cards,
+      onRequest: (kind: string, text: string) => submitMaintenanceRequest(card.id, kind, text),
+      onOpenStepSession: (() => {
+        // Expose EVERY recorded step session (not just the current stage) so any session the card
+        // produced is reachable — a card past investigate/requirements/design can still open those.
+        const ss = card.step_sessions
+        if (!ss || typeof ss !== 'object') return undefined
+        const sessions = Object.entries(ss)
+          .map(([step, ptr]) => {
+            const slot = ptr?.slot_key || (ptr?.session_key ? ptr.session_key.replace(/^cron:/, 'cron-') : undefined)
+            return slot ? { step, open: () => navigate(`/chat?sid=${encodeURIComponent(slot)}`) } : null
+          })
+          .filter((x): x is { step: string; open: () => void } => x !== null)
+        return sessions.length ? sessions : undefined
+      })(),
+      onCancelCard: () => cancelCard(card.id),
       onOpenCard: (cardId: string) => {
         const el = document.getElementById(`card-${cardId}`)
         if (el) {
@@ -3261,6 +3799,57 @@ export default function SdlcPipeline() {
         onSaveCrew={saveCrewRoute}
         onClose={() => setAgentCatalogOpen(false)}
       />}
+      {treeModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.48)', backdropFilter: 'blur(3px)' }}
+          onMouseDown={(event) => { if (event.currentTarget === event.target) setTreeModalOpen(false) }}>
+          <section role="dialog" aria-modal="true" aria-label="Pipeline event tree" className="flex flex-col rounded-xl overflow-hidden"
+            style={{ width: 'min(920px, calc(100vw - 32px))', maxHeight: 'min(88vh, 900px)', background: 'var(--bg-elevated, var(--bg))', border: '1px solid var(--border-strong, var(--border))', boxShadow: '0 28px 90px rgba(0,0,0,0.5)' }}>
+            <header className="px-5 py-3.5 flex items-center gap-3" style={{ borderBottom: '1px solid var(--border)' }}>
+              <h2 className="text-[15px] font-semibold flex-1" style={{ color: 'var(--text-strong, var(--text))' }}>🌲 Pipeline event tree</h2>
+              <button onClick={() => setTreeModalOpen(false)} className="text-[13px] px-2 py-0.5 rounded hover:opacity-80" style={{ color: 'var(--muted)' }} aria-label="Close">✕</button>
+            </header>
+            <div className="px-4 py-3 overflow-y-auto">
+              <PipelineEventTree
+                pipeline={pipelines.find(p => cards.some(c => c.pipeline_id === p.id)) || pipelines[0]}
+                cards={cards}
+                extras={stateExtras}
+                onOpenCard={(cardId) => {
+                  setTreeModalOpen(false)
+                  setView('pipeline')
+                  setTimeout(() => {
+                    const e2 = document.getElementById(`card-${cardId}`)
+                    if (e2) { e2.scrollIntoView({ behavior: 'smooth', block: 'center' }); const prev = e2.style.outline; e2.style.outline = '2px solid var(--accent)'; setTimeout(() => { e2.style.outline = prev }, 1400) }
+                  }, 80)
+                }}
+              />
+            </div>
+          </section>
+        </div>
+      )}
+
+      {backlogModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.48)', backdropFilter: 'blur(3px)' }}
+          onMouseDown={(event) => { if (event.currentTarget === event.target) setBacklogModalOpen(false) }}>
+          <section role="dialog" aria-modal="true" aria-label="Backlog" className="flex flex-col rounded-xl overflow-hidden"
+            style={{ width: 'min(820px, calc(100vw - 32px))', maxHeight: 'min(88vh, 900px)', background: 'var(--bg-elevated, var(--bg))', border: '1px solid var(--border-strong, var(--border))', boxShadow: '0 28px 90px rgba(0,0,0,0.5)' }}>
+            <header className="px-5 py-3.5 flex items-center gap-3" style={{ borderBottom: '1px solid var(--border)' }}>
+              <h2 className="text-[15px] font-semibold flex-1" style={{ color: 'var(--text-strong, var(--text))' }}>📋 Backlog{parkedTotal ? ` · ${parkedTotal}` : ''}</h2>
+              <button onClick={() => setBacklogModalOpen(false)} className="text-[13px] px-2 py-0.5 rounded hover:opacity-80" style={{ color: 'var(--muted)' }} aria-label="Close">✕</button>
+            </header>
+            <div className="px-4 py-3 overflow-y-auto">
+              <BacklogView cards={cards} />
+            </div>
+          </section>
+        </div>
+      )}
+
+      {operationsOpen && (
+        <OperationsPanel cards={cards} schedulerState={stateExtras.scheduler_state}
+          statePath={STATE_PATH} readAppFile={readAppFile} onClose={() => setOperationsOpen(false)} />
+      )}
+
       {runPaneOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
           style={{ background: 'rgba(0,0,0,0.48)', backdropFilter: 'blur(3px)' }}
@@ -3385,6 +3974,21 @@ export default function SdlcPipeline() {
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-3 mb-4 flex-wrap">
               <ViewTabs active={view} onChange={setView} counts={tabCounts} />
+              <button onClick={() => setTreeModalOpen(true)} aria-haspopup="dialog"
+                className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-md cursor-pointer" title="Pipeline event tree — everything happening across the pipeline"
+                style={{ background: 'var(--bg-elevated, var(--bg))', border: '1px solid var(--border)', color: 'var(--muted)' }}>
+                🌲 <span className="font-semibold">Tree</span>
+              </button>
+              <button onClick={() => setBacklogModalOpen(true)} aria-haspopup="dialog"
+                className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-md cursor-pointer" title="Parked backlog ideas"
+                style={{ background: 'var(--bg-elevated, var(--bg))', border: '1px solid var(--border)', color: 'var(--muted)' }}>
+                📋 <span className="font-semibold">Backlog</span>{parkedTotal ? <span style={{ color: 'var(--accent)' }}>· {parkedTotal}</span> : null}
+              </button>
+              <button onClick={() => setOperationsOpen(true)} aria-haspopup="dialog"
+                className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-md cursor-pointer" title="Operations — runtime, projection parity, webhook, sessions"
+                style={{ background: 'var(--bg-elevated, var(--bg))', border: '1px solid var(--border)', color: 'var(--muted)' }}>
+                🛠 <span className="font-semibold">Ops</span>
+              </button>
               {/* Enabled agent sessions open as a centered floating modal. */}
               <button onClick={() => setRunPaneOpen(true)} aria-haspopup="dialog" aria-expanded={runPaneOpen}
                 className="flex items-center gap-1.5 text-[11px] px-2 py-1 rounded-md cursor-pointer" title="Open enabled agent sessions and see live activity"
@@ -3412,8 +4016,6 @@ export default function SdlcPipeline() {
 
             {loading ? (
               <div className="text-sm p-3" style={{ color: 'var(--muted)' }}>Loading pipeline…</div>
-            ) : view === 'backlog' ? (
-              <BacklogView cards={cards} />
             ) : (
               <div ref={kanbanRef} className="flex gap-3 overflow-x-auto pb-4">
                 {view === 'pipeline' && activeSteps.map(step => (
@@ -3421,6 +4023,18 @@ export default function SdlcPipeline() {
                     {(cardsByStage[step.id] || []).map(card => <PipelineCardItem key={card.id} {...cardProps(card)} />)}
                   </ColumnGroup>
                 ))}
+                {view === 'pipeline' && doneCards.length > 0 && (
+                  <div className="flex-shrink-0 pl-3" style={{ borderLeft: '2px dashed var(--border-strong, var(--border))' }}>
+                    <ColumnGroup id="stage-col-done" title="✅ Done" count={doneCards.length}>
+                      {doneCards.map(card => <PipelineCardItem key={card.id} {...cardProps(card)} />)}
+                    </ColumnGroup>
+                  </div>
+                )}
+                {view === 'pipeline' && cancelledCards.length > 0 && (
+                  <ColumnGroup id="stage-col-cancelled" title="⏹ Cancelled" count={cancelledCards.length}>
+                    {cancelledCards.map(card => <PipelineCardItem key={card.id} {...cardProps(card)} />)}
+                  </ColumnGroup>
+                )}
 
                 {view === 'workspace' && Object.entries(workspaceGroups).map(([repo, rc]) => (
                   <ColumnGroup key={repo} title={repo} count={rc.length}>

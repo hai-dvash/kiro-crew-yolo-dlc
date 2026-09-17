@@ -18,7 +18,7 @@ cannot make `/dlc-yolo` fresh-session discoverable. This script closes both gaps
 
   1. DEPLOY   — copy the two zero-token cron scripts plus their secure webhook and ledger-projection
                 helpers into ~/.kiro/crew/crons/.
-  2. RECONCILE— upsert DLC-YOLO's three cron jobs in ~/.kiro/crew/crons.json.
+  2. RECONCILE— upsert DLC-YOLO's two zero-token cron jobs in ~/.kiro/crew/crons.json.
   3. PUBLISH  — link only the deployed/source DLC-YOLO command skill at
                 ~/.kiro/skills/dlc-yolo for fresh-session slash discovery.
   4. VERIFY   — compile-check deployed scripts and report repaired drift.
@@ -69,7 +69,6 @@ APP_CRONS = CREW / "apps" / "dlc-yolo" / "app-crons.json"
 
 # The jobs DLC-YOLO owns. Names are the reconcile key; anything else is left alone.
 ADVANCE_NAME = "dlc-yolo-advance"
-BACKLOG_NAME = "dlc-yolo-backlog-intake"
 SPAWNS_NAME = "dlc-yolo-spawns"
 SPAWNS_SRC = REPO / "crons" / "dlc_yolo_spawns.py"
 SPAWNS_DST = CREW / "crons" / "dlc_yolo_spawns.py"
@@ -118,35 +117,17 @@ def _job_template(name: str) -> dict:
 
 
 def _desired_jobs() -> list[dict]:
-    """Build the three desired job records, preferring manifest values when available."""
-    every_advance, every_backlog = 120, 200
-    backlog_msg = (
-        "Backlog back-feed. Read state.pipelines and select only pipelines with a "
-        "syntactically valid non-empty repo whose backlog_intake is not false; those "
-        "pipeline repo identities are the only eligible repositories. Do not infer "
-        "repository eligibility from cards alone. For each eligible repo, list open "
-        "issues labeled dlc-backlog (gh issue list --repo <repo> --label dlc-backlog "
-        "--state open --json number,title,url). For any such issue that does NOT already "
-        "have a card (match on source.issue/url), FIRST apply the OWNERSHIP GUARD — gh "
-        "issue view <n> --repo <repo> --json author; only proceed if author.login is in "
-        "trusted_authors (card->pipeline->config.trusted_authors, default the "
-        "gh-authenticated user; empty never means allow-all; fail closed if "
-        "unverifiable). Only for a guard-passing issue, create a new card at stage "
-        "'intake' inheriting config.trust/config.depth, linked to that issue. Only READ "
-        "issues and CREATE intake cards — never advance or execute here. Persist state."
-    )
-    # Prefer the manifest's declared values if we can read them.
+    """Build the desired job records (both zero-token scripts), preferring manifest 'every'.
+    F1: the backlog-intake LLM cron is RETIRED — its deterministic discovery scan now runs inside
+    the zero-token advance pass (_process_backlog_intake). setup-crons no longer declares it, so the
+    reconciler's removal path deletes any lingering live backlog-intake job."""
+    every_advance = 120
     try:
         declared = json.loads(APP_CRONS.read_text(encoding="utf-8"))
         for d in declared:
             nm = (d.get("name") or "").split("/")[-1]
             if nm == ADVANCE_NAME and d.get("every"):
                 every_advance = int(d["every"])
-            elif nm == BACKLOG_NAME:
-                if d.get("every"):
-                    every_backlog = int(d["every"])
-                if d.get("message"):
-                    backlog_msg = d["message"]
     except (OSError, json.JSONDecodeError, ValueError):
         pass  # fall back to defaults
 
@@ -154,15 +135,10 @@ def _desired_jobs() -> list[dict]:
     advance["schedule"]["every_secs"] = every_advance
     advance["script"] = "~/.kiro/crew/crons/dlc_yolo_advance.py:advance"
 
-    backlog = _job_template(BACKLOG_NAME)
-    backlog["schedule"]["every_secs"] = every_backlog
-    backlog["message"] = backlog_msg
-    backlog["agent_id"] = "pipeline-orchestrator"
-
     spawns = _job_template(SPAWNS_NAME)
     spawns["schedule"]["every_secs"] = 30
     spawns["script"] = "~/.kiro/crew/crons/dlc_yolo_spawns.py:snapshot"
-    return [advance, backlog, spawns]
+    return [advance, spawns]
 
 
 def deploy_script(check: bool) -> bool:
@@ -281,9 +257,39 @@ def reconcile_crons(check: bool) -> bool:
         kept.append(j)
     jobs = kept
 
+    # R2 — REMOVAL PATH: retire any dlc-yolo-owned job that is no longer declared in the desired
+    # set. Without this, setup-crons could only add/update, so a cron dropped from the manifest
+    # (e.g. a decommissioned agent-backed backlog-intake) kept firing forever. Scope strictly to
+    # this app's own namespace/prefix so no foreign job is ever touched.
+    desired_leaves = set(desired.keys())
+    survivors: list[dict] = []
+    for j in jobs:
+        jn = j.get("name") or ""
+        leaf = jn.split("/")[-1]
+        owned = jn.startswith("dlc-yolo/") or leaf.startswith("dlc-yolo-")
+        if owned and leaf not in desired_leaves:
+            if check:
+                _log(f"DRIFT: cron '{jn}' is dlc-yolo-owned but undeclared (would remove)")
+            else:
+                _log(f"removed retired dlc-yolo cron '{jn}' (not in desired set)")
+            changed = True
+            continue
+        survivors.append(j)
+    jobs = survivors
+
     for name, want in desired.items():
         cur = _match(name)
         if cur is None:
+            # R3: same collision guard as the update branch — a foreign job already holding the
+            # advance job's deterministic id must not be silently duplicated (terminal producers
+            # cron_trigger by that exact id, so an ambiguous id wakes the wrong job).
+            if name == ADVANCE_NAME:
+                collision = next((job for job in jobs
+                                  if str(job.get("id", "")) == want["id"]), None)
+                if collision is not None:
+                    raise RuntimeError(
+                        f"advance cron id {want['id']} is already owned by foreign job "
+                        f"'{collision.get('name') or '<unnamed>'}'; refusing ambiguous trigger")
             if check:
                 _log(f"DRIFT: cron '{name}' missing (would add)")
             else:
@@ -292,17 +298,19 @@ def reconcile_crons(check: bool) -> bool:
                 _log(f"added cron '{name}' ({'script' if want['script'] else 'agent'})")
             changed = True
             continue
-        # Reconcile only the fields we own; preserve runtime stats (last_run_ts etc.).
-        fields = ["script", "message", "agent_id"]
-        drift = any(cur.get(f, "") != want.get(f, "") for f in fields)
-        # The mute flags (silent/hide_in_chat) must be part of drift detection too:
-        # the update branch below is the ONLY writer of these flags, so if they were
-        # excluded here a job that matches on script/message/agent/schedule/id but has
-        # silent:false in the live store would report "already in sync" and NEVER get
-        # muted — exactly why backlog-intake's silent:true stayed manifest-only across
-        # sessions. Compare against the desired template's boolean defaults.
-        flag_drift = any(bool(cur.get(f, False)) != bool(want.get(f, False))
-                         for f in ("silent", "hide_in_chat"))
+        # Reconcile ALL owned fields from one canonical set — never a hand-picked subset.
+        # The backlog token-drain (and the earlier `silent`-stayed-manifest bug) both came from
+        # comparing only a few fields: a job stuck with the wrong persistent_session/minimal_context
+        # reported "in sync" forever because those fields were never checked. Drive drift + the
+        # writer from the SAME owned-field list so every cost-critical flag self-heals.
+        # Runtime stats (last_run_ts, last_status, counters, session_key) are NOT owned — preserved.
+        OWNED_STR = ("script", "command", "message", "agent_id", "approval_mode")
+        OWNED_BOOL = ("enabled", "silent", "hide_in_chat", "persistent_session", "minimal_context")
+        OWNED_INT = ("timeout_secs",)
+        str_drift = any(str(cur.get(f, "")) != str(want.get(f, "")) for f in OWNED_STR)
+        # booleans compared as bool against the template's declared default
+        bool_drift = any(bool(cur.get(f, want.get(f))) != bool(want.get(f)) for f in OWNED_BOOL)
+        int_drift = any(int(cur.get(f, want.get(f, 0)) or 0) != int(want.get(f, 0) or 0) for f in OWNED_INT)
         sched_drift = (cur.get("schedule", {}).get("every_secs")
                        != want["schedule"]["every_secs"])
         # ID CONTRACT: every malformed legacy ID is repaired. The advance job additionally uses
@@ -318,18 +326,18 @@ def reconcile_crons(check: bool) -> bool:
                     f"'{collision.get('name') or '<unnamed>'}'; refusing ambiguous trigger")
         id_drift = (not re.fullmatch(r"[a-f0-9]{6,12}", current_id)
                     or (name == ADVANCE_NAME and current_id != want["id"]))
-        if drift or sched_drift or id_drift or flag_drift:
+        if str_drift or bool_drift or int_drift or sched_drift or id_drift:
             if check:
                 _log(f"DRIFT: cron '{name}' fields differ (would update)")
             else:
-                cur["script"] = want["script"]
-                cur["message"] = want["message"]
-                cur["agent_id"] = want["agent_id"]
+                # Write EVERY owned field so any drifted flag converges (not just a subset).
+                for f in OWNED_STR:
+                    cur[f] = want.get(f, "")
+                for f in OWNED_BOOL:
+                    cur[f] = bool(want.get(f))
+                for f in OWNED_INT:
+                    cur[f] = int(want.get(f, 0) or 0)
                 cur.setdefault("schedule", {})["every_secs"] = want["schedule"]["every_secs"]
-                cur["enabled"] = True
-                cur["approval_mode"] = "auto"
-                cur["silent"] = True
-                cur["hide_in_chat"] = True
                 if id_drift:
                     cur["id"] = want["id"]
                     _log(f"reconciled deterministic id for cron '{name}' → {want['id']}")

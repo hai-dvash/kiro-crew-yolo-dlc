@@ -206,7 +206,7 @@ with zero cards, and holds the per-repo default modes that its cards inherit.
 
 Every card carries `"pipeline_id": "pl-uuid"` linking it to its pipeline. The mode
 resolution order is **card override → step override → pipeline default → global `config`**.
-The `dlc-yolo-backlog-intake` cron only back-feeds repos whose pipeline has
+The backlog discovery scan only back-feeds repos whose pipeline has
 `backlog_intake: true`.
 
 A mutable card gains one runtime-owned lease (never agent-authored):
@@ -825,11 +825,12 @@ block the current card. Instead it **parks** the idea:
    (Create the `dlc-backlog` label first if missing: `gh label create dlc-backlog --color BFD4F2 --description "DLC-YOLO parked idea" 2>/dev/null || true`.)
 3. It appends a `parked` entry to the card: `{"id","note","issue_url","at","phase"}`.
 
-**Back-feeding (auto-intake).** A separate cron (`dlc-yolo-backlog-intake`) periodically
+**Back-feeding (auto-intake).** The zero-token advance loop's discovery scan periodically
 lists open `dlc-backlog` issues across the repos DLC-YOLO owns cards for, and for any
 issue that has no existing card, creates a fresh `intake`-stage card (inheriting
-`config` trust/depth) linked to that issue. This closes the loop: parked ideas re-enter
-the pipeline as new work when capacity allows. The intake cron only READS issues and
+`config` trust/depth) linked to that issue (a verified `labeled dlc-backlog` webhook does
+the same immediately). This closes the loop: parked ideas re-enter
+the pipeline as new work when capacity allows. The scan only READS issues and
 CREATES cards — it never advances or executes, so it stays within the same safety model.
 
 Never park to a repo the card does not own, and never write issues cross-repo — the

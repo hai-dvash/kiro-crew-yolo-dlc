@@ -1800,10 +1800,32 @@ class TestBootstrap:
         data = json.loads(state_path.read_text())
         assert data["cards"] == [] and data["pipelines"] == []
 
-    def test_load_corrupt_json_returns_empty(self, advance_mod, state_path):
+    def test_load_corrupt_json_raises_not_empty(self, advance_mod, state_path):
+        # S2: a NON-EMPTY file that doesn't parse is a transient/corrupt read — it must RAISE
+        # _StateUnreadable, never collapse to {} (that was the wipe path). advance() catches this
+        # and skips the cycle; the poll repairs.
         state_path.parent.mkdir(parents=True, exist_ok=True)
         state_path.write_text("{not valid json,,,")
+        import pytest as _pytest
+        with _pytest.raises(advance_mod._StateUnreadable):
+            advance_mod._load()
+
+    def test_load_empty_or_absent_returns_empty(self, advance_mod, state_path):
+        # A truly empty (zero-byte) or absent file is a genuine first run → {} is correct.
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        state_path.write_text("")  # zero bytes → not "exists with bytes"
         assert advance_mod._load() == {}
+
+    def test_save_refuses_empty_over_populated(self, advance_mod, state_path):
+        # S2: _save must never persist an empty state over a populated on-disk file.
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        populated = {"config": {}, "pipelines": [{"id": "keep"}], "cards": [{"id": "keep-card"}]}
+        state_path.write_text(json.dumps(populated))
+        import pytest as _pytest
+        with _pytest.raises(advance_mod._StateUnreadable):
+            advance_mod._save({"config": {}, "pipelines": [], "cards": []})
+        # disk untouched
+        assert json.loads(state_path.read_text()) == populated
 
     def test_load_missing_returns_empty(self, advance_mod, state_path):
         assert not state_path.exists()

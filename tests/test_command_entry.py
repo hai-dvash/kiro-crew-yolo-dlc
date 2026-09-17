@@ -66,6 +66,9 @@ def test_fresh_pipeline_form_accepts_all_documented_defaults():
 
 def test_install_docs_use_reconciler_not_manual_global_symlinks():
     text = _README.read_text(encoding="utf-8")
+    _guide = _REPO / "guide" / "install.md"
+    if _guide.is_file():
+        text += "\n" + _guide.read_text(encoding="utf-8")
 
     assert "publish /dlc-yolo" in text
     assert "~/.kiro/skills/dlc-yolo" not in text or "ln -s" not in text

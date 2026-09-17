@@ -22,6 +22,18 @@ from pathlib import Path
 import pytest
 
 _REPO = Path(__file__).resolve().parent.parent
+
+def _readme_corpus() -> str:
+    """README + all shipped guide/*.md. The README was modularized (deep sections moved into
+    guide/), so doc-content assertions search the combined corpus, not README alone."""
+    from pathlib import Path as _P
+    parts=[(_REPO / "README.md").read_text(encoding="utf-8")]
+    gdir=_REPO / "guide"
+    if gdir.is_dir():
+        for f in sorted(gdir.glob("*.md")):
+            parts.append(f.read_text(encoding="utf-8"))
+    return "\n".join(parts)
+
 _AGENTS_DIR = _REPO / "agents"
 _APP_JSON = _REPO / "app.json"
 
@@ -156,18 +168,28 @@ def test_step_agent_prompt_has_terminal_status_clause(agent):
 # --------------------------------------------------------------------------------------
 # 39 — app.json declares exactly the 3 expected crons
 # --------------------------------------------------------------------------------------
-def test_app_json_crons_are_the_three_expected():
+def test_app_json_crons_are_the_two_expected():
     app = _load(_APP_JSON)
     crons = app.get("crons", [])
     names = sorted(c.get("name") for c in crons)
     assert names == sorted([
         "dlc-yolo-advance",
         "dlc-yolo-spawns",
-        "dlc-yolo-backlog-intake",
     ])
     # And each declares exactly one execution mechanism (script XOR agent).
     for c in crons:
         assert ("script" in c) ^ ("agent" in c), f"{c.get('name')}: must be script XOR agent"
+
+
+def test_no_agent_backed_cron():
+    """INVARIANT (post token-drain, F1 complete): NO DLC-YOLO cron is agent-backed. The backlog
+    LLM cron is retired — its discovery scan runs inside the zero-token advance pass. Every cron
+    is a zero-token script; the orchestrator LLM is spawned only on real lifting, by event. A PR
+    that adds any `agent:` cron fails here."""
+    app = _load(_APP_JSON)
+    agent_crons = [c.get("name") for c in app.get("crons", []) if c.get("agent")]
+    assert agent_crons == [], (
+        f"agent-backed cron(s) {agent_crons} must not exist — DLC-YOLO crons are zero-token scripts")
 
 
 # --------------------------------------------------------------------------------------
@@ -217,7 +239,7 @@ def test_pipeline_workflow_is_the_single_full_adaptive_control_contract():
 
 def test_adaptive_item7_orchestrator_and_readme_preserve_truthful_host_boundary():
     orchestrator = _load(_AGENTS_DIR / "pipeline-orchestrator.json")["prompt"]
-    readme = (_REPO / "README.md").read_text(encoding="utf-8")
+    readme = _readme_corpus()
     assert "ADAPTIVE EXECUTION — RESEARCH + INTENT FIDELITY + MODEL/PASS CONTROL" in orchestrator
     assert "routing.requested_model" in orchestrator
     assert "routing.pass_allocation" in orchestrator
@@ -227,7 +249,7 @@ def test_adaptive_item7_orchestrator_and_readme_preserve_truthful_host_boundary(
     assert "bounded DAG scheduler now controls" in readme
     assert "never claims host-native in-flight turn cancellation" in readme
     assert "Authenticated, privacy-minimized GitHub webhook facts enter" in readme
-    assert "### Replay-parity-gated operational projection" in readme
+    assert "Replay-parity-gated operational projection" in readme
     assert "deferred to Priority 11" not in readme
     assert "Local terminal event bridge" in readme
     assert "state.json` remains authoritative" in readme
@@ -261,7 +283,7 @@ def test_priority6_orchestrator_and_workflow_preserve_truthful_binding_boundary(
         encoding="utf-8")
     console = (_REPO / "skills" / "dlc-yolo" / "SKILL.md").read_text(
         encoding="utf-8")
-    readme = (_REPO / "README.md").read_text(encoding="utf-8")
+    readme = _readme_corpus()
     assert "WORKTREE LEASE (deterministic runtime-owned)" in orchestrator
     assert "never claim the cron host applied cwd" in orchestrator
     for legacy in (
@@ -367,7 +389,7 @@ def test_priority9_manifest_grants_only_app_owned_cancel_and_cleanup_operations(
 def test_priority9_readme_and_workflow_publish_active_scheduler_boundary():
     workflow = (_REPO / "skills" / "pipeline-workflow" / "SKILL.md").read_text(
         encoding="utf-8")
-    readme = (_REPO / "README.md").read_text(encoding="utf-8")
+    readme = _readme_corpus()
     for expected in (
         "## Topology and bounded DAG scheduling",
         "Only the orchestrator selects topology",
@@ -385,7 +407,7 @@ def test_priority9_readme_and_workflow_publish_active_scheduler_boundary():
     assert "Verified GitHub receipts enter the same bounded event vocabulary" in normalized
     assert "privacy-minimized operational projection is ledger-replay authoritative" in normalized
     assert "neither event source bypasses replay parity or control-state authority" in normalized
-    assert "### Bounded topology/DAG scheduler" in readme
+    assert "Bounded topology/DAG scheduler" in readme
     assert "The orchestrator is the sole topology selector" in readme
     assert "never claims host-native in-flight turn cancellation" in readme
     assert "Verified GitHub events enter through the separate loopback receiver" in readme_normalized
@@ -464,13 +486,13 @@ def test_priority10_runtime_refetches_and_saves_before_transport_ack():
 
 
 def test_priority10_readme_and_workflow_publish_active_safe_boundary():
-    readme = (_REPO / "README.md").read_text(encoding="utf-8")
+    readme = _readme_corpus()
     workflow = (_REPO / "skills" / "pipeline-workflow" / "SKILL.md").read_text(
         encoding="utf-8")
     readme_flat = " ".join(readme.split())
     workflow_flat = " ".join(workflow.split())
     for expected in (
-        "### Secure GitHub webhook ingress",
+        "Secure GitHub webhook ingress",
         "disabled by default",
         "binds unconditionally to `127.0.0.1`",
         "exactly `POST /github`",
@@ -479,7 +501,7 @@ def test_priority10_readme_and_workflow_publish_active_safe_boundary():
         "Raw payloads, issue prose, authors, and signatures are never persisted",
         "state is durably saved, the inbox receipt is acknowledged",
         "120-second poll remains reconciliation",
-        "projection snapshot and replay path below is separate from webhook/event authority",
+        "projection snapshot and replay path is separate from webhook/event authority",
     ):
         assert expected in readme_flat
     for expected in (
@@ -520,12 +542,12 @@ def test_priority11_projection_helper_and_append_before_replay_are_wired():
 
 
 def test_priority11_readme_and_workflow_publish_narrow_fail_closed_authority():
-    readme = " ".join((_REPO / "README.md").read_text(encoding="utf-8").split())
+    readme = " ".join(_readme_corpus().split())
     workflow = " ".join((_REPO / "skills" / "pipeline-workflow" / "SKILL.md").read_text(
         encoding="utf-8").split())
 
     for expected in (
-        "### Replay-parity-gated operational projection",
+        "Replay-parity-gated operational projection",
         "io.dlcyolo.projection.snapshot",
         "projections/runs.json",
         "projections/status.json",
@@ -568,7 +590,7 @@ def test_priority11_authoritative_specs_are_active_not_deferred():
 def test_state_override_pointer_is_secure_and_documented():
     runtime = _advance_runtime_source()
     ui = (_REPO / "ui" / "src" / "statePath.js").read_text(encoding="utf-8")
-    readme = (_REPO / "README.md").read_text(encoding="utf-8")
+    readme = _readme_corpus()
     assert "STATE_POINTER = Path" in runtime
     assert "O_NOFOLLOW" in runtime
     assert "os.fsync(temporary_fd)" in runtime
@@ -584,7 +606,7 @@ def test_linked_local_github_resync_is_runtime_owned_and_issue_creation_is_not()
     runtime = _advance_runtime_source()
     workflow = (_REPO / "skills" / "pipeline-workflow" / "SKILL.md").read_text(
         encoding="utf-8")
-    readme = (_REPO / "README.md").read_text(encoding="utf-8")
+    readme = _readme_corpus()
     assert "def _reconcile_local_github_sot" in runtime
     assert "def _sync_linked_local_card" in runtime
     assert "_github_repo_refetch(repo)" in runtime

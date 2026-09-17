@@ -18,7 +18,7 @@ crons = importlib.import_module("backend.crons")
 
 _SAMPLE = (
     "  \u2705 bbf70a8d  kirocrew-snapshot-daily  (At 3:00 AM IDT)  Daily snapshot\n"
-    "  \u2705 c4fb1c36  dlc-yolo/dlc-yolo-spawns  (every 30s)  \n"
+    "  \u23f8\ufe0f c4fb1c36  dlc-yolo/dlc-yolo-spawns  (every 30s)  \n"
     "  \u23f8\ufe0f 20d6b33f  dlc-yolo/dlc-yolo-backlog-intake  (every 200s)  Backlog\n"
     "  \u2705 f838bdf3d496  dlc-yolo-advance  (every 120s)  \n"
 )
@@ -26,11 +26,11 @@ _SAMPLE = (
 
 def test_parse_matches_only_dlc_jobs():
     jobs = crons._parse_jobs(_SAMPLE)
-    assert {j["basename"] for j in jobs} == {
-        "dlc-yolo-spawns", "dlc-yolo-backlog-intake", "dlc-yolo-advance",
-    }
-    # the unrelated snapshot cron is never included
+    # Two owned jobs only. A stray backlog-intake row (e.g. from a stale re-seed) is NO LONGER
+    # owned — the parser ignores it, so the UI never manages a retired job.
+    assert {j["basename"] for j in jobs} == {"dlc-yolo-spawns", "dlc-yolo-advance"}
     assert all("snapshot" not in j["name"] for j in jobs)
+    assert all("backlog" not in j["name"] for j in jobs)
 
 
 def test_parse_reads_real_ids_bare_and_namespaced():
@@ -42,8 +42,14 @@ def test_parse_reads_real_ids_bare_and_namespaced():
 
 def test_parse_reads_paused_glyph():
     by = {j["basename"]: j for j in crons._parse_jobs(_SAMPLE)}
-    assert by["dlc-yolo-backlog-intake"]["paused"] is True
+    assert by["dlc-yolo-spawns"]["paused"] is True
     assert by["dlc-yolo-advance"]["paused"] is False
+
+
+def test_retired_backlog_cron_is_not_owned():
+    # explicit lock: the retired agent cron must never be matched/managed again.
+    assert crons._matched_job("dlc-yolo-backlog-intake") is None
+    assert crons._matched_job("dlc-yolo/dlc-yolo-backlog-intake") is None
 
 
 def test_basename_matching_rejects_lookalikes():

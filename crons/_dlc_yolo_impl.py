@@ -123,6 +123,13 @@ PENDING_STALE_SECS = 600
 # giving up and treating it as `blocked` (awaits a human). Bounds a crash-looping step.
 MAX_STEP_RETRIES = 3
 
+# HB1 (parity-full-2.2 §3): heuristics that used to live ONLY in the orchestrator prompt now have a
+# deterministic constant + backstop, so a prompt regression cannot silently disable them. The
+# growth factor is the single source of truth; the prompt references these values.
+GROWTH_FACTOR = {"quick": 1.5, "standard": 2.0, "deep": 3.0}
+TRIGGER_PHASES = frozenset({"requirements", "design", "tasks", "implement"})
+MAX_BOOTSTRAP_CREWS = 3
+
 DEFAULT_STEP_IDS = [
     "intake", "requirements", "gate-spec", "design", "tasks",
     "gate-impl", "implement", "review", "gate-review", "pr", "done",
@@ -427,14 +434,47 @@ def _bootstrap() -> None:
         raise RuntimeError("explicit DLC-YOLO state path could not be published to the UI")
 
 
+class _StateUnreadable(RuntimeError):
+    """Raised when state.json EXISTS with bytes but did not parse — a transient/corrupt read
+    (locked, mid os.replace, partial write), NOT a genuine first run. Callers must skip the cycle
+    (the 120s poll repairs) rather than proceeding on an empty {} and clobbering real work."""
+
+
 def _load() -> dict:
     try:
         return json.loads(STATE.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except OSError:
+        # File genuinely absent → empty is correct. But an existing-but-unreadable file (perm,
+        # transient lock) must NOT collapse to {} — that is the wipe path. Distinguish by stat.
+        try:
+            if STATE.exists() and STATE.stat().st_size > 0:
+                raise _StateUnreadable(f"{STATE} exists with bytes but could not be read")
+        except OSError:
+            raise _StateUnreadable(f"{STATE} could not be stat'd; refusing to treat as empty")
+        return {}
+    except json.JSONDecodeError:
+        # Parsed-but-invalid over a nonempty file → transient/corrupt, never treat as empty.
+        try:
+            if STATE.exists() and STATE.stat().st_size > 0:
+                raise _StateUnreadable(f"{STATE} exists with bytes but did not parse as JSON")
+        except OSError:
+            pass
         return {}
 
 
 def _save(state: dict) -> None:
+    # CLOBBER GUARD (matches _bootstrap): never persist an EMPTY state over a file that exists
+    # with bytes. An empty in-memory state reaching here means an upstream read degraded to {};
+    # writing it would zero a populated board (the 13-card-wipe class). Refuse and leave disk intact.
+    if not (state.get("cards") or state.get("pipelines")):
+        try:
+            if STATE.exists() and STATE.stat().st_size > 0:
+                on_disk = json.loads(STATE.read_text(encoding="utf-8"))
+                if on_disk.get("cards") or on_disk.get("pipelines"):
+                    raise _StateUnreadable(
+                        f"refusing to save empty state over populated {STATE}")
+        except (OSError, json.JSONDecodeError):
+            pass  # unreadable disk: fall through and let the write proceed (best-effort)
     STATE.parent.mkdir(parents=True, exist_ok=True)
     tmp = STATE.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(state, indent=2), encoding="utf-8")
@@ -4771,6 +4811,37 @@ def _delegation_targets(step: dict) -> list[dict]:
     return targets
 
 
+def _single_crew_inline(card: dict, step: dict) -> tuple[bool, str | None, str]:
+    """Single-crew inline-collapse classifier (single-crew-inline-collapse-spec §4). Deterministic,
+    zero-token, from STABLE facts only — no LLM, no prompt dependence:
+
+      SINGLE-CREW  ⇔  exactly ONE crew target · no addenda · topology.action != 'fan-out'
+                       · not step.force_delegate
+
+    When true, the step-agent runs the work INLINE in one session on the CREW'S OWN capability
+    profile (readonly/authoring/builder) instead of escalating a coordinator that spawns a separate
+    crew session + synthesizes. Coordinator (the routing toolbelt) is only needed to route to
+    another session; a single-crew leaf does not route, so it needs neither the extra session nor
+    the coordinator scope. Returns (is_single_crew, crew_id, crew_profile). crew_profile is the
+    capability the lone crew would run under — the step's declared capability if set, else a
+    role default that is <= coordinator (never widens)."""
+    agent = step.get("agent") if isinstance(step.get("agent"), dict) else {}
+    crew = agent.get("crew")
+    addenda = step.get("addenda") or []
+    topo = card.get("topology") if isinstance(card.get("topology"), dict) else {}
+    if (not crew or addenda or topo.get("action") == "fan-out"
+            or step.get("force_delegate") is True):
+        return False, None, ""
+    # crew profile: explicit capability wins; else a role default that never exceeds coordinator.
+    cap = card.get("capability") or step.get("capability")
+    if not cap:
+        sid = str(step.get("id") or "")
+        cap = "builder" if sid == "implement" else ("readonly" if sid == "investigate" else "authoring")
+    if cap == "coordinator":
+        cap = "authoring"  # a single-crew leaf never needs routing scope
+    return True, str(crew), f"dlcyolo-{cap}"
+
+
 def _fallback_policy(state: dict, card: dict, step: dict, pl: dict | None) -> tuple[str, str]:
     agent = step.get("agent") if isinstance(step.get("agent"), dict) else {}
     for source, owner in (
@@ -4880,7 +4951,10 @@ def _ensure_runtime_handshake(state: dict, card: dict, step: dict, pl: dict | No
     """
     step_id = str(step.get("id") or card.get("stage") or "")
     existing = _clone(_runtime_handshake(card, step_id))
-    assigned_profile = _resolve_capability(card, step)
+    # Single-crew inline-collapse: a step that dispatches exactly one crew (no addenda, no fan-out)
+    # runs INLINE on the crew's own profile — no coordinator wrapper, no separate crew session.
+    _is_single, _inlined_crew, _crew_profile = _single_crew_inline(card, step)
+    assigned_profile = _crew_profile if _is_single else _resolve_capability(card, step)
     declaration = _profile_declaration(assigned_profile)
     ptr = ((card.get("step_sessions") or {}).get(step_id)
            if isinstance(card.get("step_sessions"), dict) else None)
@@ -4947,6 +5021,13 @@ def _ensure_runtime_handshake(state: dict, card: dict, step: dict, pl: dict | No
     required_targets = [item for item in targets if item.get("required")]
     delegation_required = bool(required_targets)
     fallback, fallback_source = _fallback_policy(state, card, step, pl)
+    # Single-crew inline-collapse: the runtime (not the agent) sets allow-inline and drops the
+    # delegation-required gate, so a lone-crew step runs in ONE session on the crew's profile
+    # instead of a coordinator delegating to a separate crew session.
+    _sc_single, _sc_crew, _sc_profile = _single_crew_inline(card, step)
+    if _sc_single:
+        fallback, fallback_source = "allow-inline", "single-crew-collapse"
+        delegation_required = False
     research_policy = (envelope.get("research_policy")
                        if isinstance(envelope, dict)
                        and isinstance(envelope.get("research_policy"), dict) else {})
@@ -7729,14 +7810,42 @@ def _process_orchestrator_triggers(ctx, state: dict, now: str) -> bool:
         trigger = card.get("orchestrator_trigger")
         if not isinstance(trigger, dict) or trigger.get("status") != "requested":
             continue
-        existing = card.get("orchestrator_session")
-        if isinstance(existing, dict) and existing.get("cron_id") and not existing.get("released"):
-            # Already have an openable session — clear the request idempotently.
-            card["orchestrator_trigger"] = {"status": "satisfied", "at": now,
-                                            "session_key": existing.get("session_key")}
-            changed = True
-            continue
         pl = _pipeline_for(state, card)
+        # CONFORMANCE (per-pipeline-orchestrator-session-spec): the orchestrator is ONE session per
+        # PIPELINE, not per card. Reuse the pipeline's live session via spawn_continue (accumulating
+        # cross-card context); only mint when the pipeline has none. The card keeps a back-reference
+        # so per-card "open orchestrator" still deep-links to the one pipeline session.
+        existing = (pl or {}).get("orchestrator_session") if isinstance(pl, dict) else None
+        if isinstance(existing, dict) and existing.get("cron_id") and not existing.get("released"):
+            # Resume the pipeline's session on this card's context — keep accumulated reasoning.
+            seed = (
+                "Continue as this pipeline's single orchestrator session. Now reason about card "
+                + str(card.get("id")) + " in pipeline " + str((pl or {}).get("id"))
+                + ": inspect its stage, step_sessions, decisions, topology; explain the next step / "
+                "crew / fan-out / back-step and honor any card.interjection. You retain context from "
+                "the other cards in this pipeline. Write reasoning/decisions to state.json; never "
+                "block the loop; never perform a single step's work here."
+            )
+            try:
+                ctx.call_tool("kirocrew-core", "spawn_continue",
+                              {"conversation": existing.get("session_key") or existing.get("cron_id"),
+                               "task": seed})
+            except Exception:  # noqa: BLE001
+                # A3: the pipeline session's conversation is GONE (cron removed / expired). Do NOT
+                # confirm success on a dead session — clear it and fall through to re-mint a fresh
+                # one below, rather than stamping a back-ref to a slot the user can't open.
+                if isinstance(pl, dict):
+                    pl["orchestrator_session"] = None
+                existing = None
+            if existing is not None:
+                card["orchestrator_session"] = {"pipeline_id": (pl or {}).get("id"),
+                                                "session_key": existing.get("session_key"),
+                                                "ref": True}
+                card["orchestrator_trigger"] = {"status": "satisfied", "at": now,
+                                                "session_key": existing.get("session_key")}
+                changed = True
+                continue
+            # else: fall through to mint (dead session was cleared)
         pipeline_label = (pl or {}).get("repo") or (pl or {}).get("id") or card.get("id")
         seed = (
             "You are this pipeline's orchestrator session (first-class-sessions §4). "
@@ -7771,14 +7880,50 @@ def _process_orchestrator_triggers(ctx, state: dict, now: str) -> bool:
                                             "reason": "no-job-id"}
             changed = True
             continue
-        card["orchestrator_session"] = {
+        session_obj = {
             "cron_id": job_id, "slot_key": f"cron-{job_id}",
             "session_key": f"cron:{job_id}",
             "name": f"dlc-yolo · {pipeline_label} · orchestrator",
             "at": now, "warm": False, "kept": True,
         }
+        # Single orchestrator: record on the PIPELINE so every card reuses it; card keeps a back-ref.
+        if isinstance(pl, dict):
+            pl["orchestrator_session"] = session_obj
+        card["orchestrator_session"] = {"pipeline_id": (pl or {}).get("id"),
+                                        "session_key": f"cron:{job_id}", "ref": True}
         card["orchestrator_trigger"] = {"status": "satisfied", "at": now,
                                         "session_key": f"cron:{job_id}"}
+        changed = True
+
+    # A2 — RELEASE (per-pipeline-orchestrator-session-spec §4): the orchestrator session is
+    # pipeline-scoped, so it must be reaped when the pipeline has no ACTIVE work left — otherwise it
+    # leaks one persistent cron + slot per pipeline forever. A pipeline whose every card is terminal
+    # (retired/merged/cancelled) needs no orchestrator; release its session and clear the pointer.
+    _TERMINAL_LC = {"retired", "merged", "cancelled", "canceled", "superseded"}
+    by_pipeline: dict = {}
+    for c in state.get("cards") or []:
+        if isinstance(c, dict) and c.get("pipeline_id"):
+            by_pipeline.setdefault(c["pipeline_id"], []).append(c)
+    for pl in state.get("pipelines") or []:
+        if not isinstance(pl, dict):
+            continue
+        sess = pl.get("orchestrator_session")
+        if not (isinstance(sess, dict) and sess.get("cron_id") and not sess.get("released")):
+            continue
+        cards_of = by_pipeline.get(pl.get("id"), [])
+        has_active = any(str(c.get("lifecycle") or "") not in _TERMINAL_LC for c in cards_of)
+        if has_active:
+            continue  # still working — keep the session
+        job = sess.get("cron_id")
+        for server, tool in (("kirocrew-core", "spawn_release"), ("kirocrew-cron", "cron_remove")):
+            try:
+                ctx.call_tool(server, tool,
+                              {"conversation": sess.get("session_key")} if tool == "spawn_release"
+                              else {"job_id": job})
+            except Exception:  # noqa: BLE001 — best-effort reap; mark released regardless
+                pass
+        sess["released"] = True
+        sess["released_at"] = now
         changed = True
     return changed
 
@@ -7878,6 +8023,14 @@ def _synthesize_step_summaries(state: dict, now: str) -> bool:
         for step_id, status in statuses.items():
             status = str(status or "")
             if status in ("", "pending"):
+                # The step reverted to transient (e.g. a block was cleared → back to pending). A
+                # summary left over from a prior terminal status (blocked/error/done) is now STALE
+                # and misrepresents the card ("tasks: blocked" on a pending step). Drop it so the
+                # glanceable line reflects the live state; it will re-synthesize on next terminal.
+                prev = summaries.get(step_id)
+                if isinstance(prev, dict) and prev.get("status") not in ("", "pending", None):
+                    summaries.pop(step_id, None)
+                    changed = True
                 continue  # transient — no durable summary yet
             existing = summaries.get(step_id)
             # Keep an agent-authored summary (has a headline and is not our synthesized floor)
@@ -7893,6 +8046,207 @@ def _synthesize_step_summaries(state: dict, now: str) -> bool:
             changed = True
         if changed and card.get("step_summaries") is not summaries:
             card["step_summaries"] = summaries
+    return changed
+
+
+BACKLOG_SCAN_MAX_ISSUES = 20  # bounded per cycle across all eligible pipelines
+
+
+def _backlog_list_issues(repo: str) -> list[dict]:
+    """Deterministic, zero-token discovery of open dlc-backlog issues for a repo."""
+    try:
+        out = subprocess.run(
+            ["gh", "issue", "list", "--repo", repo, "--label", "dlc-backlog",
+             "--state", "open", "--json", "number,title,url", "--limit", "50"],
+            capture_output=True, timeout=20, text=True)
+        if out.returncode != 0:
+            return []
+        data = json.loads(out.stdout or "[]")
+        return data if isinstance(data, list) else []
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
+        return []
+
+
+def _process_backlog_intake(ctx, state: dict, now: str) -> bool:
+    """F1 (event-driven-backlog-intake-spec): zero-token discovery scan that REPLACES the LLM
+    backlog-intake cron. For each pipeline whose backlog_intake is not false, list open
+    `dlc-backlog` issues; for any with no existing card, authoritatively refetch the issue, apply
+    the trusted-author ownership guard (fail-closed, empty != allow-all), and create an `intake`
+    card. READ + CREATE only — never advances, never files issues, never runs an LLM. Bounded per
+    cycle. The webhook path handles NEW labeled events immediately; this is the repair scan for
+    issues parked while the tunnel was down or back-fed by the orchestrator."""
+    created = 0
+    changed = False
+    for pl in state.get("pipelines") or []:
+        if created >= BACKLOG_SCAN_MAX_ISSUES:
+            break
+        if not isinstance(pl, dict):
+            continue
+        repo = pl.get("repo")
+        if not isinstance(repo, str) or not repo or pl.get("backlog_intake") is False:
+            continue
+        # exactly-one-pipeline-owns-repo, mirroring the webhook consumer's guard
+        if _github_pipeline(state, repo) is None:
+            continue
+        for issue in _backlog_list_issues(repo):
+            if created >= BACKLOG_SCAN_MAX_ISSUES:
+                break
+            num = issue.get("number")
+            if not isinstance(num, int):
+                continue
+            if _github_card(state, repo, num) is not None:
+                continue  # already tracked
+            # authoritative refetch — never trust the list payload's fields
+            snapshot, err = _github_issue_snapshot(repo, num)
+            if snapshot is None or snapshot.get("state") != "OPEN":
+                continue
+            author = snapshot.get("author")
+            trusted = {a.casefold() for a in _trusted_authors(state, {}, pl)
+                       if isinstance(a, str) and a}
+            if not trusted or not isinstance(author, str) or author.casefold() not in trusted:
+                continue  # fail-closed ownership guard — no card for an untrusted/unverifiable author
+            digest = hashlib.sha256(f"{repo.casefold()}#{num}".encode("utf-8")).hexdigest()[:16]
+            card = {
+                "id": f"card-gh-{digest}",
+                "title": snapshot.get("title") or f"backlog #{num}",
+                "pipeline_id": pl.get("id"),
+                "stage": "intake",
+                "trust": pl.get("trust") or (state.get("config") or {}).get("trust") or "assisted",
+                "depth": pl.get("depth") or (state.get("config") or {}).get("depth") or "standard",
+                "sot": "github",
+                "source": {"type": "github", "repo": repo, "issue": num, "url": snapshot.get("url")},
+                "lifecycle": "ingested", "step_status": {},
+                "guard": {"passed": True, "author": author, "at": now, "source": "backlog-scan-refetch"},
+                "github_state": "open", "created_at": now, "updated_at": now, "history": [],
+                "backlog_origin": {"label": "dlc-backlog", "discovered_at": now},
+            }
+            state.setdefault("cards", []).append(card)
+            created += 1
+            changed = True
+    return changed
+
+
+MAINTENANCE_REQUEST_KINDS = frozenset({
+    "request:re-spec", "request:retry", "request:back-step", "request:park", "request:cancel",
+})
+
+
+def _mark_request(entry: dict, status: str, now: str, reason: str = "") -> None:
+    entry["status"] = status
+    entry["handled_at" if status == "handled" else "rejected_at"] = now
+    if reason:
+        entry["reason"] = reason
+
+
+def _request_backstep_pingpong(card: dict, boundary: str) -> bool:
+    """Refuse a >2 same-boundary back-step, mirroring the numeric heuristic's ping-pong guard."""
+    n = 0
+    for h in card.get("backstep_history") or []:
+        if isinstance(h, dict) and f"{h.get('from')}→{h.get('to')}" == boundary:
+            n += 1
+    for d in card.get("decisions") or []:
+        if isinstance(d, dict) and d.get("kind") == "back-step" and d.get("boundary") == boundary:
+            n += 1
+    return n >= 2
+
+
+def _process_maintenance_requests(ctx, state: dict, now: str, cycle: dict) -> bool:
+    """RT1 (parity-full-2.2 §2): deterministic consumer of UI-written `request:*` interjections.
+
+    For each pending maintenance request: validate the UI's captured `expected` snapshot (lost-update
+    guard), then route by kind. Consequential kinds (re-spec/back-step/park) are NOT moved directly —
+    they append a `card.decisions[]` entry for the trust-gated orchestrator to deliberate, preserving
+    the "runtime owns movement, orchestrator owns semantic choice" split. Only `request:retry`
+    (re-arm a failed step) and `request:cancel` (cooperative flag) act directly, since neither moves a
+    stage. Request `text` is untrusted DATA — read for provenance, never executed. Bounded to one
+    handled request per card per cycle under the shared MAX_MOVES budget."""
+    changed = False
+    moves = cycle["moves"]
+    MAX_MOVES = cycle["max_moves"]
+    for card in state.get("cards") or []:
+        if not isinstance(card, dict):
+            continue
+        entries = card.get("interjection")
+        if not isinstance(entries, list):
+            continue
+        stage = card.get("stage")
+        step_status = ((card.get("step_status") or {}).get(stage)
+                       if isinstance(card.get("step_status"), dict) else None)
+        handled_this_card = False
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            kind = entry.get("kind")
+            if kind not in MAINTENANCE_REQUEST_KINDS or entry.get("status") != "pending":
+                continue
+            # (1) validate expected snapshot — lost-update / staleness guard
+            expected = entry.get("expected") if isinstance(entry.get("expected"), dict) else {}
+            if expected:
+                if expected.get("stage") not in (None, stage):
+                    _mark_request(entry, "rejected", now, "stale-expected-state")
+                    changed = True
+                    continue
+                exp_ss = expected.get("step_status")
+                if exp_ss is not None and exp_ss != step_status:
+                    _mark_request(entry, "rejected", now, "stale-expected-state")
+                    changed = True
+                    continue
+            # (3) per-cycle budget: at most one handled request per card per cycle
+            if handled_this_card or moves >= MAX_MOVES:
+                continue  # leave pending for the next cycle
+            # (2) route by kind
+            if kind == "request:retry":
+                if step_status in ("error", "blocked"):
+                    retry = card.setdefault("retry_count", {})
+                    if retry.get(stage, 0) >= MAX_STEP_RETRIES:
+                        _mark_request(entry, "rejected", now, "retry-cap-reached")
+                        changed = True
+                    else:
+                        retry[stage] = retry.get(stage, 0) + 1
+                        if isinstance(card.get("step_status"), dict):
+                            card["step_status"][stage] = None  # allow re-escalation
+                        br = card.get("block_reason")
+                        if isinstance(br, dict):
+                            br.pop(stage, None)
+                        card["updated_at"] = now
+                        _mark_request(entry, "handled", now)
+                        handled_this_card = True
+                        moves += 1
+                        changed = True
+                else:
+                    _mark_request(entry, "rejected", now, "nothing-to-retry")
+                    changed = True
+            elif kind in ("request:re-spec", "request:back-step", "request:park"):
+                dkind = {"request:re-spec": "re-scope",
+                         "request:back-step": "back-step",
+                         "request:park": "parked"}[kind]
+                if kind == "request:back-step":
+                    boundary = str(entry.get("boundary") or f"{stage}→prev")
+                    if _request_backstep_pingpong(card, boundary):
+                        _mark_request(entry, "rejected", now, "backstep-ping-pong")
+                        changed = True
+                        continue
+                decisions = card.setdefault("decisions", [])
+                did = f"dec-{card.get('id')}-{stage}-{dkind}-{entry.get('id')}"
+                if not any(isinstance(d, dict) and d.get("id") == did for d in decisions):
+                    decisions.append({
+                        "id": did, "kind": dkind, "step": stage, "status": "open",
+                        "resolution": "human-required", "raised_by": "ui:request",
+                        "source_request": entry.get("id"), "at": now,
+                        "boundary": entry.get("boundary"),
+                    })
+                _mark_request(entry, "handled", now)  # the decision now carries it
+                handled_this_card = True
+                moves += 1
+                changed = True
+            elif kind == "request:cancel":
+                if _scheduler_request_cancellation(ctx, card, stage, now, "ui:request:cancel"):
+                    changed = True
+                _mark_request(entry, "handled", now)
+                handled_this_card = True
+                moves += 1
+                changed = True
+    cycle["moves"] = moves
     return changed
 
 
@@ -7916,6 +8270,8 @@ def _run_advance_passes(ctx, state: dict, now: str, cycle: dict) -> bool:
         changed = True
     if _synthesize_step_summaries(state, now):
         changed = True
+    if _process_maintenance_requests(ctx, state, now, cycle):
+        changed = True
     if _process_orchestrator_triggers(ctx, state, now):
         changed = True
     if _scheduler_reconcile_cancellations(ctx, state, now):
@@ -7923,6 +8279,8 @@ def _run_advance_passes(ctx, state: dict, now: str, cycle: dict) -> bool:
     if _reconcile_github_transitions(ctx, state, now, cycle):
         changed = True
     if _reconcile_local_github_sot(state, now, cycle):
+        changed = True
+    if _process_backlog_intake(ctx, state, now):
         changed = True
 
     # RC#2 — deterministic CONSUMED-flip (card-lifecycle-spec: no-retire-until-consumed). The
@@ -8236,6 +8594,103 @@ def _run_advance_passes(ctx, state: dict, now: str, cycle: dict) -> bool:
     # exactly the "pause on a blocker" case). We NEVER delete child cards (created work is real).
     # Idempotent: skip a stage already carrying a budget block_reason.
     for card in cards:
+        # EF1 (§4A): populate the specced effort.spent field for any card carrying per-phase scope,
+        # so consumers have it without recomputing. spent = sum(effort.scope[*]).
+        eff = card.get("effort")
+        if isinstance(eff, dict) and isinstance(eff.get("scope"), dict) and eff["scope"]:
+            try:
+                total = sum(v for v in eff["scope"].values() if isinstance(v, (int, float)))
+                if eff.get("spent") != total:
+                    eff["spent"] = total
+                    changed = True
+            except Exception:
+                pass
+
+        # HB1 §3.1 — scope-growth backstop. If a step's scope outgrew its predecessor beyond the
+        # depth-tuned GROWTH_FACTOR and the prompt raised NO back-step for this boundary, RAISE the
+        # fork as a decision so the orchestrator must resolve it. The code never performs the
+        # back-step (that stays trust-gated) — it guarantees the fork is not silently dropped.
+        if isinstance(eff, dict) and isinstance(eff.get("scope"), dict):
+            scope = eff["scope"]
+            depth = (card.get("depth") or (state.get("config") or {}).get("depth") or "standard")
+            factor = GROWTH_FACTOR.get(str(depth), 2.0)
+            plc = _pipeline_for(state, card)
+            ladder = _ladder(plc) if plc else []
+            for i in range(1, len(ladder)):
+                cur_step, prev_step = ladder[i], ladder[i - 1]
+                cur_v, prev_v = scope.get(cur_step), scope.get(prev_step)
+                if not (isinstance(cur_v, (int, float)) and isinstance(prev_v, (int, float)) and prev_v > 0):
+                    continue
+                if cur_v <= prev_v * factor:
+                    continue
+                boundary = f"{cur_step}→{prev_step}"
+                already = any(
+                    isinstance(h, dict) and f"{h.get('from')}→{h.get('to')}" == boundary
+                    for h in card.get("backstep_history") or []
+                ) or any(
+                    isinstance(d, dict) and d.get("kind") in ("back-step", "scope-growth")
+                    and d.get("boundary") == boundary
+                    for d in card.get("decisions") or []
+                )
+                if already:
+                    continue
+                did = f"dec-{card.get('id')}-{boundary}-scope-growth"
+                card.setdefault("decisions", []).append({
+                    "id": did, "kind": "scope-growth", "step": cur_step, "boundary": boundary,
+                    "status": "open", "resolution": "human-required", "raised_by": "auto:growth-backstop",
+                    "detail": f"{cur_step} scope {cur_v} > {factor}× {prev_step} scope {prev_v}",
+                    "at": now,
+                })
+                changed = True
+
+        # HB1 §3.2 — phase-trigger backstop. A card in an agent phase (requirements/design/tasks/
+        # implement) that has produced NO trigger record AND no artifact after the staleness window
+        # is a silent stall (a prompt that failed to pick/record a trigger). Surface it as a block
+        # reason instead of an invisible pending. Conservative: only when clearly past staleness.
+        stg = card.get("stage")
+        if stg in TRIGGER_PHASES:
+            ss = (card.get("step_status") or {}).get(stg)
+            if ss == "pending":
+                pending_at = (card.get("pending_at") or {}).get(stg)
+                stale = False
+                if isinstance(pending_at, str):
+                    try:
+                        from datetime import datetime
+                        age = (datetime.fromisoformat(now.replace("Z", "+00:00"))
+                               - datetime.fromisoformat(pending_at.replace("Z", "+00:00"))).total_seconds()
+                        stale = age >= PENDING_STALE_SECS
+                    except Exception:
+                        stale = False
+                has_trigger = bool((card.get("trigger_history") or []))
+                has_artifact = bool((card.get("artifacts") or {}).get(stg)) or bool((card.get("step_results") or {}).get(stg))
+                # A step SESSION for this stage is positive evidence a trigger WAS picked (a trigger
+                # produces the escalated session), even if the legacy trigger_history field is empty.
+                # Only a step with NO session, no trigger, and no artifact is a genuine "trigger
+                # never picked" stall — otherwise this backstop falsely blocks a card that is (or
+                # was) actively working the step. This is the fix for the false positive that wedged
+                # a card whose step_sessions were populated but trigger_history was unrecorded.
+                has_session = isinstance((card.get("step_sessions") or {}).get(stg), dict)
+                existing_br = (card.get("block_reason") or {}).get(stg, "")
+                if (stale and not has_trigger and not has_artifact and not has_session
+                        and not str(existing_br).startswith("phase-trigger")):
+                    card.setdefault("block_reason", {})[stg] = "phase-trigger-unrecorded — no trigger picked/recorded and no artifact after staleness"
+                    changed = True
+
+        # HB1 §3.3 — self-enablement bootstrap idempotency + crew-cap backstop (code-enforced, not
+        # just prompt). The cron NEVER creates crews/issues (coordinator authority); it only reads
+        # the marker: a done bootstrap must not re-escalate, and > MAX_BOOTSTRAP_CREWS crews is a
+        # gate-worthy breach.
+        boot = card.get("bootstrap")
+        if isinstance(boot, dict):
+            crews = boot.get("crews_created")
+            if isinstance(crews, list) and len(crews) > MAX_BOOTSTRAP_CREWS:
+                bstg = card.get("stage")
+                existing_br = (card.get("block_reason") or {}).get(bstg, "")
+                if not str(existing_br).startswith("bootstrap-crew-cap"):
+                    card.setdefault("block_reason", {})[bstg] = (
+                        f"bootstrap-crew-cap: {len(crews)} crews exceeds max {MAX_BOOTSTRAP_CREWS} — human decision needed")
+                    changed = True
+
         kids = card.get("child_tickets")
         if not isinstance(kids, list) or not kids:
             continue  # only parents that actually fanned out can breach a fan-out budget
@@ -8531,7 +8986,13 @@ def _run_advance_passes(ctx, state: dict, now: str, cycle: dict) -> bool:
                             f"{card.get('title', card.get('id'))} @ {stage} (blocked: {infeasible})")
                         changed = True
                         continue
-                    profile = _resolve_capability(card, step)
+                    # A1: honor single-crew inline-collapse at the LAUNCH seed, not just the
+                    # handshake. A collapsed step runs on the crew's own profile (readonly/
+                    # authoring/builder) in one session — NOT the coordinator wrapper. Without this
+                    # the cron agent + pointer provenance would still say coordinator, silently
+                    # keeping the extra scope the collapse is meant to drop.
+                    _sc_ok, _sc_crew, _sc_profile = _single_crew_inline(card, step)
+                    profile = _sc_profile if _sc_ok else _resolve_capability(card, step)
                     depth = _eff_depth(state, card, step, pl)
                     crew = (((step or {}).get("agent") or {}).get("crew"))
                     lease_changed, lease_error = _ensure_worktree_lease(
@@ -9077,7 +9538,12 @@ def advance(ctx):
     from datetime import datetime, timezone
 
     _bootstrap()
-    state = _load()
+    try:
+        state = _load()
+    except _StateUnreadable as exc:
+        # Transient/corrupt read of a populated state — do NOT proceed on {} and risk clobbering.
+        # Skip this cycle; the next 120s tick (or terminal wake) reconciles once the read clears.
+        raise Report(f"state unreadable this cycle, skipped (poll will repair): {exc}")
 
     now = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 

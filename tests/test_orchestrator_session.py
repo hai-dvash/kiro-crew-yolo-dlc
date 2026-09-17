@@ -18,46 +18,127 @@ class _Ctx:
 
     def call_tool(self, server, tool, payload):
         self.calls.append((server, tool, payload))
-        assert server == "kirocrew-cron" and tool == "cron_add"
-        return "Added job: abc123def456 (orchestrator :: card-x) scheduled"
+        if tool == "cron_add":
+            return "Added job: abc123def456 (orchestrator :: card-x) scheduled"
+        return "continued"  # spawn_continue
+
+    def mints(self):
+        return [c for c in self.calls if c[1] == "cron_add"]
+
+    def continues(self):
+        return [c for c in self.calls if c[1] == "spawn_continue"]
 
 
-def _card(trigger_status="requested"):
-    return {"id": "card-x", "pipeline_id": "pl-1", "stage": "design",
+def _card(trigger_status="requested", cid="card-x"):
+    return {"id": cid, "pipeline_id": "pl-1", "stage": "design",
             "orchestrator_trigger": {"status": trigger_status, "at": "t0"}}
 
 
-def _state(card):
-    return {"pipelines": [{"id": "pl-1", "repo": "o/r"}], "cards": [card]}
+def _state(*cards):
+    return {"pipelines": [{"id": "pl-1", "repo": "o/r"}], "cards": list(cards)}
 
 
-def test_trigger_mints_openable_session_with_slot_controls():
+def test_trigger_mints_pipeline_session_with_slot_controls():
     ctx = _Ctx()
     state = _state(_card())
     assert advance._process_orchestrator_triggers(ctx, state, "t1") is True
-    payload = ctx.calls[0][2]
-    assert payload["silent"] is False
-    assert payload["hide_in_chat"] is False
+    payload = ctx.mints()[0][2]
+    assert payload["silent"] is False and payload["hide_in_chat"] is False
     assert payload["persistent_session"] is True
     assert payload["agent"] == "dlcyolo-coordinator"
-    os_ = state["cards"][0]["orchestrator_session"]
-    assert os_["cron_id"] == "abc123def456"
-    assert os_["slot_key"] == "cron-abc123def456"
-    assert os_["session_key"] == "cron:abc123def456"
-    assert os_["name"] == "dlc-yolo · o/r · orchestrator"
-    assert os_["warm"] is False
+    # SINGLE ORCHESTRATOR: session recorded on the PIPELINE, card holds a back-ref
+    pl_os = state["pipelines"][0]["orchestrator_session"]
+    assert pl_os["cron_id"] == "abc123def456"
+    assert pl_os["slot_key"] == "cron-abc123def456"
+    assert pl_os["session_key"] == "cron:abc123def456"
+    card_ref = state["cards"][0]["orchestrator_session"]
+    assert card_ref["ref"] is True and card_ref["pipeline_id"] == "pl-1"
+    assert card_ref["session_key"] == "cron:abc123def456"
     assert state["cards"][0]["orchestrator_trigger"]["status"] == "satisfied"
 
 
-def test_trigger_is_idempotent_when_session_exists():
+def test_second_card_continues_not_remints():
+    # SINGLE ORCHESTRATOR: a second card's trigger in the SAME pipeline continues the one session.
     ctx = _Ctx()
-    card = _card()
-    card["orchestrator_session"] = {"cron_id": "existing", "session_key": "cron:existing"}
-    state = _state(card)
+    state = _state(_card(cid="card-a"), _card(cid="card-b"))
     assert advance._process_orchestrator_triggers(ctx, state, "t1") is True
-    # no new spawn — the existing session is reused
-    assert ctx.calls == []
-    assert card["orchestrator_trigger"]["status"] == "satisfied"
+    assert len(ctx.mints()) == 1, "only ONE orchestrator session may be minted per pipeline"
+    assert len(ctx.continues()) == 1, "the second card must CONTINUE the existing session"
+    # both cards satisfied, both back-referencing the one session
+    for c in state["cards"]:
+        assert c["orchestrator_trigger"]["status"] == "satisfied"
+        assert c["orchestrator_session"]["session_key"] == "cron:abc123def456"
+
+
+def test_existing_pipeline_session_is_reused_via_continue():
+    ctx = _Ctx()
+    state = _state(_card())
+    state["pipelines"][0]["orchestrator_session"] = {
+        "cron_id": "existing", "slot_key": "cron-existing", "session_key": "cron:existing"}
+    assert advance._process_orchestrator_triggers(ctx, state, "t1") is True
+    assert ctx.mints() == [], "must not mint when a pipeline session already exists"
+    assert len(ctx.continues()) == 1
+    assert state["cards"][0]["orchestrator_session"]["session_key"] == "cron:existing"
+
+
+def test_released_pipeline_session_re_mints():
+    ctx = _Ctx()
+    state = _state(_card())
+    state["pipelines"][0]["orchestrator_session"] = {
+        "cron_id": "old", "session_key": "cron:old", "released": True}
+    assert advance._process_orchestrator_triggers(ctx, state, "t1") is True
+    assert len(ctx.mints()) == 1, "a released session must be re-minted"
+
+
+class _CtxFailContinue(_Ctx):
+    def call_tool(self, server, tool, payload):
+        self.calls.append((server, tool, payload))
+        if tool == "spawn_continue":
+            raise RuntimeError("conversation_gone")
+        if tool == "cron_add":
+            return "Added job: aaaabbbbcccc (orchestrator) scheduled"
+        return "ok"
+
+
+def test_continue_failure_remints_not_wedges():
+    # A3: if the pipeline session's conversation is gone, spawn_continue fails — the pass must
+    # RE-MINT a fresh session, not stamp the dead one and confirm success.
+    ctx = _CtxFailContinue()
+    state = _state(_card())
+    state["pipelines"][0]["orchestrator_session"] = {
+        "cron_id": "deadbeef0001", "session_key": "cron:deadbeef0001", "slot_key": "cron-deadbeef0001"}
+    assert advance._process_orchestrator_triggers(ctx, state, "t1") is True
+    assert len(ctx.mints()) == 1, "a gone conversation must re-mint"
+    pl_os = state["pipelines"][0]["orchestrator_session"]
+    assert pl_os["cron_id"] == "aaaabbbbcccc"
+    assert state["cards"][0]["orchestrator_session"]["session_key"] == "cron:aaaabbbbcccc"
+
+
+def test_release_reaps_session_when_no_active_cards():
+    # A2: a pipeline whose every card is terminal must have its orchestrator session RELEASED
+    # (spawn_release + cron_remove + released flag) — no per-pipeline cron leak.
+    ctx = _Ctx()
+    card = _card(trigger_status="satisfied")  # no pending trigger
+    card["lifecycle"] = "retired"
+    state = _state(card)
+    state["pipelines"][0]["orchestrator_session"] = {
+        "cron_id": "live", "session_key": "cron:live", "slot_key": "cron-live"}
+    assert advance._process_orchestrator_triggers(ctx, state, "t1") is True
+    sess = state["pipelines"][0]["orchestrator_session"]
+    assert sess.get("released") is True
+    tools = {c[1] for c in ctx.calls}
+    assert "spawn_release" in tools and "cron_remove" in tools
+
+
+def test_release_kept_when_a_card_is_active():
+    ctx = _Ctx()
+    active = _card(trigger_status="satisfied")  # lifecycle default 'ingested' (active)
+    state = _state(active)
+    state["pipelines"][0]["orchestrator_session"] = {
+        "cron_id": "live", "session_key": "cron:live", "slot_key": "cron-live"}
+    advance._process_orchestrator_triggers(ctx, state, "t1")
+    assert state["pipelines"][0]["orchestrator_session"].get("released") is not True
+    assert not any(c[1] in ("spawn_release", "cron_remove") for c in ctx.calls)
 
 
 def test_no_trigger_is_noop():
@@ -88,16 +169,20 @@ def test_orchestrator_session_has_exactly_one_writer():
     from pathlib import Path
     src = (Path(__file__).resolve().parent.parent / "crons" / "_dlc_yolo_impl.py").read_text(
         encoding="utf-8")
-    # Assignment/setdefault writes to card["orchestrator_session"] / card.setdefault("orchestrator_session"...
-    write_sites = re.findall(
-        r"""\[["']orchestrator_session["']\]\s*=|setdefault\(\s*["']orchestrator_session["']""",
-        src,
-    )
-    # There is exactly one legitimate write site (inside _process_orchestrator_triggers).
-    assert len(write_sites) == 1, (
-        f"expected exactly 1 writer of card.orchestrator_session (in "
-        f"_process_orchestrator_triggers); found {len(write_sites)}. A step escalation must "
-        f"record step_sessions, never orchestrator_session."
+    # All writes to card["orchestrator_session"] must live INSIDE _process_orchestrator_triggers
+    # (the mint path + the reuse/back-ref path both write it, per per-pipeline-orchestrator-session-
+    # spec). No STEP-escalation code path may write it. Assert confinement to that one function.
+    def _fn_body(name: str) -> str:
+        m = re.search(rf"\ndef {name}\(.*?\n(?=\ndef |\Z)", src, re.DOTALL)
+        return m.group(0) if m else ""
+    orch_body = _fn_body("_process_orchestrator_triggers")
+    write_re = r"""\[["']orchestrator_session["']\]\s*=|setdefault\(\s*["']orchestrator_session["']"""
+    all_writes = re.findall(write_re, src)
+    in_orch = re.findall(write_re, orch_body)
+    assert all_writes and len(in_orch) == len(all_writes), (
+        f"every card/pipeline orchestrator_session write must be inside "
+        f"_process_orchestrator_triggers; found {len(all_writes)} total, {len(in_orch)} confined. "
+        f"A step escalation must record step_sessions, never orchestrator_session."
     )
 
 

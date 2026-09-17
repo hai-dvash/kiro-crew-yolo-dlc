@@ -25,29 +25,17 @@ def test_advance_job_identity_matches_runtime_seed(setup_mod, advance_mod):
     assert len(advance_mod._advance_job_id()) == 12
 
 
-def test_backlog_job_honors_pipeline_opt_out_in_manifest_and_fallback(
-        setup_mod, monkeypatch, tmp_path: Path):
-    required = (
-        "Read state.pipelines",
-        "backlog_intake is not false",
-        "Do not infer repository eligibility from cards alone",
-        "FIRST apply the OWNERSHIP GUARD",
-    )
+def test_backlog_cron_is_retired_from_desired_jobs(setup_mod, monkeypatch, tmp_path: Path):
+    # F1: the backlog-intake LLM cron is retired — its scan runs in the zero-token advance pass.
+    # _desired_jobs must contain ONLY the two zero-token script crons; no backlog, no agent job.
     source_manifest = json.loads((setup_mod.REPO / "app.json").read_text(encoding="utf-8"))
     source_app_crons = tmp_path / "source-app-crons.json"
     source_app_crons.write_text(json.dumps(source_manifest["crons"]), encoding="utf-8")
     monkeypatch.setattr(setup_mod, "APP_CRONS", source_app_crons)
-    declared = next(job for job in setup_mod._desired_jobs()
-                    if job["name"] == setup_mod.BACKLOG_NAME)
-    for text in required:
-        assert text in declared["message"]
-    assert "Collect the distinct owned repos from state.json cards' source.repo" not in declared["message"]
-
-    monkeypatch.setattr(setup_mod, "APP_CRONS", tmp_path / "missing-app-crons.json")
-    fallback = next(job for job in setup_mod._desired_jobs()
-                    if job["name"] == setup_mod.BACKLOG_NAME)
-    for text in required:
-        assert text in fallback["message"]
+    jobs = setup_mod._desired_jobs()
+    names = sorted(j["name"] for j in jobs)
+    assert names == [setup_mod.ADVANCE_NAME, setup_mod.SPAWNS_NAME]
+    assert all(j.get("script") and not j.get("agent_id") for j in jobs)
 
 
 def test_reconcile_converges_valid_random_advance_id_and_preserves_foreign_job(
@@ -98,6 +86,55 @@ def test_reconcile_refuses_foreign_advance_id_collision(
 
     assert json.loads(crons_json.read_text(encoding="utf-8")) == original
     assert not crons_json.with_suffix(".json.bak").exists()
+
+
+def test_reconcile_heals_cost_critical_field_drift(setup_mod, monkeypatch, tmp_path: Path):
+    """R1: drift on persistent_session / minimal_context / approval_mode / enabled MUST be
+    detected and repaired — the fields whose omission let the backlog cron stay in expensive mode
+    'in sync' forever. Uses a script job so nothing agent-specific interferes."""
+    crons_json = tmp_path / "crons.json"
+    desired = setup_mod._job_template(setup_mod.SPAWNS_NAME)
+    desired["script"] = "~/.kiro/crew/crons/dlc_yolo_spawns.py:snapshot"
+    # desired template: persistent_session True, minimal_context False, enabled True, approval auto
+    current = copy.deepcopy(desired)
+    # live job has drifted to the exact expensive/broken shape the audit found:
+    current["minimal_context"] = True          # drifted
+    current["persistent_session"] = False       # drifted
+    current["approval_mode"] = "manual"          # drifted
+    current["enabled"] = False                   # auto-paused / disabled
+    crons_json.write_text(json.dumps({"version": 2, "jobs": [current]}), encoding="utf-8")
+    monkeypatch.setattr(setup_mod, "CRONS_JSON", crons_json)
+    monkeypatch.setattr(setup_mod, "_desired_jobs", lambda: [copy.deepcopy(desired)])
+
+    assert setup_mod.reconcile_crons(check=True) is True   # drift detected
+    assert setup_mod.reconcile_crons(check=False) is True   # and repaired
+    healed = json.loads(crons_json.read_text(encoding="utf-8"))["jobs"][0]
+    assert healed["minimal_context"] == desired["minimal_context"]
+    assert healed["persistent_session"] == desired["persistent_session"]
+    assert healed["approval_mode"] == desired["approval_mode"]
+    assert healed["enabled"] is True             # re-armed
+    assert setup_mod.reconcile_crons(check=False) is False  # now stable
+
+
+def test_reconcile_removes_undeclared_dlcyolo_job_but_keeps_foreign(
+        setup_mod, monkeypatch, tmp_path: Path):
+    """R2: a dlc-yolo-owned job not in the desired set is removed (the kill path for a retired
+    cron); a foreign app's job is never touched."""
+    crons_json = tmp_path / "crons.json"
+    advance = setup_mod._job_template(setup_mod.ADVANCE_NAME)
+    advance["script"] = "~/.kiro/crew/crons/dlc_yolo_advance.py:advance"
+    retired = {"id": "aaaaaabbbbbb", "name": "dlc-yolo/dlc-yolo-old-scanner",
+               "agent_id": "pipeline-orchestrator", "enabled": True}
+    foreign = {"id": "ffffffeeeeee", "name": "some-other-app/job", "enabled": True}
+    crons_json.write_text(json.dumps(
+        {"version": 2, "jobs": [copy.deepcopy(advance), retired, foreign]}), encoding="utf-8")
+    monkeypatch.setattr(setup_mod, "CRONS_JSON", crons_json)
+    monkeypatch.setattr(setup_mod, "_desired_jobs", lambda: [copy.deepcopy(advance)])
+
+    assert setup_mod.reconcile_crons(check=False) is True
+    names = {j["name"] for j in json.loads(crons_json.read_text())["jobs"]}
+    assert "dlc-yolo/dlc-yolo-old-scanner" not in names   # retired dlc-yolo job removed
+    assert "some-other-app/job" in names                  # foreign job preserved
 
 
 def test_deploy_script_includes_secure_webhook_helper(

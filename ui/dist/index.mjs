@@ -1,29 +1,29 @@
-import { jsx as e, Fragment as He, jsxs as a } from "react/jsx-runtime";
-import { useChatLauncher as ir, useAppApi as Zt, useNavigate as cr } from "@kirocrew/app-sdk";
-import { PageHeader as dr, StatCard as kt } from "@kirocrew/app-sdk/ui";
-import { useState as N, useCallback as ae, useEffect as _e, useMemo as xe, useRef as fe } from "react";
-const pr = new RegExp("\\p{L}[\\p{L}\\p{N}_'’-]*|\\p{N}+(?:[.,]\\p{N}+)*|[^\\s\\p{L}\\p{N}]", "gu"), ur = /^[.,!?;:%)\]}]$/u, mr = /^[(\[{]$/u;
-function gr(t, r = 3) {
-  const o = (String(t || "").match(pr) || []).slice(-Math.max(0, r));
-  return o.reduce((l, m, u) => {
-    if (u === 0) return m;
-    const g = o[u - 1];
-    return ur.test(m) || mr.test(g) ? l + m : l + " " + m;
+import { jsx as e, Fragment as ze, jsxs as a } from "react/jsx-runtime";
+import { useChatLauncher as fr, useAppApi as yr, useNavigate as Er } from "@kirocrew/app-sdk";
+import { PageHeader as Or, StatCard as Wt } from "@kirocrew/app-sdk/ui";
+import { useState as w, useCallback as le, useEffect as Ee, useMemo as Ce, useRef as Ae } from "react";
+const Lr = new RegExp("\\p{L}[\\p{L}\\p{N}_'’-]*|\\p{N}+(?:[.,]\\p{N}+)*|[^\\s\\p{L}\\p{N}]", "gu"), qr = /^[.,!?;:%)\]}]$/u, Ir = /^[(\[{]$/u;
+function Mr(t, r = 3) {
+  const s = (String(t || "").match(Lr) || []).slice(-Math.max(0, r));
+  return s.reduce((l, p, u) => {
+    if (u === 0) return p;
+    const i = s[u - 1];
+    return qr.test(p) || Ir.test(i) ? l + p : l + " " + p;
   }, "");
 }
-function Dt(t, r = !1) {
+function nr(t, r = !1) {
   return t != null && t.active && !r ? t : { buffer: "", tail: "", active: !0, phase: "thinking", seq: 0 };
 }
-function vr(t, r, i) {
-  if (!r || t != null && t.active && Number.isFinite(i) && Number.isFinite(t.seq) && i <= t.seq)
+function Dr(t, r, o) {
+  if (!r || t != null && t.active && Number.isFinite(o) && Number.isFinite(t.seq) && o <= t.seq)
     return t;
   const l = ((t != null && t.active ? t.buffer : "") + r).slice(-512);
-  return { buffer: l, tail: gr(l, 3), active: !0, phase: "generating", seq: Number(i) || 0 };
+  return { buffer: l, tail: Mr(l, 3), active: !0, phase: "generating", seq: Number(o) || 0 };
 }
-function hr(t) {
+function Br(t) {
   return t && { ...t, active: !1, phase: "idle" };
 }
-const br = /* @__PURE__ */ new Set(["done", "advanced"]), xr = /* @__PURE__ */ new Set([
+const zr = /* @__PURE__ */ new Set(["done", "advanced"]), Pr = /* @__PURE__ */ new Set([
   "done",
   "advanced",
   "completed",
@@ -31,23 +31,23 @@ const br = /* @__PURE__ */ new Set(["done", "advanced"]), xr = /* @__PURE__ */ n
   "integrated",
   "waived",
   "omitted"
-]), Le = (t) => !!t && typeof t == "object" && !Array.isArray(t), H = (t) => Le(t) ? t : {}, ce = (t) => Array.isArray(t) ? t : t == null ? [] : [t], z = (...t) => t.find((r) => r != null && r !== "");
-function De(t) {
+]), Ve = (t) => !!t && typeof t == "object" && !Array.isArray(t), H = (t) => Ve(t) ? t : {}, xe = (t) => Array.isArray(t) ? t : t == null ? [] : [t], P = (...t) => t.find((r) => r != null && r !== "");
+function tt(t) {
   if (t == null || t === "") return "unobservable";
   if (typeof t == "boolean") return t ? "yes" : "no";
   if (typeof t == "string" || typeof t == "number") return String(t);
-  if (Array.isArray(t)) return t.length ? t.map(De).join(" · ") : "none";
-  if (Le(t)) {
+  if (Array.isArray(t)) return t.length ? t.map(tt).join(" · ") : "none";
+  if (Ve(t)) {
     const r = Object.entries(t);
-    return r.length ? r.map(([i, o]) => `${i}: ${De(o)}`).join(" · ") : "none";
+    return r.length ? r.map(([o, s]) => `${o}: ${tt(s)}`).join(" · ") : "none";
   }
   return String(t);
 }
-function Ie(t) {
-  return ce(t).map((r, i) => {
-    if (!Le(r))
-      return { key: `item-${i}`, title: De(r), detail: null, status: null, level: null, ref: null, url: null };
-    const o = z(
+function Ze(t) {
+  return xe(t).map((r, o) => {
+    if (!Ve(r))
+      return { key: `item-${o}`, title: tt(r), detail: null, status: null, level: null, ref: null, url: null };
+    const s = P(
       r.title,
       r.label,
       r.name,
@@ -58,7 +58,7 @@ function Ie(t) {
       r.id,
       r.path,
       r.ref
-    ) || `item ${i + 1}`, l = z(
+    ) || `item ${o + 1}`, l = P(
       r.summary,
       r.detail,
       r.description,
@@ -68,58 +68,58 @@ function Ie(t) {
       r.reason,
       r.path,
       r.ref
-    ), m = z(
+    ), p = P(
       r.enforcement,
       r.level,
       r.priority,
       r.required === !0 ? "required" : void 0
-    ), u = z(
+    ), u = P(
       r.status,
       r.outcome,
       r.state,
       r.passed === !0 ? "passed" : void 0,
       r.passed === !1 ? "failed" : void 0
-    ), g = z(r.url, r.path, r.ref), d = typeof g == "string" && /^https?:\/\//.test(g) ? g : null;
+    ), i = P(r.url, r.path, r.ref), c = typeof i == "string" && /^https?:\/\//.test(i) ? i : null;
     return {
-      key: String(z(r.id, r.key, r.path, r.ref, `item-${i}`)),
-      title: String(o),
-      detail: l == null || String(l) === String(o) ? null : De(l),
+      key: String(P(r.id, r.key, r.path, r.ref, `item-${o}`)),
+      title: String(s),
+      detail: l == null || String(l) === String(s) ? null : tt(l),
       status: u == null ? null : String(u),
-      level: m == null ? null : String(m),
-      ref: g == null ? null : String(g),
-      url: d
+      level: p == null ? null : String(p),
+      ref: i == null ? null : String(i),
+      url: c
     };
   });
 }
-function fr(t) {
-  return ce(t).filter((r) => r != null).map((r, i) => {
-    const o = H(r), l = Le(r) ? z(o.url, o.path, o.ref, o.id) : String(r), m = Le(r) ? z(o.label, o.name, o.kind, o.id, o.path, o.ref, `artifact ${i + 1}`) : String(r), u = z(o.url, typeof l == "string" && /^https?:\/\//.test(l) ? l : void 0), g = z(o.preview, o.summary, o.description, o.evidence, o.detail);
+function Wr(t) {
+  return xe(t).filter((r) => r != null).map((r, o) => {
+    const s = H(r), l = Ve(r) ? P(s.url, s.path, s.ref, s.id) : String(r), p = Ve(r) ? P(s.label, s.name, s.kind, s.id, s.path, s.ref, `artifact ${o + 1}`) : String(r), u = P(s.url, typeof l == "string" && /^https?:\/\//.test(l) ? l : void 0), i = P(s.preview, s.summary, s.description, s.evidence, s.detail);
     return {
-      key: String(z(o.id, o.path, o.ref, `artifact-${i}`)),
-      label: String(m),
+      key: String(P(s.id, s.path, s.ref, `artifact-${o}`)),
+      label: String(p),
       ref: l == null ? null : String(l),
       url: typeof u == "string" && /^https?:\/\//.test(u) ? u : null,
-      preview: g == null ? null : De(g),
-      kind: o.kind == null ? null : String(o.kind),
-      status: o.status == null ? null : String(o.status)
+      preview: i == null ? null : tt(i),
+      kind: s.kind == null ? null : String(s.kind),
+      status: s.status == null ? null : String(s.status)
     };
   });
 }
-function yr(t) {
-  return ce(t.children).map((i, o) => {
-    const l = H(i), m = l.required !== !1 && !["optional", "preferred", "advisory"].includes(
-      String(z(l.enforcement, l.level, "required")).toLowerCase()
-    ), u = String(z(l.status, l.state, "unobservable"));
+function Ur(t) {
+  return xe(t.children).map((o, s) => {
+    const l = H(o), p = l.required !== !1 && !["optional", "preferred", "advisory"].includes(
+      String(P(l.enforcement, l.level, "required")).toLowerCase()
+    ), u = String(P(l.status, l.state, "unobservable"));
     return {
-      key: String(z(l.id, l.card_id, l.issue, `child-${o}`)),
-      label: String(z(l.title, l.name, l.card_id, l.id, l.issue, `child ${o + 1}`)),
-      required: m,
+      key: String(P(l.id, l.card_id, l.issue, `child-${s}`)),
+      label: String(P(l.title, l.name, l.card_id, l.id, l.issue, `child ${s + 1}`)),
+      required: p,
       status: u,
-      complete: xr.has(u.toLowerCase())
+      complete: Pr.has(u.toLowerCase())
     };
   });
 }
-const Jt = /* @__PURE__ */ new Set([
+const kr = /* @__PURE__ */ new Set([
   "done",
   "completed",
   "covered",
@@ -129,12 +129,12 @@ const Jt = /* @__PURE__ */ new Set([
   "passed",
   "approved"
 ]);
-function kr(t, r) {
-  const i = H(t == null ? void 0 : t.execution_envelope);
-  return i.step === r ? i : ce(t == null ? void 0 : t.execution_envelope_history).map(H).reverse().find((o) => o.step === r) || {};
+function Gr(t, r) {
+  const o = H(t == null ? void 0 : t.execution_envelope);
+  return o.step === r ? o : xe(t == null ? void 0 : t.execution_envelope_history).map(H).reverse().find((s) => s.step === r) || {};
 }
-function Qt(t) {
-  return typeof t == "string" ? t.trim().length > 0 : Le(t) ? [
+function wr(t) {
+  return typeof t == "string" ? t.trim().length > 0 : Ve(t) ? [
     "ref",
     "id",
     "url",
@@ -148,173 +148,173 @@ function Qt(t) {
     "refs"
   ].some((r) => t[r] !== void 0 && t[r] !== null && t[r] !== "" && (!Array.isArray(t[r]) || t[r].length > 0)) : !1;
 }
-function zt(t, r) {
-  const i = ce(t.validation_and_evidence).map(H);
-  return ce(r).map(String).filter((o) => !i.some((l) => {
-    const m = String(z(l.kind, l.type, l.id, "")).toLowerCase(), u = String(z(l.status, "")).toLowerCase();
-    return (m === o.toLowerCase() || ce(l.satisfies).map(String).includes(o)) && Jt.has(u) && Qt(l);
+function or(t, r) {
+  const o = xe(t.validation_and_evidence).map(H);
+  return xe(r).map(String).filter((s) => !o.some((l) => {
+    const p = String(P(l.kind, l.type, l.id, "")).toLowerCase(), u = String(P(l.status, "")).toLowerCase();
+    return (p === s.toLowerCase() || xe(l.satisfies).map(String).includes(s)) && kr.has(u) && wr(l);
   }));
 }
-function wr(t, r) {
-  const i = ce(t.findings).map(H);
-  if (!i.length) return !1;
+function Fr(t, r) {
+  const o = xe(t.findings).map(H);
+  if (!o.length) return !1;
   if (!r) return !0;
-  const o = ce(z(t.sources, t.consulted_sources)).map(H).filter((m) => typeof m.url == "string" && /^https?:\/\//.test(m.url) && m.title && m.accessed_at && z(m.source_type, m.type)), l = new Set(o.flatMap((m) => [m.id && String(m.id), m.url]).filter(Boolean));
-  return l.size > 0 && i.every((m) => {
-    const u = ce(z(m.source_ids, m.sources)).map(String);
-    return m.claim && u.some((g) => l.has(g));
+  const s = xe(P(t.sources, t.consulted_sources)).map(H).filter((p) => typeof p.url == "string" && /^https?:\/\//.test(p.url) && p.title && p.accessed_at && P(p.source_type, p.type)), l = new Set(s.flatMap((p) => [p.id && String(p.id), p.url]).filter(Boolean));
+  return l.size > 0 && o.every((p) => {
+    const u = xe(P(p.source_ids, p.sources)).map(String);
+    return p.claim && u.some((i) => l.has(i));
   });
 }
-function Nr(t, r, i, o) {
-  const l = H(t == null ? void 0 : t.intent_integrity), m = l.status === "violation" ? [`intent integrity (${ce(l.violations).join(", ")})`] : [], u = kr(t, r), g = ce(H(u.observations).controls_runtime);
-  if (Number(u.schema_version || 0) < 2 || !g.includes("result_scope"))
-    return { missing: m, preferredShortfalls: [] };
-  const d = [...m], T = [];
-  i.envelope_id !== u.id && d.push("result bound to the active envelope revision");
-  const x = ce(t == null ? void 0 : t.decisions).map(H).filter((y) => y.step && y.step !== r || y.envelope_id && y.envelope_id !== u.id ? !1 : y.question || [
+function Hr(t, r, o, s) {
+  const l = H(t == null ? void 0 : t.intent_integrity), p = l.status === "violation" ? [`intent integrity (${xe(l.violations).join(", ")})`] : [], u = Gr(t, r), i = xe(H(u.observations).controls_runtime);
+  if (Number(u.schema_version || 0) < 2 || !i.includes("result_scope"))
+    return { missing: p, preferredShortfalls: [] };
+  const c = [...p], g = [];
+  o.envelope_id !== u.id && c.push("result bound to the active envelope revision");
+  const v = xe(t == null ? void 0 : t.decisions).map(H).filter((y) => y.step && y.step !== r || y.envelope_id && y.envelope_id !== u.id ? !1 : y.question || [
     "intent-fidelity",
     "scope-drift",
     "technical-fork",
     "capability-gap",
     "qualitative-direction",
     "visual-direction"
-  ].includes(y.kind)), j = x.filter((y) => {
-    const ee = String(z(y.status, "")).toLowerCase();
-    return y.chosen === void 0 && y.resolved_at == null && !["resolved", "answered", "accepted", "declined", "superseded"].includes(ee);
+  ].includes(y.kind)), E = v.filter((y) => {
+    const J = String(P(y.status, "")).toLowerCase();
+    return y.chosen === void 0 && y.resolved_at == null && !["resolved", "answered", "accepted", "declined", "superseded"].includes(J);
   }), f = H(u.questions);
-  j.length && d.push("all qualified questions resolved before completion"), j.length > 1 && f.cadence === "one-at-a-time" && d.push("one-at-a-time question cadence"), Number.isInteger(f.max_rounds) && x.length > f.max_rounds && d.push(`question rounds within max_rounds=${f.max_rounds}`);
-  const w = H(u.result_scope), V = H(w.enforcement), I = new Map(ce(o.intent_and_requirement_coverage).map(H).filter((y) => z(y.intent_id, y.constraint_id, y.id)).map((y) => [String(z(y.intent_id, y.constraint_id, y.id)), y]));
-  for (const y of [...ce(w.required_outcome_ids), ...ce(w.hard_constraint_ids)]) {
-    const ee = I.get(String(y)) || {}, S = String(z(ee.status, "")).toLowerCase(), se = ce(z(ee.evidence_refs, ee.requirement_refs, ee.refs));
-    (!Jt.has(S) || !se.some(Qt)) && d.push(`required intent coverage ${y}`);
+  E.length && c.push("all qualified questions resolved before completion"), E.length > 1 && f.cadence === "one-at-a-time" && c.push("one-at-a-time question cadence"), Number.isInteger(f.max_rounds) && v.length > f.max_rounds && c.push(`question rounds within max_rounds=${f.max_rounds}`);
+  const b = H(u.result_scope), x = H(b.enforcement), k = new Map(xe(s.intent_and_requirement_coverage).map(H).filter((y) => P(y.intent_id, y.constraint_id, y.id)).map((y) => [String(P(y.intent_id, y.constraint_id, y.id)), y]));
+  for (const y of [...xe(b.required_outcome_ids), ...xe(b.hard_constraint_ids)]) {
+    const J = k.get(String(y)) || {}, S = String(P(J.status, "")).toLowerCase(), he = xe(P(J.evidence_refs, J.requirement_refs, J.refs));
+    (!kr.has(S) || !he.some(wr)) && c.push(`required intent coverage ${y}`);
   }
-  const q = ce(o.alternatives);
-  if (Number.isInteger(w.alternatives) && q.length < w.alternatives) {
-    const y = `${w.alternatives} material alternatives`;
-    V.alternatives === "required" ? d.push(y) : V.alternatives === "preferred" && T.push(y);
+  const D = xe(s.alternatives);
+  if (Number.isInteger(b.alternatives) && D.length < b.alternatives) {
+    const y = `${b.alternatives} material alternatives`;
+    x.alternatives === "required" ? c.push(y) : x.alternatives === "preferred" && g.push(y);
   }
-  const O = zt(o, w.evidence), R = zt(o, w.validation);
-  V.evidence === "required" ? d.push(...O.map((y) => `required evidence ${y.toLowerCase()}`)) : V.evidence === "preferred" && T.push(...O.map((y) => `preferred evidence ${y.toLowerCase()}`)), V.validation === "required" ? d.push(...R.map((y) => `required validation ${y.toLowerCase()}`)) : V.validation === "preferred" && T.push(...R.map((y) => `preferred validation ${y.toLowerCase()}`));
-  const B = H(u.research_policy), _ = H(t == null ? void 0 : t.research_artifacts)[r], M = ce(z(o.research_and_citations, _)).map(H), K = M.filter((y) => wr(
+  const q = or(s, b.evidence), A = or(s, b.validation);
+  x.evidence === "required" ? c.push(...q.map((y) => `required evidence ${y.toLowerCase()}`)) : x.evidence === "preferred" && g.push(...q.map((y) => `preferred evidence ${y.toLowerCase()}`)), x.validation === "required" ? c.push(...A.map((y) => `required validation ${y.toLowerCase()}`)) : x.validation === "preferred" && g.push(...A.map((y) => `preferred validation ${y.toLowerCase()}`));
+  const I = H(u.research_policy), C = H(t == null ? void 0 : t.research_artifacts)[r], B = xe(P(s.research_and_citations, C)).map(H), X = B.filter((y) => Fr(
     y,
-    B.citations === "required"
+    I.citations === "required"
   ));
-  return B.mode === "required" && !K.length && d.push("required research with claim-level citations"), Number.isInteger(B.max_passes) && M.length > B.max_passes && d.push(`research passes within max_passes=${B.max_passes}`), B.mode === "on-demand" && M.length && !K.length && T.push("complete citations for used research"), {
-    missing: [...new Set(d)],
-    preferredShortfalls: [...new Set(T)]
+  return I.mode === "required" && !X.length && c.push("required research with claim-level citations"), Number.isInteger(I.max_passes) && B.length > I.max_passes && c.push(`research passes within max_passes=${I.max_passes}`), I.mode === "on-demand" && B.length && !X.length && g.push("complete citations for used research"), {
+    missing: [...new Set(c)],
+    preferredShortfalls: [...new Set(g)]
   };
 }
-function _r(t, r, i) {
-  const o = H(t.runtime_handshakes), l = H(t.runtime_handshake), m = H(o[r] || (l.step == null || l.step === r ? l : {})), u = H(m.assignment), g = H(m.capabilities), d = H(g.tools), T = H(g.skills), x = H(m.routing), j = H(x.model), f = H(x.reasoning_effort), w = H(m.scope), V = H(w.worktree), I = H(i.routing_and_provenance), q = H(I.model), O = H(I.reasoning_effort), R = H(I.assignment), B = z(d.profile_declared, d.declared, I.declared_tools), _ = z(d.actual, I.actual_tools), M = z(T.profile_declared, T.declared, I.declared_skills), K = z(T.actual, I.actual_skills);
+function Kr(t, r, o) {
+  const s = H(t.runtime_handshakes), l = H(t.runtime_handshake), p = H(s[r] || (l.step == null || l.step === r ? l : {})), u = H(p.assignment), i = H(p.capabilities), c = H(i.tools), g = H(i.skills), v = H(p.routing), E = H(v.model), f = H(v.reasoning_effort), b = H(p.scope), x = H(b.worktree), k = H(o.routing_and_provenance), D = H(k.model), q = H(k.reasoning_effort), A = H(k.assignment), I = P(c.profile_declared, c.declared, k.declared_tools), C = P(c.actual, k.actual_tools), B = P(g.profile_declared, g.declared, k.declared_skills), X = P(g.actual, k.actual_skills);
   return {
-    assignedProfile: z(
-      R.assigned_profile,
-      I.assigned_profile,
+    assignedProfile: P(
+      A.assigned_profile,
+      k.assigned_profile,
       u.assigned_profile
     ) ?? null,
-    effectiveProfile: z(
-      R.effective_profile,
-      I.effective_profile,
+    effectiveProfile: P(
+      A.effective_profile,
+      k.effective_profile,
       u.effective_profile
     ) ?? null,
     model: {
-      requested: z(q.requested, I.requested_model, j.requested) ?? null,
-      applied: z(q.applied, I.applied_model, j.applied) ?? null,
-      provider: z(q.provider, I.resolved_provider, j.provider) ?? null,
-      version: z(q.version, I.model_version, j.version) ?? null,
-      status: z(
-        q.status,
-        I.model_resolution_status,
-        j.status,
-        z(q.applied, I.applied_model, j.applied) != null ? "observed" : "unobservable"
+      requested: P(D.requested, k.requested_model, E.requested) ?? null,
+      applied: P(D.applied, k.applied_model, E.applied) ?? null,
+      provider: P(D.provider, k.resolved_provider, E.provider) ?? null,
+      version: P(D.version, k.model_version, E.version) ?? null,
+      status: P(
+        D.status,
+        k.model_resolution_status,
+        E.status,
+        P(D.applied, k.applied_model, E.applied) != null ? "observed" : "unobservable"
       )
     },
     effort: {
-      requested: z(O.requested, I.requested_effort, f.requested) ?? null,
-      applied: z(O.applied, I.applied_effort, f.applied) ?? null,
-      status: z(
-        O.status,
-        I.effort_resolution_status,
+      requested: P(q.requested, k.requested_effort, f.requested) ?? null,
+      applied: P(q.applied, k.applied_effort, f.applied) ?? null,
+      status: P(
+        q.status,
+        k.effort_resolution_status,
         f.status,
-        z(O.applied, I.applied_effort, f.applied) != null ? "observed" : "unobservable"
+        P(q.applied, k.applied_effort, f.applied) != null ? "observed" : "unobservable"
       )
     },
     tools: {
-      declared: B == null ? null : ce(B),
-      actual: _ == null ? null : ce(_),
-      status: z(d.status, I.tools_status, _ != null ? "observed" : "unobservable")
+      declared: I == null ? null : xe(I),
+      actual: C == null ? null : xe(C),
+      status: P(c.status, k.tools_status, C != null ? "observed" : "unobservable")
     },
     skills: {
-      declared: M == null ? null : ce(M),
-      actual: K == null ? null : ce(K),
-      status: z(T.status, I.skills_status, K != null ? "observed" : "unobservable")
+      declared: B == null ? null : xe(B),
+      actual: X == null ? null : xe(X),
+      status: P(g.status, k.skills_status, X != null ? "observed" : "unobservable")
     },
-    network: H(w.network),
-    write: H(w.write),
-    worktree: Object.keys(V).length ? V : null
+    network: H(b.network),
+    write: H(b.write),
+    worktree: Object.keys(x).length ? x : null
   };
 }
-function Cr(t, r) {
-  const i = H(t == null ? void 0 : t.gate_review), o = H(i.bundle), l = z(i.gate, t == null ? void 0 : t.stage), m = z(i.producer_step, r), u = H(t == null ? void 0 : t.step_sessions), g = Number.isInteger(i.result_revision) ? i.result_revision : null, d = z(i.status, "unobservable"), T = m ? H(t == null ? void 0 : t.step_status)[m] : void 0, x = fr(o.artifacts), j = H(o.card_topology), f = yr(j), w = z(j.action, "unobservable"), V = ["fan-in", "unify"].includes(String(w).toLowerCase()), I = V ? f.filter((K) => K.required && !K.complete) : [], q = [];
-  (!(t != null && t.gate_review) || !Le(t.gate_review)) && q.push("result bundle record"), (!i.bundle || !Le(i.bundle)) && q.push("declared result bundle"), m || q.push("producer binding"), g === null && q.push("result revision"), l && (t != null && t.stage) && l !== t.stage && q.push("gate binding matches current stage"), d !== "awaiting-review" && q.push(`review status awaiting-review (currently ${d})`), br.has(String(T || "").toLowerCase()) || q.push(`terminal producer status (currently ${T || "unobservable"})`), z(o.summary) || q.push("result summary"), x.length === 0 && q.push("referenced artifact");
-  const O = x.filter((K) => !K.ref);
-  O.length > 0 && q.push(`artifact reference (${O.length} missing)`), V && f.length === 0 && q.push("declared fan-in child set"), I.length > 0 && q.push(`required child fan-in (${I.length} incomplete)`);
-  const R = Nr(t, m, i, o);
-  q.push(...R.missing);
-  const B = ce(t == null ? void 0 : t.decisions).filter((K) => {
-    const y = H(K);
-    return !y.chosen && (!m || !y.step || y.step === m);
-  }), _ = Ie([
-    ...ce(o.decisions_and_questions),
-    ...B
-  ]), M = _r(t || {}, m, o);
+function Vr(t, r) {
+  const o = H(t == null ? void 0 : t.gate_review), s = H(o.bundle), l = P(o.gate, t == null ? void 0 : t.stage), p = P(o.producer_step, r), u = H(t == null ? void 0 : t.step_sessions), i = Number.isInteger(o.result_revision) ? o.result_revision : null, c = P(o.status, "unobservable"), g = p ? H(t == null ? void 0 : t.step_status)[p] : void 0, v = Wr(s.artifacts), E = H(s.card_topology), f = Ur(E), b = P(E.action, "unobservable"), x = ["fan-in", "unify"].includes(String(b).toLowerCase()), k = x ? f.filter((X) => X.required && !X.complete) : [], D = [];
+  (!(t != null && t.gate_review) || !Ve(t.gate_review)) && D.push("result bundle record"), (!o.bundle || !Ve(o.bundle)) && D.push("declared result bundle"), p || D.push("producer binding"), i === null && D.push("result revision"), l && (t != null && t.stage) && l !== t.stage && D.push("gate binding matches current stage"), c !== "awaiting-review" && D.push(`review status awaiting-review (currently ${c})`), zr.has(String(g || "").toLowerCase()) || D.push(`terminal producer status (currently ${g || "unobservable"})`), P(s.summary) || D.push("result summary"), v.length === 0 && D.push("referenced artifact");
+  const q = v.filter((X) => !X.ref);
+  q.length > 0 && D.push(`artifact reference (${q.length} missing)`), x && f.length === 0 && D.push("declared fan-in child set"), k.length > 0 && D.push(`required child fan-in (${k.length} incomplete)`);
+  const A = Hr(t, p, o, s);
+  D.push(...A.missing);
+  const I = xe(t == null ? void 0 : t.decisions).filter((X) => {
+    const y = H(X);
+    return !y.chosen && (!p || !y.step || y.step === p);
+  }), C = Ze([
+    ...xe(s.decisions_and_questions),
+    ...I
+  ]), B = Kr(t || {}, p, s);
   return {
     gate: l || null,
-    producerStep: m || null,
-    producerSessionRef: z(
-      i.producer_session_ref,
-      m && Le(u[m]) ? `step_sessions.${m}` : void 0
+    producerStep: p || null,
+    producerSessionRef: P(
+      o.producer_session_ref,
+      p && Ve(u[p]) ? `step_sessions.${p}` : void 0
     ) || null,
-    envelopeId: z(i.envelope_id) || null,
-    revision: g,
-    reviewStatus: d,
-    createdAt: z(i.created_at) || null,
-    ready: q.length === 0,
-    missing: q,
-    summary: z(o.summary) || null,
-    changes: Ie(o.changes_since_prior),
-    artifacts: x,
-    coverage: Ie(o.intent_and_requirement_coverage),
-    alternatives: Ie(o.alternatives),
-    research: Ie(z(
-      o.research_and_citations,
-      m && H(t == null ? void 0 : t.research_artifacts)[m]
+    envelopeId: P(o.envelope_id) || null,
+    revision: i,
+    reviewStatus: c,
+    createdAt: P(o.created_at) || null,
+    ready: D.length === 0,
+    missing: D,
+    summary: P(s.summary) || null,
+    changes: Ze(s.changes_since_prior),
+    artifacts: v,
+    coverage: Ze(s.intent_and_requirement_coverage),
+    alternatives: Ze(s.alternatives),
+    research: Ze(P(
+      s.research_and_citations,
+      p && H(t == null ? void 0 : t.research_artifacts)[p]
     )),
-    preferredShortfalls: R.preferredShortfalls,
-    decisions: _,
+    preferredShortfalls: A.preferredShortfalls,
+    decisions: C,
     topology: {
-      action: w,
-      integrationOwner: z(j.integration_owner, j.owner) || null,
-      integrationStatus: z(j.integration_status, j.status) || null,
+      action: b,
+      integrationOwner: P(E.integration_owner, E.owner) || null,
+      integrationStatus: P(E.integration_status, E.status) || null,
       children: f,
-      incompleteRequiredChildren: I
+      incompleteRequiredChildren: k
     },
     budget: {
-      allocated: H(o.budget).allocated ?? null,
-      consumed: H(o.budget).consumed ?? null,
-      remaining: H(o.budget).remaining ?? null
+      allocated: H(s.budget).allocated ?? null,
+      consumed: H(s.budget).consumed ?? null,
+      remaining: H(s.budget).remaining ?? null
     },
-    routing: M,
-    validation: Ie(o.validation_and_evidence),
-    risks: Ie(o.known_risks),
-    deviations: Ie(o.omissions_and_deviations)
+    routing: B,
+    validation: Ze(s.validation_and_evidence),
+    risks: Ze(s.known_risks),
+    deviations: Ze(s.omissions_and_deviations)
   };
 }
-const Sr = "~/.dlc-yolo/.statepath", Mt = "~/.dlc-yolo/state.json", Bt = "/tmp/dlc-yolo/state.json", Tr = 1, Gt = 4096, Ar = 3072;
-function Rr(t) {
+const Xr = "~/.dlc-yolo/.statepath", er = "~/.dlc-yolo/state.json", sr = "/tmp/dlc-yolo/state.json", Yr = 1, lr = 4096, Zr = 3072;
+function Jr(t) {
   let r = t;
   if (typeof t == "string") {
-    if (new TextEncoder().encode(t).length > Gt) return null;
+    if (new TextEncoder().encode(t).length > lr) return null;
     try {
       r = JSON.parse(t);
     } catch {
@@ -322,52 +322,52 @@ function Rr(t) {
     }
   }
   if (!r || typeof r != "object" || Array.isArray(r)) return null;
-  let i;
+  let o;
   try {
-    i = JSON.stringify(r);
+    o = JSON.stringify(r);
   } catch {
     return null;
   }
-  if (new TextEncoder().encode(i).length > Gt) return null;
-  const o = Object.keys(r).sort();
-  if (o.length !== 2 || o[0] !== "path" || o[1] !== "schema_version" || r.schema_version !== Tr || typeof r.path != "string") return null;
+  if (new TextEncoder().encode(o).length > lr) return null;
+  const s = Object.keys(r).sort();
+  if (s.length !== 2 || s[0] !== "path" || s[1] !== "schema_version" || r.schema_version !== Yr || typeof r.path != "string") return null;
   const l = r.path;
-  return !l.startsWith("/") || l.length === 0 || l.length > Ar || l.includes("\0") || l.includes("\r") || l.includes(`
-`) || l.split("/").some((m) => m === "." || m === "..") ? null : l;
+  return !l.startsWith("/") || l.length === 0 || l.length > Zr || l.includes("\0") || l.includes("\r") || l.includes(`
+`) || l.split("/").some((p) => p === "." || p === "..") ? null : l;
 }
-async function St(t) {
+async function Ht(t) {
   try {
-    const r = await t(Sr), i = Rr(r);
-    if (i)
+    const r = await t(Xr), o = Jr(r);
+    if (o)
       try {
-        return { path: i, data: await t(i), source: "pointer" };
+        return { path: o, data: await t(o), source: "pointer" };
       } catch {
       }
   } catch {
   }
   try {
-    return { path: Mt, data: await t(Mt), source: "durable" };
+    return { path: er, data: await t(er), source: "durable" };
   } catch {
-    return { path: Bt, data: await t(Bt), source: "scratch" };
+    return { path: sr, data: await t(sr), source: "scratch" };
   }
 }
-async function Wt(t, r) {
+async function ir(t, r) {
   try {
     return { path: r, data: await t(r), source: "current" };
   } catch {
-    return St(t);
+    return Ht(t);
   }
 }
-const $r = /^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/;
-function Er(t) {
+const Qr = /^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/;
+function ea(t) {
   const r = /* @__PURE__ */ new Map();
-  for (const i of String(t || "").split(/[\n,]/)) {
-    const o = i.trim();
-    $r.test(o) && !r.has(o.toLowerCase()) && r.set(o.toLowerCase(), o);
+  for (const o of String(t || "").split(/[\n,]/)) {
+    const s = o.trim();
+    Qr.test(s) && !r.has(s.toLowerCase()) && r.set(s.toLowerCase(), s);
   }
-  return [...r.values()].sort((i, o) => i.toLowerCase().localeCompare(o.toLowerCase()));
+  return [...r.values()].sort((o, s) => o.toLowerCase().localeCompare(s.toLowerCase()));
 }
-const Lr = {
+const ta = {
   "receiver-disabled": "Enable and save the receiver above first.",
   "receiver-secret-missing": "Set a webhook secret above before exposing the port.",
   "receiver-allowlist-empty": "Add at least one allowed repository above first.",
@@ -375,96 +375,96 @@ const Lr = {
   "receiver-not-listening": "The receiver is not listening yet — save it, then Refresh.",
   "receiver-config-invalid": "Repair the stored receiver configuration first."
 };
-function Pt(t) {
+function cr(t) {
   return t === "listening" ? "var(--ok)" : t === "misconfigured" || t === "failed" ? "var(--danger, #ef4444)" : "var(--muted)";
 }
-function st(t) {
+function jt(t) {
   const r = (t == null ? void 0 : t.message) || String(t);
   return /(?:404|not found)/i.test(r) ? "Webhook backend unavailable in the running gateway. Restart KiroCrew after syncing this app, then refresh this tab." : r;
 }
-function jr() {
-  var $, C;
-  const t = Zt(), [r, i] = N(null), [o, l] = N(!1), [m, u] = N("8765"), [g, d] = N(""), [T, x] = N(""), [j, f] = N(""), [w, V] = N(!1), [I, q] = N(!1), [O, R] = N(!0), [B, _] = N(!1), [M, K] = N(""), y = ae((v) => {
-    i(v), l(!!v.enabled), u(String(v.port || 8765)), d((v.repositories || []).join(`
-`)), x(v.inbox_path || ""), q(!!v.autosync), f(""), V(!1);
-  }, []), ee = ae(async () => {
-    R(!0), K("");
+function Nr() {
+  var F, ve;
+  const t = yr(), [r, o] = w(null), [s, l] = w(!1), [p, u] = w("8765"), [i, c] = w(""), [g, v] = w(""), [E, f] = w(""), [b, x] = w(!1), [k, D] = w(!1), [q, A] = w(!0), [I, C] = w(!1), [B, X] = w(""), y = le((O) => {
+    o(O), l(!!O.enabled), u(String(O.port || 8765)), c((O.repositories || []).join(`
+`)), v(O.inbox_path || ""), D(!!O.autosync), f(""), x(!1);
+  }, []), J = le(async () => {
+    A(!0), X("");
     try {
       y(await t.get("/apps/dlc-yolo/api/webhook/config"));
-    } catch (v) {
-      K(st(v));
+    } catch (O) {
+      X(jt(O));
     } finally {
-      R(!1);
+      A(!1);
     }
   }, [t, y]);
-  _e(() => {
-    ee();
-  }, [ee]);
-  const [S, se] = N(null), [ie, ne] = N(!1), oe = ae(async () => {
+  Ee(() => {
+    J();
+  }, [J]);
+  const [S, he] = w(null), [ye, ie] = w(!1), me = le(async () => {
     try {
-      se(await t.get("/apps/dlc-yolo/api/tunnel/status"));
+      he(await t.get("/apps/dlc-yolo/api/tunnel/status"));
     } catch {
-      se(null);
+      he(null);
     }
   }, [t]);
-  _e(() => {
-    oe();
-  }, [oe]);
-  const be = ae(async () => {
-    ne(!0);
+  Ee(() => {
+    me();
+  }, [me]);
+  const Se = le(async () => {
+    ie(!0);
     try {
-      se(await t.post("/apps/dlc-yolo/api/tunnel/start", {}));
-    } catch (v) {
-      K(st(v));
+      he(await t.post("/apps/dlc-yolo/api/tunnel/start", {}));
+    } catch (O) {
+      X(jt(O));
     } finally {
-      ne(!1);
+      ie(!1);
     }
-  }, [t]), Z = ae(async () => {
-    ne(!0);
+  }, [t]), Q = le(async () => {
+    ie(!0);
     try {
-      se(await t.post("/apps/dlc-yolo/api/tunnel/stop", {}));
-    } catch (v) {
-      K(st(v));
+      he(await t.post("/apps/dlc-yolo/api/tunnel/stop", {}));
+    } catch (O) {
+      X(jt(O));
     } finally {
-      ne(!1);
+      ie(!1);
     }
-  }, [t]), [D, X] = N(null), [pe, ue] = N(!1), ve = ae(async () => {
+  }, [t]), [z, ee] = w(null), [$e, Te] = w(!1), _e = le(async () => {
     try {
-      X(await t.get("/apps/dlc-yolo/api/crons/status"));
+      ee(await t.get("/apps/dlc-yolo/api/crons/status"));
     } catch {
-      X(null);
+      ee(null);
     }
   }, [t]);
-  _e(() => {
-    ve();
-  }, [ve]);
-  const h = ae(async (v) => {
-    ue(!0);
+  Ee(() => {
+    _e();
+  }, [_e]);
+  const _ = le(async (O) => {
+    Te(!0);
     try {
-      const re = v ? "/apps/dlc-yolo/api/crons/pause" : "/apps/dlc-yolo/api/crons/resume";
-      X(await t.post(re, {}));
-    } catch (re) {
-      K(st(re));
+      const ce = O ? "/apps/dlc-yolo/api/crons/pause" : "/apps/dlc-yolo/api/crons/resume";
+      ee(await t.post(ce, {}));
+    } catch (ce) {
+      X(jt(ce));
     } finally {
-      ue(!1);
+      Te(!1);
     }
-  }, [t]), P = xe(() => Er(g), [g]), U = Number(m), le = typeof TextEncoder > "u" ? j.length : new TextEncoder().encode(j).length, ke = !!(r != null && r.secret_configured) || le >= 32, W = Number.isInteger(U) && U >= 1024 && U <= 65535 && (!o || P.length > 0 && ke) && (!T.trim() || T.trim().startsWith("/")), de = async () => {
-    if (!(!(r != null && r.editable) || !W)) {
-      _(!0), K("");
+  }, [t]), U = Ce(() => ea(i), [i]), te = Number(p), we = typeof TextEncoder > "u" ? E.length : new TextEncoder().encode(E).length, Oe = !!(r != null && r.secret_configured) || we >= 32, oe = Number.isInteger(te) && te >= 1024 && te <= 65535 && (!s || U.length > 0 && Oe) && (!g.trim() || g.trim().startsWith("/")), Z = async () => {
+    if (!(!(r != null && r.editable) || !oe)) {
+      C(!0), X("");
       try {
-        const v = {
-          enabled: o,
-          port: U,
-          repositories: P,
-          inbox_path: T.trim() || null,
-          clear_secret: w,
-          autosync: I
+        const O = {
+          enabled: s,
+          port: te,
+          repositories: U,
+          inbox_path: g.trim() || null,
+          clear_secret: b,
+          autosync: k
         };
-        j && (v.secret = j), y(await t.post("/apps/dlc-yolo/api/webhook/config", v));
-      } catch (v) {
-        K(st(v));
+        E && (O.secret = E), y(await t.post("/apps/dlc-yolo/api/webhook/config", O));
+      } catch (O) {
+        X(jt(O));
       } finally {
-        _(!1);
+        C(!1);
       }
     }
   };
@@ -491,7 +491,7 @@ function jr() {
               "span",
               {
                 className: "text-[10px] font-semibold px-2 py-0.5 rounded-full",
-                style: { color: Pt(r.listener), background: `color-mix(in srgb, ${Pt(r.listener)} 13%, transparent)` },
+                style: { color: cr(r.listener), background: `color-mix(in srgb, ${cr(r.listener)} 13%, transparent)` },
                 children: r.listener
               }
             )
@@ -499,7 +499,7 @@ function jr() {
           /* @__PURE__ */ e("p", { className: "text-[11px] mt-1", style: { color: "var(--muted)" }, children: "Shared by every pipeline. This authenticated control owns the app-wide loopback receiver; the secret is write-only and never returned." })
         ] }) }),
         /* @__PURE__ */ a("div", { className: "px-4 py-4 flex flex-col gap-4", children: [
-          O ? /* @__PURE__ */ e("div", { className: "text-[12px]", style: { color: "var(--muted)" }, children: "Loading receiver configuration…" }) : r && /* @__PURE__ */ a(He, { children: [
+          q ? /* @__PURE__ */ e("div", { className: "text-[12px]", style: { color: "var(--muted)" }, children: "Loading receiver configuration…" }) : r && /* @__PURE__ */ a(ze, { children: [
             r.configuration_source === "environment" && /* @__PURE__ */ e("div", { className: "rounded-md px-3 py-2 text-[11px]", style: { color: "var(--warn)", border: "1px solid color-mix(in srgb, var(--warn) 40%, var(--border))", background: "color-mix(in srgb, var(--warn) 7%, transparent)" }, children: "Gateway environment variables currently own this configuration, so the UI is read-only. Remove those overrides and restart the gateway to transfer authority to this form." }),
             r.configuration_source === "invalid" && /* @__PURE__ */ a("div", { className: "rounded-md px-3 py-2 text-[11px]", style: { color: "var(--danger, #ef4444)", border: "1px solid var(--danger, #ef4444)" }, children: [
               "Stored configuration failed secure validation and was not loaded. Repair or remove the app-owned config file before using this form.",
@@ -518,11 +518,11 @@ function jr() {
                 {
                   type: "button",
                   disabled: !r.editable,
-                  onClick: () => l((v) => !v),
-                  "aria-pressed": o,
+                  onClick: () => l((O) => !O),
+                  "aria-pressed": s,
                   className: "rounded-full transition-all relative disabled:opacity-50",
-                  style: { background: o ? "var(--accent)" : "var(--border-strong, var(--border))", height: 22, width: 40 },
-                  children: /* @__PURE__ */ e("span", { className: "absolute top-0.5 rounded-full transition-all", style: { height: 18, width: 18, background: "var(--bg)", left: o ? 20 : 2 } })
+                  style: { background: s ? "var(--accent)" : "var(--border-strong, var(--border))", height: 22, width: 40 },
+                  children: /* @__PURE__ */ e("span", { className: "absolute top-0.5 rounded-full transition-all", style: { height: 18, width: 18, background: "var(--bg)", left: s ? 20 : 2 } })
                 }
               )
             ] }),
@@ -535,9 +535,9 @@ function jr() {
                     type: "number",
                     min: 1024,
                     max: 65535,
-                    value: m,
+                    value: p,
                     disabled: !r.editable,
-                    onChange: (v) => u(v.target.value),
+                    onChange: (O) => u(O.target.value),
                     className: "mt-1 w-full px-3 py-2 rounded-md text-sm outline-none disabled:opacity-60",
                     style: { background: "var(--bg-elevated, var(--bg))", border: "1px solid var(--border)", color: "var(--text)" }
                   }
@@ -552,7 +552,7 @@ function jr() {
                     style: { background: "var(--bg-elevated, var(--bg))", border: "1px solid var(--border)", color: "var(--text)" },
                     children: [
                       "127.0.0.1:",
-                      Number.isFinite(U) ? U : "—",
+                      Number.isFinite(te) ? te : "—",
                       "/github"
                     ]
                   }
@@ -565,9 +565,9 @@ function jr() {
                 "textarea",
                 {
                   rows: 4,
-                  value: g,
+                  value: i,
                   disabled: !r.editable,
-                  onChange: (v) => d(v.target.value),
+                  onChange: (O) => c(O.target.value),
                   placeholder: "owner/repo",
                   className: "mt-1 w-full px-3 py-2 rounded-md text-sm font-mono outline-none resize-y disabled:opacity-60",
                   style: { background: "var(--bg-elevated, var(--bg))", border: "1px solid var(--border)", color: "var(--text)" }
@@ -579,9 +579,9 @@ function jr() {
               /* @__PURE__ */ e(
                 "input",
                 {
-                  value: T,
+                  value: g,
                   disabled: !r.editable,
-                  onChange: (v) => x(v.target.value),
+                  onChange: (O) => v(O.target.value),
                   placeholder: "Uses the state directory by default",
                   className: "mt-1 w-full px-3 py-2 rounded-md text-sm font-mono outline-none disabled:opacity-60",
                   style: { background: "var(--bg-elevated, var(--bg))", border: "1px solid var(--border)", color: "var(--text)" }
@@ -596,17 +596,17 @@ function jr() {
                 {
                   type: "password",
                   autoComplete: "new-password",
-                  value: j,
+                  value: E,
                   disabled: !r.editable,
-                  onChange: (v) => f(v.target.value),
+                  onChange: (O) => f(O.target.value),
                   placeholder: r.secret_configured ? "•••••••••••••••• (unchanged)" : "Enter a new secret",
                   className: "mt-1 w-full px-3 py-2 rounded-md text-sm outline-none disabled:opacity-60",
                   style: { background: "var(--bg-elevated, var(--bg))", border: "1px solid var(--border)", color: "var(--text)" }
                 }
               )
             ] }),
-            !o && r.secret_configured && r.editable && /* @__PURE__ */ a("label", { className: "flex items-center gap-2 text-[11px] cursor-pointer", style: { color: "var(--muted)" }, children: [
-              /* @__PURE__ */ e("input", { type: "checkbox", checked: w, onChange: (v) => V(v.target.checked) }),
+            !s && r.secret_configured && r.editable && /* @__PURE__ */ a("label", { className: "flex items-center gap-2 text-[11px] cursor-pointer", style: { color: "var(--muted)" }, children: [
+              /* @__PURE__ */ e("input", { type: "checkbox", checked: b, onChange: (O) => x(O.target.checked) }),
               "Remove the stored secret when saving the disabled receiver"
             ] }),
             /* @__PURE__ */ a(
@@ -625,11 +625,11 @@ function jr() {
                   ] }),
                   /* @__PURE__ */ a("div", { children: [
                     /* @__PURE__ */ e("span", { style: { color: "var(--muted)" }, children: "Pending" }),
-                    /* @__PURE__ */ e("div", { style: { color: "var(--text)" }, children: (($ = r.inbox) == null ? void 0 : $.pending) ?? "—" })
+                    /* @__PURE__ */ e("div", { style: { color: "var(--text)" }, children: ((F = r.inbox) == null ? void 0 : F.pending) ?? "—" })
                   ] }),
                   /* @__PURE__ */ a("div", { children: [
                     /* @__PURE__ */ e("span", { style: { color: "var(--muted)" }, children: "Processed" }),
-                    /* @__PURE__ */ e("div", { style: { color: "var(--text)" }, children: ((C = r.inbox) == null ? void 0 : C.processed) ?? "—" })
+                    /* @__PURE__ */ e("div", { style: { color: "var(--text)" }, children: ((ve = r.inbox) == null ? void 0 : ve.processed) ?? "—" })
                   ] })
                 ]
               }
@@ -673,7 +673,7 @@ function jr() {
                       {
                         readOnly: !0,
                         value: S.payload_url,
-                        onFocus: (v) => v.currentTarget.select(),
+                        onFocus: (O) => O.currentTarget.select(),
                         className: "mt-1 w-full px-3 py-2 rounded-md text-sm font-mono outline-none",
                         style: { background: "var(--bg)", border: "1px solid var(--border)", color: "var(--ok)" }
                       }
@@ -687,7 +687,7 @@ function jr() {
                       {
                         readOnly: !0,
                         value: S.command,
-                        onFocus: (v) => v.currentTarget.select(),
+                        onFocus: (O) => O.currentTarget.select(),
                         className: "mt-1 w-full px-3 py-2 rounded-md text-sm font-mono outline-none",
                         style: { background: "var(--bg)", border: "1px solid var(--border)", color: "var(--text)" }
                       }
@@ -699,33 +699,33 @@ function jr() {
                   ] }),
                   S && S.installed && !S.running && S.receiver_ready === !1 && /* @__PURE__ */ a("div", { className: "rounded px-2 py-1.5 text-[11px]", style: { color: "var(--warn)", border: "1px solid color-mix(in srgb, var(--warn) 40%, var(--border))" }, children: [
                     "Won't expose the port until the receiver is ready: ",
-                    Lr[S.receiver_block_reason || ""] || S.receiver_block_reason
+                    ta[S.receiver_block_reason || ""] || S.receiver_block_reason
                   ] }),
                   /* @__PURE__ */ a("div", { className: "flex gap-2", children: [
                     S != null && S.running ? /* @__PURE__ */ e(
                       "button",
                       {
-                        onClick: () => void Z(),
-                        disabled: ie,
+                        onClick: () => void Q(),
+                        disabled: ye,
                         className: "text-xs px-3 py-1.5 rounded-md font-semibold disabled:opacity-40",
                         style: { background: "var(--danger, #ef4444)", color: "var(--bg)" },
-                        children: ie ? "Stopping…" : "Stop tunnel"
+                        children: ye ? "Stopping…" : "Stop tunnel"
                       }
                     ) : /* @__PURE__ */ e(
                       "button",
                       {
-                        onClick: () => void be(),
-                        disabled: ie || !(S != null && S.installed) || (S == null ? void 0 : S.receiver_ready) === !1,
+                        onClick: () => void Se(),
+                        disabled: ye || !(S != null && S.installed) || (S == null ? void 0 : S.receiver_ready) === !1,
                         className: "text-xs px-3 py-1.5 rounded-md font-semibold disabled:opacity-40",
                         style: { background: "var(--accent)", color: "var(--bg)" },
-                        children: ie ? "Starting…" : "Start tunnel"
+                        children: ye ? "Starting…" : "Start tunnel"
                       }
                     ),
                     /* @__PURE__ */ e(
                       "button",
                       {
-                        onClick: () => void oe(),
-                        disabled: ie,
+                        onClick: () => void me(),
+                        disabled: ye,
                         className: "text-xs px-3 py-1.5 rounded-md font-medium disabled:opacity-50",
                         style: { color: "var(--muted)" },
                         children: "Refresh"
@@ -742,9 +742,9 @@ function jr() {
                       "input",
                       {
                         type: "checkbox",
-                        checked: I,
+                        checked: k,
                         disabled: !(r != null && r.editable),
-                        onChange: (v) => q(v.target.checked),
+                        onChange: (O) => D(O.target.checked),
                         className: "mt-0.5"
                       }
                     ),
@@ -757,7 +757,7 @@ function jr() {
                       ". Only rewrites a hook already on a quick-tunnel host (a hand-set stable URL is never touched). Save to apply."
                     ] })
                   ] }),
-                  (S == null ? void 0 : S.autosync) && S.autosync.enabled && /* @__PURE__ */ e("div", { className: "text-[10px]", style: { color: S.autosync.error ? "var(--danger, #ef4444)" : "var(--ok)" }, children: S.autosync.error ? `Auto-sync failed: ${S.autosync.error}` : `Auto-synced ${(S.autosync.results || []).filter((v) => v.action === "updated").length} hook(s) → ${S.autosync.payload_url}` })
+                  (S == null ? void 0 : S.autosync) && S.autosync.enabled && /* @__PURE__ */ e("div", { className: "text-[10px]", style: { color: S.autosync.error ? "var(--danger, #ef4444)" : "var(--ok)" }, children: S.autosync.error ? `Auto-sync failed: ${S.autosync.error}` : `Auto-synced ${(S.autosync.results || []).filter((O) => O.action === "updated").length} hook(s) → ${S.autosync.payload_url}` })
                 ]
               }
             ),
@@ -770,59 +770,59 @@ function jr() {
                 children: [
                   /* @__PURE__ */ a("div", { className: "flex items-center gap-2", children: [
                     /* @__PURE__ */ e("span", { className: "text-sm font-medium", style: { color: "var(--text)" }, children: "Automation crons" }),
-                    D && D.available && /* @__PURE__ */ e(
+                    z && z.available && /* @__PURE__ */ e(
                       "span",
                       {
                         className: "text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded",
-                        style: { color: D.all_paused ? "var(--warn)" : "var(--ok)", border: "1px solid var(--border)" },
-                        children: D.all_paused ? "paused" : D.any_active ? "running" : "—"
+                        style: { color: z.all_paused ? "var(--warn)" : "var(--ok)", border: "1px solid var(--border)" },
+                        children: z.all_paused ? "paused" : z.any_active ? "running" : "—"
                       }
                     )
                   ] }),
                   /* @__PURE__ */ e("p", { className: "text-[11px]", style: { color: "var(--muted)" }, children: "DLC-YOLO's three background jobs (advance · spawns · backlog-intake). Pause them for a webhook-only or maintenance setup; the webhook receiver keeps working while paused (a verified delivery still wakes advance when resumed). Polling stops while paused." }),
-                  D && !D.available && /* @__PURE__ */ a("div", { className: "text-[11px]", style: { color: "var(--danger, #ef4444)" }, children: [
+                  z && !z.available && /* @__PURE__ */ a("div", { className: "text-[11px]", style: { color: "var(--danger, #ef4444)" }, children: [
                     "Cron control unavailable",
-                    D.error ? `: ${D.error}` : "",
+                    z.error ? `: ${z.error}` : "",
                     "."
                   ] }),
-                  D && D.available && D.jobs.length > 0 && /* @__PURE__ */ e("div", { className: "flex flex-col gap-1", children: D.jobs.map((v) => /* @__PURE__ */ a(
+                  z && z.available && z.jobs.length > 0 && /* @__PURE__ */ e("div", { className: "flex flex-col gap-1", children: z.jobs.map((O) => /* @__PURE__ */ a(
                     "div",
                     {
                       className: "flex items-center justify-between text-[11px] font-mono",
                       style: { color: "var(--muted)" },
                       children: [
-                        /* @__PURE__ */ e("span", { children: v.basename }),
-                        /* @__PURE__ */ e("span", { style: { color: v.paused ? "var(--warn)" : "var(--ok)" }, children: v.paused ? "paused" : "active" })
+                        /* @__PURE__ */ e("span", { children: O.basename }),
+                        /* @__PURE__ */ e("span", { style: { color: O.paused ? "var(--warn)" : "var(--ok)" }, children: O.paused ? "paused" : "active" })
                       ]
                     },
-                    v.id
+                    O.id
                   )) }),
                   /* @__PURE__ */ a("div", { className: "flex gap-2", children: [
                     /* @__PURE__ */ e(
                       "button",
                       {
-                        onClick: () => void h(!0),
-                        disabled: pe || !(D != null && D.available) || (D == null ? void 0 : D.all_paused),
+                        onClick: () => void _(!0),
+                        disabled: $e || !(z != null && z.available) || (z == null ? void 0 : z.all_paused),
                         className: "text-xs px-3 py-1.5 rounded-md font-semibold disabled:opacity-40",
                         style: { background: "var(--warn)", color: "var(--bg)" },
-                        children: pe ? "…" : "Pause all"
+                        children: $e ? "…" : "Pause all"
                       }
                     ),
                     /* @__PURE__ */ e(
                       "button",
                       {
-                        onClick: () => void h(!1),
-                        disabled: pe || !(D != null && D.available) || (D == null ? void 0 : D.any_active),
+                        onClick: () => void _(!1),
+                        disabled: $e || !(z != null && z.available) || (z == null ? void 0 : z.any_active),
                         className: "text-xs px-3 py-1.5 rounded-md font-semibold disabled:opacity-40",
                         style: { background: "var(--accent)", color: "var(--bg)" },
-                        children: pe ? "…" : "Resume all"
+                        children: $e ? "…" : "Resume all"
                       }
                     ),
                     /* @__PURE__ */ e(
                       "button",
                       {
-                        onClick: () => void ve(),
-                        disabled: pe,
+                        onClick: () => void _e(),
+                        disabled: $e,
                         className: "text-xs px-3 py-1.5 rounded-md font-medium disabled:opacity-50",
                         style: { color: "var(--muted)" },
                         children: "Refresh"
@@ -833,18 +833,18 @@ function jr() {
               }
             )
           ] }),
-          M && /* @__PURE__ */ e("div", { className: "rounded-md px-3 py-2 text-[11px]", style: { color: "var(--danger, #ef4444)", border: "1px solid color-mix(in srgb, var(--danger, #ef4444) 45%, var(--border))" }, children: M })
+          B && /* @__PURE__ */ e("div", { className: "rounded-md px-3 py-2 text-[11px]", style: { color: "var(--danger, #ef4444)", border: "1px solid color-mix(in srgb, var(--danger, #ef4444) 45%, var(--border))" }, children: B })
         ] }),
         /* @__PURE__ */ a("footer", { className: "px-4 py-3 flex justify-between gap-2", style: { borderTop: "1px solid var(--border)", background: "var(--card)" }, children: [
-          /* @__PURE__ */ e("button", { onClick: () => void ee(), disabled: O || B, className: "text-xs px-3 py-1.5 rounded-md font-medium disabled:opacity-50", style: { color: "var(--muted)" }, children: "Refresh status" }),
+          /* @__PURE__ */ e("button", { onClick: () => void J(), disabled: q || I, className: "text-xs px-3 py-1.5 rounded-md font-medium disabled:opacity-50", style: { color: "var(--muted)" }, children: "Refresh status" }),
           (r == null ? void 0 : r.editable) && /* @__PURE__ */ e(
             "button",
             {
-              onClick: () => void de(),
-              disabled: !W || B,
+              onClick: () => void Z(),
+              disabled: !oe || I,
               className: "text-xs px-3 py-1.5 rounded-md font-semibold disabled:opacity-40",
               style: { background: "var(--accent)", color: "var(--bg)" },
-              children: B ? "Applying…" : "Save & apply"
+              children: I ? "Applying…" : "Save & apply"
             }
           )
         ] })
@@ -852,15 +852,15 @@ function jr() {
     }
   );
 }
-function Or({ repos: t, selectedRepos: r, onNewPipeline: i, onConfigure: o, onOpenAgents: l }) {
-  const { openChat: m } = ir(), u = r.length === 1 ? r[0] : t.length === 1 ? t[0] : "", g = "/dlc-yolo", d = "text-[10px] leading-none px-1.5 py-1 rounded font-semibold";
-  return /* @__PURE__ */ e(He, { children: /* @__PURE__ */ a("div", { "data-dlc-command-controls": !0, className: "mb-4 flex min-h-6 items-center justify-end gap-1.5 flex-wrap", children: [
+function ra({ repos: t, selectedRepos: r, onNewPipeline: o, onConfigure: s, onOpenAgents: l }) {
+  const { openChat: p } = fr(), u = r.length === 1 ? r[0] : t.length === 1 ? t[0] : "", i = "/dlc-yolo", c = "text-[10px] leading-none px-1.5 py-1 rounded font-semibold";
+  return /* @__PURE__ */ e(ze, { children: /* @__PURE__ */ a("div", { "data-dlc-command-controls": !0, className: "mb-4 flex min-h-6 items-center justify-end gap-1.5 flex-wrap", children: [
     /* @__PURE__ */ e(
       "button",
       {
-        onClick: () => m({ message: g }),
+        onClick: () => p({ message: i }),
         title: "Open the DLC-YOLO command session; choose the next command action there",
-        className: d,
+        className: c,
         style: { background: "var(--accent)", color: "var(--bg)" },
         children: "✨ Command session"
       }
@@ -868,8 +868,8 @@ function Or({ repos: t, selectedRepos: r, onNewPipeline: i, onConfigure: o, onOp
     /* @__PURE__ */ e(
       "button",
       {
-        onClick: () => u ? o(u) : i(),
-        className: d,
+        onClick: () => u ? s(u) : o(),
+        className: c,
         style: { color: "var(--muted)", border: "1px solid var(--border)" },
         children: u ? "Edit pipeline" : "New pipeline"
       }
@@ -878,7 +878,7 @@ function Or({ repos: t, selectedRepos: r, onNewPipeline: i, onConfigure: o, onOp
       "button",
       {
         onClick: l,
-        className: d,
+        className: c,
         style: { color: "var(--muted)", border: "1px solid var(--border)" },
         children: "Agent config"
       }
@@ -889,41 +889,41 @@ function Or({ repos: t, selectedRepos: r, onNewPipeline: i, onConfigure: o, onOp
     ] })
   ] }) });
 }
-const wt = {
+const Ut = {
   quick: { max_child_cards: 0, effort_ceiling: 3, max_feature_size: "S", addenda: "none" },
   standard: { max_child_cards: 3, effort_ceiling: 15, max_feature_size: "L", addenda: "obvious" },
   deep: { max_child_cards: 8, effort_ceiling: 40, max_feature_size: "XL", addenda: "proactive" }
 };
-function lt(t) {
+function Et(t) {
   return t ? t.max_child_cards === "unlimited" && t.effort_ceiling === "unlimited" ? "unlimited" : "custom" : "depth";
 }
-function Ir({ budget: t, depth: r, onSave: i }) {
-  const [o, l] = N(!1), [m, u] = N(lt(t)), [g, d] = N(
-    lt(t) === "custom" ? { ...t } : { ...wt[r] || wt.standard }
-  ), T = () => {
-    const f = lt(t);
-    u(f), d(f === "custom" ? { ...t } : { ...wt[r] || wt.standard }), l(!0);
-  }, x = () => {
-    i(m === "depth" ? void 0 : m === "unlimited" ? {
+function aa({ budget: t, depth: r, onSave: o }) {
+  const [s, l] = w(!1), [p, u] = w(Et(t)), [i, c] = w(
+    Et(t) === "custom" ? { ...t } : { ...Ut[r] || Ut.standard }
+  ), g = () => {
+    const f = Et(t);
+    u(f), c(f === "custom" ? { ...t } : { ...Ut[r] || Ut.standard }), l(!0);
+  }, v = () => {
+    o(p === "depth" ? void 0 : p === "unlimited" ? {
       max_child_cards: "unlimited",
       effort_ceiling: "unlimited",
       max_feature_size: "XL",
       addenda: "proactive"
-    } : { ...g }), l(!1);
-  }, j = lt(t) === "depth" ? "budget: depth" : lt(t) === "unlimited" ? "budget: unlimited" : "budget: custom";
+    } : { ...i }), l(!1);
+  }, E = Et(t) === "depth" ? "budget: depth" : Et(t) === "unlimited" ? "budget: unlimited" : "budget: custom";
   return /* @__PURE__ */ a("div", { className: "relative", children: [
     /* @__PURE__ */ e(
       "button",
       {
         type: "button",
-        onClick: T,
+        onClick: g,
         title: "Edit this card's explicit budget override",
         className: "text-[10px] px-1.5 py-0.5 rounded-full font-semibold",
         style: { color: t ? "var(--accent)" : "var(--muted)", border: `1px solid ${t ? "color-mix(in srgb, var(--accent) 45%, var(--border))" : "var(--border)"}`, background: t ? "color-mix(in srgb, var(--accent) 10%, transparent)" : "transparent" },
-        children: j
+        children: E
       }
     ),
-    o && /* @__PURE__ */ a(
+    s && /* @__PURE__ */ a(
       "div",
       {
         className: "absolute z-40 mt-1 left-0 w-72 rounded-lg p-3 flex flex-col gap-2",
@@ -936,20 +936,20 @@ function Ir({ budget: t, depth: r, onSave: i }) {
               type: "button",
               onClick: () => u(f),
               className: "text-[10px] px-2 py-1 rounded font-semibold",
-              style: { color: m === f ? "var(--bg)" : "var(--muted)", background: m === f ? "var(--accent)" : "var(--bg-hover, var(--border))" },
+              style: { color: p === f ? "var(--bg)" : "var(--muted)", background: p === f ? "var(--accent)" : "var(--bg-hover, var(--border))" },
               children: f === "depth" ? "follow depth" : f
             },
             f
           )) }),
-          m === "depth" && /* @__PURE__ */ a("div", { className: "text-[10px]", style: { color: "var(--muted)" }, children: [
+          p === "depth" && /* @__PURE__ */ a("div", { className: "text-[10px]", style: { color: "var(--muted)" }, children: [
             "Removes ",
             /* @__PURE__ */ e("code", { children: "card.budget" }),
             "; effective budget follows ",
             r || "standard",
             " depth."
           ] }),
-          m === "unlimited" && /* @__PURE__ */ e("div", { className: "text-[10px]", style: { color: "var(--warn)" }, children: "Literal unlimited child/effort caps · XL · proactive addenda." }),
-          m === "custom" && /* @__PURE__ */ a("div", { className: "grid grid-cols-2 gap-2", children: [
+          p === "unlimited" && /* @__PURE__ */ e("div", { className: "text-[10px]", style: { color: "var(--warn)" }, children: "Literal unlimited child/effort caps · XL · proactive addenda." }),
+          p === "custom" && /* @__PURE__ */ a("div", { className: "grid grid-cols-2 gap-2", children: [
             /* @__PURE__ */ a("label", { className: "text-[9px] uppercase", style: { color: "var(--muted)" }, children: [
               "Child cards",
               /* @__PURE__ */ e(
@@ -957,8 +957,8 @@ function Ir({ budget: t, depth: r, onSave: i }) {
                 {
                   type: "number",
                   min: 0,
-                  value: g.max_child_cards,
-                  onChange: (f) => d((w) => ({ ...w, max_child_cards: Math.max(0, Number(f.target.value) || 0) })),
+                  value: i.max_child_cards,
+                  onChange: (f) => c((b) => ({ ...b, max_child_cards: Math.max(0, Number(f.target.value) || 0) })),
                   className: "mt-0.5 w-full px-2 py-1 rounded text-[11px]",
                   style: { background: "var(--card)", border: "1px solid var(--border)", color: "var(--text)" }
                 }
@@ -971,8 +971,8 @@ function Ir({ budget: t, depth: r, onSave: i }) {
                 {
                   type: "number",
                   min: 0,
-                  value: g.effort_ceiling,
-                  onChange: (f) => d((w) => ({ ...w, effort_ceiling: Math.max(0, Number(f.target.value) || 0) })),
+                  value: i.effort_ceiling,
+                  onChange: (f) => c((b) => ({ ...b, effort_ceiling: Math.max(0, Number(f.target.value) || 0) })),
                   className: "mt-0.5 w-full px-2 py-1 rounded text-[11px]",
                   style: { background: "var(--card)", border: "1px solid var(--border)", color: "var(--text)" }
                 }
@@ -983,8 +983,8 @@ function Ir({ budget: t, depth: r, onSave: i }) {
               /* @__PURE__ */ e(
                 "select",
                 {
-                  value: g.max_feature_size,
-                  onChange: (f) => d((w) => ({ ...w, max_feature_size: f.target.value })),
+                  value: i.max_feature_size,
+                  onChange: (f) => c((b) => ({ ...b, max_feature_size: f.target.value })),
                   className: "mt-0.5 w-full px-2 py-1 rounded text-[11px]",
                   style: { background: "var(--card)", border: "1px solid var(--border)", color: "var(--text)" },
                   children: ["S", "M", "L", "XL"].map((f) => /* @__PURE__ */ e("option", { children: f }, f))
@@ -996,8 +996,8 @@ function Ir({ budget: t, depth: r, onSave: i }) {
               /* @__PURE__ */ e(
                 "select",
                 {
-                  value: g.addenda,
-                  onChange: (f) => d((w) => ({ ...w, addenda: f.target.value })),
+                  value: i.addenda,
+                  onChange: (f) => c((b) => ({ ...b, addenda: f.target.value })),
                   className: "mt-0.5 w-full px-2 py-1 rounded text-[11px]",
                   style: { background: "var(--card)", border: "1px solid var(--border)", color: "var(--text)" },
                   children: ["none", "obvious", "proactive"].map((f) => /* @__PURE__ */ e("option", { children: f }, f))
@@ -1007,14 +1007,14 @@ function Ir({ budget: t, depth: r, onSave: i }) {
           ] }),
           /* @__PURE__ */ a("div", { className: "flex justify-end gap-2 mt-1", children: [
             /* @__PURE__ */ e("button", { type: "button", onClick: () => l(!1), className: "text-[10px] px-2 py-1", style: { color: "var(--muted)" }, children: "Cancel" }),
-            /* @__PURE__ */ e("button", { type: "button", onClick: x, className: "text-[10px] px-2 py-1 rounded font-semibold", style: { background: "var(--accent)", color: "var(--bg)" }, children: "Save budget" })
+            /* @__PURE__ */ e("button", { type: "button", onClick: v, className: "text-[10px] px-2 py-1 rounded font-semibold", style: { background: "var(--accent)", color: "var(--bg)" }, children: "Save budget" })
           ] })
         ]
       }
     )
   ] });
 }
-const Ft = [
+const dr = [
   "terminal",
   "cancelling",
   "blocked",
@@ -1025,7 +1025,7 @@ const Ft = [
   "queued",
   "ready",
   "idle"
-], er = {
+], _r = {
   terminal: { label: "Terminal", color: "var(--ok)" },
   cancelling: { label: "Cancelling", color: "var(--warn)" },
   blocked: { label: "Blocked", color: "var(--danger)" },
@@ -1036,54 +1036,54 @@ const Ft = [
   queued: { label: "Queued", color: "var(--info)" },
   ready: { label: "Ready", color: "var(--accent)" },
   idle: { label: "Idle / unstarted", color: "var(--muted)" }
-}, Mr = /* @__PURE__ */ new Set(["retired", "merged"]), Ht = /* @__PURE__ */ new Set(["cancelled", "canceled", "superseded", "parked"]);
-function qr(t) {
+}, na = /* @__PURE__ */ new Set(["retired", "merged"]), pr = /* @__PURE__ */ new Set(["cancelled", "canceled", "superseded", "parked"]);
+function oa(t) {
   const r = t == null ? void 0 : t.execution_schedule;
   if (!r || typeof r != "object") return null;
-  const i = r.nodes;
-  if (!i || typeof i != "object") return null;
-  const o = r.current_node_id;
-  return typeof o == "string" && i[o] && typeof i[o] == "object" ? i[o] : Object.values(i).find((l) => l && typeof l == "object" && l.step === t.stage) || null;
+  const o = r.nodes;
+  if (!o || typeof o != "object") return null;
+  const s = r.current_node_id;
+  return typeof s == "string" && o[s] && typeof o[s] == "object" ? o[s] : Object.values(o).find((l) => l && typeof l == "object" && l.step === t.stage) || null;
 }
-function Ut(t, r) {
-  const i = t == null ? void 0 : t[r], o = i && typeof i == "object" ? i[t.stage] : null;
-  return typeof o == "string" && o.trim() ? o.trim() : null;
+function ur(t, r) {
+  const o = t == null ? void 0 : t[r], s = o && typeof o == "object" ? o[t.stage] : null;
+  return typeof s == "string" && s.trim() ? s.trim() : null;
 }
-function Kt(t, { isGate: r = !1, liveObserved: i = !1 } = {}) {
-  const o = typeof (t == null ? void 0 : t.stage) == "string" ? t.stage : "", l = typeof (t == null ? void 0 : t.lifecycle) == "string" ? t.lifecycle.toLowerCase() : "", m = t != null && t.step_status && typeof t.step_status == "object" ? String(t.step_status[o] || "") : "", u = qr(t), g = typeof (u == null ? void 0 : u.status) == "string" ? u.status : "", d = t != null && t.step_sessions && typeof t.step_sessions == "object" ? t.step_sessions[o] : null, T = Ht.has(l) || g === "cancelling" || (d == null ? void 0 : d.writes_allowed) === !1 || !!(d != null && d.cancel_requested_at), x = o === "done" || Mr.has(l) || ["completed", "cancelled", "superseded"].includes(g);
-  let j, f = null;
-  return x ? (j = "terminal", f = g === "cancelled" || Ht.has(l) ? `terminal ${l || g}` : l || g || o || null) : T ? (j = "cancelling", f = "writes revoked; awaiting terminal observation") : m === "blocked" || g === "blocked" ? (j = "blocked", f = Ut(t, "block_reason") || ((u == null ? void 0 : u.wait_reasons) || [])[0] || "step blocked") : m === "error" || g === "failed" ? (j = "error", f = Ut(t, "error_reason") || (u == null ? void 0 : u.dispatch_error) || "step error") : r || g === "gate-wait" ? j = "waiting-gate" : i ? j = "running-observed" : m === "pending" || g === "running" ? (j = "pending-unconfirmed", f = "no current live observation") : ["queued", "dependency-wait", "permit-wait"].includes(g) ? (j = "queued", f = Array.isArray(u == null ? void 0 : u.wait_reasons) ? u.wait_reasons.join(" · ") : null) : g === "ready" ? j = "ready" : j = "idle", { kind: j, reason: f, ...er[j] };
+function mr(t, { isGate: r = !1, liveObserved: o = !1 } = {}) {
+  const s = typeof (t == null ? void 0 : t.stage) == "string" ? t.stage : "", l = typeof (t == null ? void 0 : t.lifecycle) == "string" ? t.lifecycle.toLowerCase() : "", p = t != null && t.step_status && typeof t.step_status == "object" ? String(t.step_status[s] || "") : "", u = oa(t), i = typeof (u == null ? void 0 : u.status) == "string" ? u.status : "", c = t != null && t.step_sessions && typeof t.step_sessions == "object" ? t.step_sessions[s] : null, g = pr.has(l) || i === "cancelling" || (c == null ? void 0 : c.writes_allowed) === !1 || !!(c != null && c.cancel_requested_at), v = s === "done" || na.has(l) || ["completed", "cancelled", "superseded"].includes(i);
+  let E, f = null;
+  return v ? (E = "terminal", f = i === "cancelled" || pr.has(l) ? `terminal ${l || i}` : l || i || s || null) : g ? (E = "cancelling", f = "writes revoked; awaiting terminal observation") : p === "blocked" || i === "blocked" ? (E = "blocked", f = ur(t, "block_reason") || ((u == null ? void 0 : u.wait_reasons) || [])[0] || "step blocked") : p === "error" || i === "failed" ? (E = "error", f = ur(t, "error_reason") || (u == null ? void 0 : u.dispatch_error) || "step error") : r || i === "gate-wait" ? E = "waiting-gate" : o ? E = "running-observed" : p === "pending" || i === "running" ? (E = "pending-unconfirmed", f = "no current live observation") : ["queued", "dependency-wait", "permit-wait"].includes(i) ? (E = "queued", f = Array.isArray(u == null ? void 0 : u.wait_reasons) ? u.wait_reasons.join(" · ") : null) : i === "ready" ? E = "ready" : E = "idle", { kind: E, reason: f, ..._r[E] };
 }
-const Ze = { LOOP: "loop", STEP: "step-agent", ORCH: "orchestrator", HUMAN: "human" };
-function We(t) {
+const vt = { LOOP: "loop", STEP: "step-agent", ORCH: "orchestrator", HUMAN: "human" };
+function ot(t) {
   return typeof t == "string" ? t : "";
 }
-function Dr(t) {
+function sa(t) {
   if (!t || typeof t != "object") return [];
-  const r = [], i = (o) => {
-    o && o.at && r.push(o);
+  const r = [], o = (s) => {
+    s && s.at && r.push(s);
   };
-  for (const o of t.history || [])
-    !o || typeof o != "object" || i({
-      id: `hist:${o.at}:${o.to}`,
-      at: We(o.at),
-      actor: Ze.LOOP,
+  for (const s of t.history || [])
+    !s || typeof s != "object" || o({
+      id: `hist:${s.at}:${s.to}`,
+      at: ot(s.at),
+      actor: vt.LOOP,
       kind: "promoted",
-      step: o.to,
+      step: s.to,
       cls: "notification",
       needs_human: !1,
-      headline: `advanced ${o.from || "?"} → ${o.to || "?"}`,
-      detail: o.agent ? `by ${o.agent}` : ""
+      headline: `advanced ${s.from || "?"} → ${s.to || "?"}`,
+      detail: s.agent ? `by ${s.agent}` : ""
     });
-  for (const [o, l] of Object.entries(t.step_summaries || {})) {
+  for (const [s, l] of Object.entries(t.step_summaries || {})) {
     if (!l || typeof l != "object" || !l.headline) continue;
-    const m = l.status === "blocked";
-    i({
-      id: `summ:${o}:${l.at || l.status}`,
-      at: We(l.at) || We(t.updated_at),
-      actor: Ze.STEP,
-      kind: m ? "blocked" : l.status === "error" ? "error" : "step-done",
-      step: o,
+    const p = l.status === "blocked";
+    o({
+      id: `summ:${s}:${l.at || l.status}`,
+      at: ot(l.at) || ot(t.updated_at),
+      actor: vt.STEP,
+      kind: p ? "blocked" : l.status === "error" ? "error" : "step-done",
+      step: s,
       cls: "notification",
       needs_human: !!l.needs_human,
       headline: l.headline,
@@ -1091,118 +1091,355 @@ function Dr(t) {
       executor: l.executor || null
     });
   }
-  for (const o of t.gate_history || [])
-    !o || typeof o != "object" || i({
-      id: `gate:${o.at}:${o.gate}`,
-      at: We(o.at),
-      actor: Ze.HUMAN,
-      kind: o.decision === "rejected" ? "rejected" : o.decision === "approved" ? "approved" : "gate",
-      step: o.gate,
+  for (const s of t.gate_history || [])
+    !s || typeof s != "object" || o({
+      id: `gate:${s.at}:${s.gate}`,
+      at: ot(s.at),
+      actor: vt.HUMAN,
+      kind: s.decision === "rejected" ? "rejected" : s.decision === "approved" ? "approved" : "gate",
+      step: s.gate,
       cls: "decision",
       needs_human: !1,
-      headline: `you ${o.decision || "acted on"} ${o.gate}`,
-      detail: o.notes || ""
+      headline: `you ${s.decision || "acted on"} ${s.gate}`,
+      detail: s.notes || ""
     });
-  for (const o of t.decisions || []) {
-    if (!o || typeof o != "object") continue;
-    const l = !!o.chosen || !!o.resolved_at;
-    i({
-      id: `dec:${o.id || o.at}`,
-      at: We(o.at),
-      actor: Ze.ORCH,
+  for (const s of t.decisions || []) {
+    if (!s || typeof s != "object") continue;
+    const l = !!s.chosen || !!s.resolved_at;
+    o({
+      id: `dec:${s.id || s.at}`,
+      at: ot(s.at),
+      actor: vt.ORCH,
       kind: l ? "resolved" : "decision",
-      step: o.step,
+      step: s.step,
       cls: "decision",
       needs_human: !l,
-      headline: l ? `resolved: ${o.chosen || o.action || o.kind || "decision"}` : `decision needed: ${o.question || o.kind || "a fork"}`,
-      detail: o.rationale || o.question || ""
+      headline: l ? `resolved: ${s.chosen || s.action || s.kind || "decision"}` : `decision needed: ${s.question || s.kind || "a fork"}`,
+      detail: s.rationale || s.question || ""
     });
   }
-  for (const o of t.backstep_history || [])
-    !o || typeof o != "object" || i({
-      id: `back:${o.at}`,
-      at: We(o.at),
-      actor: Ze.ORCH,
+  for (const s of t.backstep_history || [])
+    !s || typeof s != "object" || o({
+      id: `back:${s.at}`,
+      at: ot(s.at),
+      actor: vt.ORCH,
       kind: "back-stepped",
-      step: o.to,
+      step: s.to,
       cls: "notification",
       needs_human: !1,
-      headline: `stepped back ${o.from || "?"} → ${o.to || "?"}`,
-      detail: o.reason || ""
+      headline: `stepped back ${s.from || "?"} → ${s.to || "?"}`,
+      detail: s.reason || ""
     });
-  for (const o of t.parked || [])
-    !o || typeof o != "object" || i({
-      id: `park:${o.id || o.at}`,
-      at: We(o.at),
-      actor: Ze.ORCH,
+  for (const s of t.parked || [])
+    !s || typeof s != "object" || o({
+      id: `park:${s.id || s.at}`,
+      at: ot(s.at),
+      actor: vt.ORCH,
       kind: "parked",
-      step: o.phase,
+      step: s.phase,
       cls: "notification",
       needs_human: !1,
-      headline: `parked to backlog: ${o.note || "idea"}`,
-      detail: o.issue_url || ""
+      headline: `parked to backlog: ${s.note || "idea"}`,
+      detail: s.issue_url || ""
     });
-  return r.map((o, l) => ({ ...o, _i: l })).sort((o, l) => o.at < l.at ? -1 : o.at > l.at ? 1 : o._i - l._i).map(({ _i: o, ...l }) => l);
+  return r.map((s, l) => ({ ...s, _i: l })).sort((s, l) => s.at < l.at ? -1 : s.at > l.at ? 1 : s._i - l._i).map(({ _i: s, ...l }) => l);
 }
-const zr = /^\[([a-z0-9-]+)\s*[·.]\s*f?\d+\]\s*(.*)$/i;
-function tr(t) {
-  const r = zr.exec(String(t || ""));
+const la = /^\[([a-z0-9-]+)\s*[·.]\s*f?\d+\]\s*(.*)$/i;
+function Cr(t) {
+  const r = la.exec(String(t || ""));
   return r ? { parentId: r[1], rest: r[2] } : null;
 }
-function Br(t, r) {
-  var m;
+function ia(t, r) {
+  var p;
   if (!t) return [];
-  const i = [], o = /* @__PURE__ */ new Set(), l = (u) => {
-    u && !o.has(u.id) && (o.add(u.id), i.push(u));
+  const o = [], s = /* @__PURE__ */ new Set(), l = (u) => {
+    u && !s.has(u.id) && (s.add(u.id), o.push(u));
   };
-  for (const u of ((m = t.topology) == null ? void 0 : m.children) || []) {
-    const g = typeof u == "string" ? u : u == null ? void 0 : u.card_id, d = (r || []).find((T) => T.id === g);
-    d && l({ id: d.id, title: d.title, stage: d.stage, lifecycle: d.lifecycle, required: (u == null ? void 0 : u.required) !== !1 });
+  for (const u of ((p = t.topology) == null ? void 0 : p.children) || []) {
+    const i = typeof u == "string" ? u : u == null ? void 0 : u.card_id, c = (r || []).find((g) => g.id === i);
+    c && l({ id: c.id, title: c.title, stage: c.stage, lifecycle: c.lifecycle, required: (u == null ? void 0 : u.required) !== !1 });
   }
   for (const u of r || []) {
-    const g = tr(u.title);
-    g && g.parentId === t.id && l({ id: u.id, title: u.title, stage: u.stage, lifecycle: u.lifecycle, required: !0 });
+    const i = Cr(u.title);
+    i && i.parentId === t.id && l({ id: u.id, title: u.title, stage: u.stage, lifecycle: u.lifecycle, required: !0 });
   }
-  return i;
+  return o;
 }
-function Gr(t) {
-  var i;
-  const r = tr(t == null ? void 0 : t.title);
-  return r ? r.parentId : ((i = t == null ? void 0 : t.topology) == null ? void 0 : i.integration_owner) || (t == null ? void 0 : t.parent_card) || null;
+function ca(t) {
+  var o;
+  const r = Cr(t == null ? void 0 : t.title);
+  return r ? r.parentId : ((o = t == null ? void 0 : t.topology) == null ? void 0 : o.integration_owner) || (t == null ? void 0 : t.parent_card) || null;
 }
-const Vt = /^[A-Za-z0-9._-]{1,128}$/;
-function it({ values: t, empty: r = "none declared" }) {
-  return t.length ? /* @__PURE__ */ e("div", { className: "flex flex-wrap gap-1", children: t.map((i) => /* @__PURE__ */ e(
+const hr = ["webhook", "loop", "orchestrator", "crew", "step-agent", "human"], Sr = {
+  webhook: "⬇",
+  loop: "⚙",
+  orchestrator: "🧠",
+  crew: "👥",
+  "step-agent": "🤖",
+  human: "🧑"
+};
+function je(t) {
+  return typeof t == "string" ? t : "";
+}
+function da(t) {
+  return String(t || "").slice(0, 8);
+}
+function pa(t, r) {
+  var u;
+  const o = t.id, s = ((u = t.execution_schedule) == null ? void 0 : u.nodes) || {};
+  for (const [i, c] of Object.entries(s)) {
+    if (!c || typeof c != "object") continue;
+    const g = je(c.terminal_at) || je(c.session_at) || je(c.ready_at) || je(c.created_at);
+    r({
+      id: `sched:${i}`,
+      at: g,
+      actor: "step-agent",
+      kind: `step-${c.status || "node"}`,
+      cardId: o,
+      step: c.step,
+      node_id: i,
+      headline: `${c.step || c.kind || "step"} · ${c.status || "node"}`,
+      detail: c.concurrency_class ? `class ${c.concurrency_class}` : ""
+    });
+  }
+  for (const i of t.event_outbox || [])
+    !i || typeof i != "object" || r({
+      id: i.id || `outbox:${o}:${i.subject}:${i.time}`,
+      at: je(i.time),
+      actor: "step-agent",
+      kind: (i.type || "").split(".").pop() || "event",
+      cardId: o,
+      step: i.subject,
+      run_id: i.run_id,
+      envelope_id: i.envelope_id,
+      caused_by: i.correlation_id && i.correlation_id !== o ? i.correlation_id : void 0,
+      headline: `${i.subject || "step"} → ${i.terminal_status || i.type || "event"}`,
+      detail: i.observed_status ? `observed: ${i.observed_status}` : i.run_id ? `run ${da(i.run_id)}` : ""
+    });
+  for (const i of t.history || []) {
+    if (!i || typeof i != "object") continue;
+    const c = i.agent || "", g = /cron|advance/i.test(c) ? "loop" : /human|user/i.test(c) ? "human" : "loop";
+    r({
+      id: `hist:${o}:${i.at}:${i.to}`,
+      at: je(i.at),
+      actor: g,
+      kind: "promoted",
+      cardId: o,
+      step: i.to,
+      inferred: g === "loop" && /cron|advance/i.test(c) ? !1 : void 0,
+      headline: `advanced ${i.from || "?"} → ${i.to || "?"}`,
+      detail: c ? `by ${c}` : ""
+    });
+  }
+  for (const i of t.decisions || []) {
+    if (!i || typeof i != "object") continue;
+    const c = i.status === "resolved" || !!i.chosen || !!i.resolved_at;
+    r({
+      id: `dec:${i.id || o + i.step}`,
+      at: je(i.at) || je(i.resolved_at),
+      actor: "orchestrator",
+      kind: c ? "decision-resolved" : "decision-open",
+      cardId: o,
+      step: i.step,
+      envelope_id: i.envelope_id,
+      needs_human: !c && i.resolution === "human-required",
+      headline: c ? `decision resolved: ${i.kind || "fork"}` : `decision: ${i.kind || "fork"}`,
+      detail: (i.question || "").slice(0, 160)
+    });
+  }
+  for (const i of t.gate_history || []) {
+    if (!i || typeof i != "object") continue;
+    const c = /user|human/i.test(i.actor || "");
+    r({
+      id: `gate:${o}:${i.at}:${i.gate}`,
+      at: je(i.at),
+      actor: c ? "human" : "orchestrator",
+      kind: i.decision === "rejected" ? "gate-rejected" : "gate-approved",
+      cardId: o,
+      step: i.gate,
+      headline: `${c ? "human" : i.actor || "system"} ${i.decision || "acted"} ${i.gate}`,
+      detail: i.notes || (i.result_revision != null ? `rev ${i.result_revision}` : "")
+    });
+  }
+  const l = t.orchestrator_session;
+  l && l.at && r({
+    id: `orch:${o}:${l.session_key || l.at}`,
+    at: je(l.at),
+    actor: "orchestrator",
+    kind: "orchestrator-session",
+    cardId: o,
+    session_key: l.session_key,
+    headline: "orchestrator session",
+    detail: l.name || l.slot_key || ""
+  });
+  const p = t.orchestrator_trigger;
+  p && p.at && (!l || p.at !== l.at) && r({
+    id: `orchtrig:${o}:${p.at}`,
+    at: je(p.at),
+    actor: "orchestrator",
+    kind: "orchestrator-trigger",
+    cardId: o,
+    session_key: p.session_key,
+    headline: `orchestrator trigger · ${p.status || ""}`,
+    detail: ""
+  });
+  for (const [i, c] of Object.entries(t.step_sessions || {}))
+    !c || typeof c != "object" || !c.at || r({
+      id: `sess:${o}:${i}:${c.at}`,
+      at: je(c.at),
+      actor: "crew",
+      kind: "session",
+      cardId: o,
+      step: i,
+      session_key: c.slot_key || c.session_key,
+      headline: `crew session · ${i}`,
+      detail: c.executor || c.working_dir || "",
+      inferred: !0
+    });
+}
+function ua(t, r) {
+  for (const o of (t == null ? void 0 : t.github_webhook_history) || [])
+    !o || typeof o != "object" || r({
+      id: `wh:${o.delivery_id}`,
+      at: je(o.at) || je(o.received_at) || je(o.time),
+      actor: "webhook",
+      kind: `webhook-${o.status || "received"}`,
+      cardId: o.card_id,
+      caused_by: void 0,
+      headline: `${o.event}.${o.action} #${o.issue_number ?? "?"}`,
+      detail: `${o.repository || ""}${o.status ? ` · ${o.status}` : ""}${o.reason ? ` (${o.reason})` : ""}`
+    });
+}
+function ma(t, r, o) {
+  const s = t == null ? void 0 : t.id, l = (r || []).filter((g) => {
+    var v;
+    return g && (g.pipeline_id === s || !g.pipeline_id && ((v = g.source) == null ? void 0 : v.repo) === (t == null ? void 0 : t.repo));
+  }), p = [], u = (g) => {
+    g && g.at && p.push({ glyph: Sr[g.actor] || "•", ...g });
+  };
+  for (const g of l) pa(g, u);
+  ua(o, u);
+  const i = Object.fromEntries(hr.map((g, v) => [g, v]));
+  p.sort((g, v) => (g.at < v.at ? -1 : g.at > v.at ? 1 : 0) || (i[g.actor] ?? 9) - (i[v.actor] ?? 9) || (g.id < v.id ? -1 : g.id > v.id ? 1 : 0));
+  const c = hr.filter((g) => p.some((v) => v.actor === g));
+  return { events: p, actors: c, now: (o == null ? void 0 : o.scheduler_state) || null };
+}
+const ha = [
+  "request:re-spec",
+  "request:retry",
+  "request:back-step",
+  "request:park",
+  "request:cancel"
+], tr = 500, rr = {
+  "request:retry": { label: "Retry step", reasonRequired: !1, confirm: "Re-run this failed step?" },
+  "request:re-spec": { label: "Re-spec", reasonRequired: !1, confirm: "Ask the orchestrator to re-scope this card?" },
+  "request:back-step": { label: "Back-step", reasonRequired: !0, confirm: "Propose stepping this card back a level? A reason is required." },
+  "request:park": { label: "Park", reasonRequired: !0, confirm: "Park this card to the backlog? A reason is required." },
+  "request:cancel": {
+    label: "Cancel",
+    reasonRequired: !1,
+    confirm: "Cancel cooperatively: writes are revoked, the live turn may NOT stop immediately, and the permit/worktree are retained until terminal observation. Continue?"
+  }
+};
+function va() {
+  var r, o;
+  return `ui-${(((o = (r = globalThis.crypto) == null ? void 0 : r.randomUUID) == null ? void 0 : o.call(r)) || Math.random().toString(36).slice(2)).replace(/-/g, "").slice(0, 16)}`;
+}
+function ga(t, r) {
+  if (!ha.includes(t)) return { ok: !1, error: `unknown request kind: ${t}` };
+  const o = rr[t], s = String(r || "").trim();
+  return o.reasonRequired && !s ? { ok: !1, error: "a reason is required for this request" } : s.length > tr ? { ok: !1, error: `reason exceeds ${tr} chars` } : { ok: !0 };
+}
+function ba({ id: t, kind: r, text: o, card: s, now: l, boundary: p }) {
+  const u = ga(r, o);
+  if (!u.ok) throw new Error(u.error);
+  const i = s == null ? void 0 : s.stage, c = s != null && s.step_status && typeof s.step_status == "object" ? s.step_status[i] ?? null : null, g = {
+    id: t,
+    at: l,
+    step: i,
+    kind: r,
+    text: String(o || "").trim().slice(0, tr),
+    by: "user",
+    status: "pending",
+    expected: { stage: i ?? null, step_status: c }
+  };
+  return r === "request:back-step" && p && (g.boundary = p), g;
+}
+function xa(t, r) {
+  const o = Array.isArray(t) ? t : [];
+  return o.some((s) => s && s.id === r.id) ? o : [...o, r];
+}
+const $r = [
+  "ready",
+  "queued",
+  "running",
+  "pending",
+  "blocked",
+  "error",
+  "cancelling",
+  "terminal"
+];
+function fa(t, r) {
+  const o = Object.fromEntries($r.map((p) => [p, 0])), s = r && typeof r == "object" ? r : {};
+  o.ready = (s.ready_node_ids || []).length, o.running = (s.running_node_ids || []).length, o.blocked = (s.blocked_node_ids || []).length, o.queued = (s.selected_node_ids || []).length;
+  const l = [];
+  for (const p of t || []) {
+    if (!p || typeof p != "object") continue;
+    const u = p.stage, i = p.step_status && typeof p.step_status == "object" ? p.step_status[u] : null;
+    p.writes_allowed === !1 || p.cancel_requested_at ? o.cancelling += 1 : i === "error" ? o.error += 1 : i === "blocked" ? o.blocked += 1 : i === "pending" ? o.pending += 1 : (i === "done" || p.lifecycle === "retired" || p.lifecycle === "merged") && (o.terminal += 1);
+    const c = p.block_reason && typeof p.block_reason == "object" ? p.block_reason[u] : null;
+    c && l.push({ card: p.id, reason: String(c) });
+  }
+  return { counts: o, waitReasons: l.slice(0, 50) };
+}
+function Gt(t) {
+  if (!t || typeof t != "object")
+    return { available: !1, label: "unavailable", authority_active: !1, verified: !1 };
+  const r = !!t.authority_active, o = String(t.parity_status || ""), s = o === "verified" || t.verified === !0;
+  return {
+    available: !0,
+    authority_active: r,
+    verified: s,
+    parity_status: o || (s ? "verified" : "unknown"),
+    digest_match: t.digest_match === void 0 ? null : !!t.digest_match,
+    failure_code: t.failure_code || t.error || null,
+    // never surface paths/prose from the minimized model
+    label: r ? s ? "verified" : "blocked" : "authority inactive"
+  };
+}
+const vr = /^[A-Za-z0-9._-]{1,128}$/;
+function Ot({ values: t, empty: r = "none declared" }) {
+  return t.length ? /* @__PURE__ */ e("div", { className: "flex flex-wrap gap-1", children: t.map((o) => /* @__PURE__ */ e(
     "code",
     {
       className: "text-[10px] px-1.5 py-0.5 rounded",
       style: { color: "var(--text)", background: "var(--bg-hover, var(--border))", border: "1px solid var(--border)" },
-      children: i
+      children: o
     },
-    i
+    o
   )) }) : /* @__PURE__ */ e("span", { className: "text-[11px] italic", style: { color: "var(--muted)" }, children: r });
 }
-function Me({ label: t, value: r }) {
+function Je({ label: t, value: r }) {
   return /* @__PURE__ */ a("div", { className: "grid grid-cols-[110px_minmax(0,1fr)] gap-2 text-[11px]", children: [
     /* @__PURE__ */ e("span", { className: "uppercase tracking-wide", style: { color: "var(--muted)" }, children: t }),
     /* @__PURE__ */ e("span", { className: "break-words", style: { color: r ? "var(--text)" : "var(--muted)" }, children: r || "not set" })
   ] });
 }
-function Wr({ profiles: t, initial: r, onSave: i, onClose: o }) {
-  var B;
-  const l = r ? "update" : "create", [m, u] = N((r == null ? void 0 : r.name) || ""), [g, d] = N((r == null ? void 0 : r.kiroAgent) || ((B = t.find((_) => _.status === "loaded")) == null ? void 0 : B.name) || ""), [T, x] = N((r == null ? void 0 : r.workspace) || ""), [j, f] = N((r == null ? void 0 : r.memoryStore) || ""), [w, V] = N(!1), [I, q] = N(""), O = Vt.test(m.trim()) && Vt.test(g.trim()) && new TextEncoder().encode(T.trim()).length <= 256 && new TextEncoder().encode(j.trim()).length <= 256, R = async () => {
-    if (!(!O || w)) {
-      V(!0), q("");
+function ya({ profiles: t, initial: r, onSave: o, onClose: s }) {
+  var I;
+  const l = r ? "update" : "create", [p, u] = w((r == null ? void 0 : r.name) || ""), [i, c] = w((r == null ? void 0 : r.kiroAgent) || ((I = t.find((C) => C.status === "loaded")) == null ? void 0 : I.name) || ""), [g, v] = w((r == null ? void 0 : r.workspace) || ""), [E, f] = w((r == null ? void 0 : r.memoryStore) || ""), [b, x] = w(!1), [k, D] = w(""), q = vr.test(p.trim()) && vr.test(i.trim()) && new TextEncoder().encode(g.trim()).length <= 256 && new TextEncoder().encode(E.trim()).length <= 256, A = async () => {
+    if (!(!q || b)) {
+      x(!0), D("");
       try {
-        await i({
+        await o({
           mode: l,
-          name: m.trim(),
-          kiroAgent: g.trim(),
-          workspace: T.trim() || void 0,
-          memoryStore: j.trim() || void 0
+          name: p.trim(),
+          kiroAgent: i.trim(),
+          workspace: g.trim() || void 0,
+          memoryStore: E.trim() || void 0
         });
-      } catch (_) {
-        q((_ == null ? void 0 : _.message) || String(_)), V(!1);
+      } catch (C) {
+        D((C == null ? void 0 : C.message) || String(C)), x(!1);
       }
     }
   };
@@ -1211,8 +1448,8 @@ function Wr({ profiles: t, initial: r, onSave: i, onClose: o }) {
     {
       className: "fixed inset-0 z-[80] flex items-center justify-center p-4",
       style: { background: "color-mix(in srgb, black 68%, transparent)", backdropFilter: "blur(3px)" },
-      onMouseDown: (_) => {
-        _.currentTarget === _.target && !w && o();
+      onMouseDown: (C) => {
+        C.currentTarget === C.target && !b && s();
       },
       children: /* @__PURE__ */ a(
         "section",
@@ -1231,8 +1468,8 @@ function Wr({ profiles: t, initial: r, onSave: i, onClose: o }) {
               /* @__PURE__ */ e(
                 "button",
                 {
-                  onClick: o,
-                  disabled: w,
+                  onClick: s,
+                  disabled: b,
                   "aria-label": "Close crew route editor",
                   className: "w-8 h-8 rounded-lg text-lg disabled:opacity-40",
                   style: { color: "var(--muted)", border: "1px solid var(--border)" },
@@ -1246,8 +1483,8 @@ function Wr({ profiles: t, initial: r, onSave: i, onClose: o }) {
                 /* @__PURE__ */ e(
                   "input",
                   {
-                    value: m,
-                    onChange: (_) => u(_.target.value),
+                    value: p,
+                    onChange: (C) => u(C.target.value),
                     disabled: l === "update",
                     placeholder: "e.g. dlcyolo-secure-review",
                     className: "mt-1 w-full px-3 py-2 rounded-md text-sm normal-case tracking-normal outline-none disabled:opacity-60",
@@ -1261,14 +1498,14 @@ function Wr({ profiles: t, initial: r, onSave: i, onClose: o }) {
                   "input",
                   {
                     list: "dlc-agent-profile-options",
-                    value: g,
-                    onChange: (_) => d(_.target.value),
+                    value: i,
+                    onChange: (C) => c(C.target.value),
                     placeholder: "dlcyolo-readonly",
                     className: "mt-1 w-full px-3 py-2 rounded-md text-sm normal-case tracking-normal outline-none",
                     style: { background: "var(--bg-elevated, var(--bg))", border: "1px solid var(--border)", color: "var(--text)" }
                   }
                 ),
-                /* @__PURE__ */ e("datalist", { id: "dlc-agent-profile-options", children: t.map((_) => /* @__PURE__ */ e("option", { value: _.name }, _.name)) })
+                /* @__PURE__ */ e("datalist", { id: "dlc-agent-profile-options", children: t.map((C) => /* @__PURE__ */ e("option", { value: C.name }, C.name)) })
               ] }),
               /* @__PURE__ */ a("label", { className: "text-[10px] uppercase tracking-wider", style: { color: "var(--muted)" }, children: [
                 "Workspace ",
@@ -1276,8 +1513,8 @@ function Wr({ profiles: t, initial: r, onSave: i, onClose: o }) {
                 /* @__PURE__ */ e(
                   "input",
                   {
-                    value: T,
-                    onChange: (_) => x(_.target.value),
+                    value: g,
+                    onChange: (C) => v(C.target.value),
                     placeholder: l === "update" ? "Blank keeps the current value" : "Default workspace",
                     className: "mt-1 w-full px-3 py-2 rounded-md text-sm normal-case tracking-normal outline-none",
                     style: { background: "var(--bg-elevated, var(--bg))", border: "1px solid var(--border)", color: "var(--text)" }
@@ -1290,8 +1527,8 @@ function Wr({ profiles: t, initial: r, onSave: i, onClose: o }) {
                 /* @__PURE__ */ e(
                   "input",
                   {
-                    value: j,
-                    onChange: (_) => f(_.target.value),
+                    value: E,
+                    onChange: (C) => f(C.target.value),
                     placeholder: l === "update" ? "Blank keeps the current value" : "Default memory store",
                     className: "mt-1 w-full px-3 py-2 rounded-md text-sm normal-case tracking-normal outline-none",
                     style: { background: "var(--bg-elevated, var(--bg))", border: "1px solid var(--border)", color: "var(--text)" }
@@ -1303,18 +1540,18 @@ function Wr({ profiles: t, initial: r, onSave: i, onClose: o }) {
                 /* @__PURE__ */ e("code", { children: "kiro_agent" }),
                 " route. Profile prompts, tools, and approval policy remain source-managed declarations; pipeline-local objectives stay in Pipeline Setup."
               ] }),
-              I && /* @__PURE__ */ e("div", { className: "text-[11px] rounded-md px-3 py-2", style: { color: "var(--danger)", border: "1px solid color-mix(in srgb, var(--danger) 35%, var(--border))" }, children: I })
+              k && /* @__PURE__ */ e("div", { className: "text-[11px] rounded-md px-3 py-2", style: { color: "var(--danger)", border: "1px solid color-mix(in srgb, var(--danger) 35%, var(--border))" }, children: k })
             ] }),
             /* @__PURE__ */ a("footer", { className: "px-5 py-3 flex justify-end gap-2", style: { borderTop: "1px solid var(--border)", background: "var(--bg-elevated, var(--bg))" }, children: [
-              /* @__PURE__ */ e("button", { onClick: o, disabled: w, className: "text-[11px] px-3 py-1.5 rounded-md disabled:opacity-40", style: { color: "var(--muted)" }, children: "Cancel" }),
+              /* @__PURE__ */ e("button", { onClick: s, disabled: b, className: "text-[11px] px-3 py-1.5 rounded-md disabled:opacity-40", style: { color: "var(--muted)" }, children: "Cancel" }),
               /* @__PURE__ */ e(
                 "button",
                 {
-                  onClick: () => void R(),
-                  disabled: !O || w,
+                  onClick: () => void A(),
+                  disabled: !q || b,
                   className: "text-[11px] px-3 py-1.5 rounded-md font-semibold disabled:opacity-40",
                   style: { background: "var(--accent)", color: "var(--bg)" },
-                  children: w ? "Saving…" : l === "create" ? "Create crew route" : "Save crew route"
+                  children: b ? "Saving…" : l === "create" ? "Create crew route" : "Save crew route"
                 }
               )
             ] })
@@ -1324,27 +1561,27 @@ function Wr({ profiles: t, initial: r, onSave: i, onClose: o }) {
     }
   );
 }
-function qt({ profiles: t, crews: r, loading: i = !1, context: o, onRefresh: l, onClose: m, onSelectProfile: u, onSelectCrew: g, onSaveCrew: d }) {
-  var M, K;
-  const [T, x] = N("agents"), [j, f] = N(((M = t[0]) == null ? void 0 : M.name) || ""), [w, V] = N(((K = r[0]) == null ? void 0 : K.name) || ""), [I, q] = N(null);
-  _e(() => {
+function ar({ profiles: t, crews: r, loading: o = !1, context: s, onRefresh: l, onClose: p, onSelectProfile: u, onSelectCrew: i, onSaveCrew: c }) {
+  var B, X;
+  const [g, v] = w("agents"), [E, f] = w(((B = t[0]) == null ? void 0 : B.name) || ""), [b, x] = w(((X = r[0]) == null ? void 0 : X.name) || ""), [k, D] = w(null);
+  Ee(() => {
     var y;
-    t.some((ee) => ee.name === j) || f(((y = t[0]) == null ? void 0 : y.name) || "");
-  }, [t, j]), _e(() => {
+    t.some((J) => J.name === E) || f(((y = t[0]) == null ? void 0 : y.name) || "");
+  }, [t, E]), Ee(() => {
     var y;
-    r.some((ee) => ee.name === w) || V(((y = r[0]) == null ? void 0 : y.name) || "");
-  }, [r, w]);
-  const O = t.find((y) => y.name === j), R = r.find((y) => y.name === w), B = xe(
-    () => R != null && R.kiroAgent ? t.find((y) => y.name === R.kiroAgent) : void 0,
-    [R, t]
-  ), _ = O != null && O.prompt ? O.prompt.length > 1200 ? `${O.prompt.slice(0, 1200)}…` : O.prompt : "";
+    r.some((J) => J.name === b) || x(((y = r[0]) == null ? void 0 : y.name) || "");
+  }, [r, b]);
+  const q = t.find((y) => y.name === E), A = r.find((y) => y.name === b), I = Ce(
+    () => A != null && A.kiroAgent ? t.find((y) => y.name === A.kiroAgent) : void 0,
+    [A, t]
+  ), C = q != null && q.prompt ? q.prompt.length > 1200 ? `${q.prompt.slice(0, 1200)}…` : q.prompt : "";
   return /* @__PURE__ */ a(
     "div",
     {
       className: "fixed inset-0 z-[70] flex items-center justify-center p-4",
       style: { background: "color-mix(in srgb, black 62%, transparent)", backdropFilter: "blur(2px)" },
       onMouseDown: (y) => {
-        y.currentTarget === y.target && m();
+        y.currentTarget === y.target && p();
       },
       children: [
         /* @__PURE__ */ a(
@@ -1360,26 +1597,26 @@ function qt({ profiles: t, crews: r, loading: i = !1, context: o, onRefresh: l, 
                 /* @__PURE__ */ a("div", { className: "min-w-0 flex-1", children: [
                   /* @__PURE__ */ e("h2", { id: "agent-crew-catalog-title", className: "text-base font-semibold", style: { color: "var(--text-strong, var(--text))" }, children: "Agents & crews" }),
                   /* @__PURE__ */ e("p", { className: "text-[11px] mt-0.5", style: { color: "var(--muted)" }, children: "KiroCrew agent templates define prompts/tools/approval policy. Global crew records route to one template plus workspace and memory." }),
-                  o && /* @__PURE__ */ a("p", { className: "text-[10px] mt-1", style: { color: "var(--accent)" }, children: [
+                  s && /* @__PURE__ */ a("p", { className: "text-[10px] mt-1", style: { color: "var(--accent)" }, children: [
                     "Pipeline context: ",
-                    o
+                    s
                   ] })
                 ] }),
                 l && /* @__PURE__ */ e(
                   "button",
                   {
                     onClick: l,
-                    disabled: i,
+                    disabled: o,
                     className: "text-[11px] px-2.5 py-1.5 rounded-md disabled:opacity-50",
                     style: { color: "var(--muted)", border: "1px solid var(--border)" },
-                    children: i ? "Refreshing…" : "Refresh"
+                    children: o ? "Refreshing…" : "Refresh"
                   }
                 ),
-                d && /* @__PURE__ */ e(
+                c && /* @__PURE__ */ e(
                   "button",
                   {
                     onClick: () => {
-                      x("crews"), q({ mode: "create" });
+                      v("crews"), D({ mode: "create" });
                     },
                     className: "text-[11px] px-2.5 py-1.5 rounded-md font-semibold",
                     style: { color: "var(--accent)", border: "1px solid color-mix(in srgb, var(--accent) 45%, var(--border))" },
@@ -1389,7 +1626,7 @@ function qt({ profiles: t, crews: r, loading: i = !1, context: o, onRefresh: l, 
                 /* @__PURE__ */ e(
                   "button",
                   {
-                    onClick: m,
+                    onClick: p,
                     "aria-label": "Close agents and crews",
                     className: "w-8 h-8 rounded-lg text-lg leading-none",
                     style: { color: "var(--muted)", border: "1px solid var(--border)" },
@@ -1397,24 +1634,24 @@ function qt({ profiles: t, crews: r, loading: i = !1, context: o, onRefresh: l, 
                   }
                 )
               ] }),
-              /* @__PURE__ */ e("div", { className: "px-5 pt-3 flex gap-1", style: { borderBottom: "1px solid var(--border)" }, children: [["agents", `Agent templates · ${t.length}`], ["crews", `Global crews · ${r.length}`]].map(([y, ee]) => /* @__PURE__ */ e(
+              /* @__PURE__ */ e("div", { className: "px-5 pt-3 flex gap-1", style: { borderBottom: "1px solid var(--border)" }, children: [["agents", `Agent templates · ${t.length}`], ["crews", `Global crews · ${r.length}`]].map(([y, J]) => /* @__PURE__ */ e(
                 "button",
                 {
-                  onClick: () => x(y),
+                  onClick: () => v(y),
                   className: "text-[12px] px-3 py-2 font-semibold",
-                  style: { color: T === y ? "var(--accent)" : "var(--muted)", borderBottom: `2px solid ${T === y ? "var(--accent)" : "transparent"}`, marginBottom: -1 },
-                  children: ee
+                  style: { color: g === y ? "var(--accent)" : "var(--muted)", borderBottom: `2px solid ${g === y ? "var(--accent)" : "transparent"}`, marginBottom: -1 },
+                  children: J
                 },
                 y
               )) }),
-              /* @__PURE__ */ e("div", { className: "flex min-h-0 flex-1", children: T === "agents" ? /* @__PURE__ */ a(He, { children: [
+              /* @__PURE__ */ e("div", { className: "flex min-h-0 flex-1", children: g === "agents" ? /* @__PURE__ */ a(ze, { children: [
                 /* @__PURE__ */ a("aside", { className: "w-60 flex-shrink-0 overflow-y-auto p-2", style: { borderRight: "1px solid var(--border)", background: "var(--bg-elevated, var(--bg))" }, children: [
                   t.map((y) => /* @__PURE__ */ a(
                     "button",
                     {
                       onClick: () => f(y.name),
                       className: "w-full text-left px-3 py-2 rounded-md mb-1",
-                      style: { background: y.name === j ? "color-mix(in srgb, var(--accent) 14%, transparent)" : "transparent", color: y.name === j ? "var(--accent)" : "var(--text)" },
+                      style: { background: y.name === E ? "color-mix(in srgb, var(--accent) 14%, transparent)" : "transparent", color: y.name === E ? "var(--accent)" : "var(--text)" },
                       children: [
                         /* @__PURE__ */ e("div", { className: "text-[12px] font-semibold truncate", children: y.name }),
                         /* @__PURE__ */ e("div", { className: "text-[9px] mt-0.5", style: { color: y.status === "loaded" ? "var(--ok)" : "var(--warn)" }, children: y.status === "loaded" ? "config loaded" : "config unavailable" })
@@ -1424,17 +1661,17 @@ function qt({ profiles: t, crews: r, loading: i = !1, context: o, onRefresh: l, 
                   )),
                   !t.length && /* @__PURE__ */ e("div", { className: "p-3 text-[11px] italic", style: { color: "var(--muted)" }, children: "No referenced profiles." })
                 ] }),
-                /* @__PURE__ */ e("main", { className: "flex-1 min-w-0 overflow-y-auto p-5", children: O ? /* @__PURE__ */ a("div", { className: "flex flex-col gap-4", children: [
+                /* @__PURE__ */ e("main", { className: "flex-1 min-w-0 overflow-y-auto p-5", children: q ? /* @__PURE__ */ a("div", { className: "flex flex-col gap-4", children: [
                   /* @__PURE__ */ a("div", { className: "flex items-start gap-3", children: [
                     /* @__PURE__ */ a("div", { className: "min-w-0 flex-1", children: [
-                      /* @__PURE__ */ e("div", { className: "text-lg font-semibold", style: { color: "var(--text-strong, var(--text))" }, children: O.name }),
-                      /* @__PURE__ */ e("div", { className: "text-[11px] mt-1", style: { color: "var(--muted)" }, children: O.description || "No description declared." })
+                      /* @__PURE__ */ e("div", { className: "text-lg font-semibold", style: { color: "var(--text-strong, var(--text))" }, children: q.name }),
+                      /* @__PURE__ */ e("div", { className: "text-[11px] mt-1", style: { color: "var(--muted)" }, children: q.description || "No description declared." })
                     ] }),
                     u && /* @__PURE__ */ e(
                       "button",
                       {
-                        onClick: () => u(O),
-                        disabled: O.status !== "loaded",
+                        onClick: () => u(q),
+                        disabled: q.status !== "loaded",
                         className: "text-[11px] px-3 py-1.5 rounded-md font-semibold disabled:opacity-40",
                         style: { background: "var(--accent)", color: "var(--bg)" },
                         children: "Use for this step"
@@ -1442,40 +1679,40 @@ function qt({ profiles: t, crews: r, loading: i = !1, context: o, onRefresh: l, 
                     )
                   ] }),
                   /* @__PURE__ */ a("div", { className: "rounded-lg p-3 flex flex-col gap-2", style: { border: "1px solid var(--border)", background: "var(--bg-elevated, var(--bg))" }, children: [
-                    /* @__PURE__ */ e(Me, { label: "Model", value: O.model || "auto / provider default" }),
-                    /* @__PURE__ */ e(Me, { label: "Config source", value: O.sourcePath }),
-                    /* @__PURE__ */ e(Me, { label: "Prompt", value: O.prompt ? O.prompt.startsWith("file://") ? O.prompt : "inline prompt" : void 0 })
+                    /* @__PURE__ */ e(Je, { label: "Model", value: q.model || "auto / provider default" }),
+                    /* @__PURE__ */ e(Je, { label: "Config source", value: q.sourcePath }),
+                    /* @__PURE__ */ e(Je, { label: "Prompt", value: q.prompt ? q.prompt.startsWith("file://") ? q.prompt : "inline prompt" : void 0 })
                   ] }),
                   /* @__PURE__ */ a("section", { children: [
                     /* @__PURE__ */ e("div", { className: "text-[10px] uppercase tracking-wider mb-1.5", style: { color: "var(--muted)" }, children: "Declared tools" }),
-                    /* @__PURE__ */ e(it, { values: O.tools })
+                    /* @__PURE__ */ e(Ot, { values: q.tools })
                   ] }),
                   /* @__PURE__ */ a("section", { children: [
                     /* @__PURE__ */ e("div", { className: "text-[10px] uppercase tracking-wider mb-1.5", style: { color: "var(--muted)" }, children: "Auto-approved tools" }),
-                    /* @__PURE__ */ e(it, { values: O.allowedTools })
+                    /* @__PURE__ */ e(Ot, { values: q.allowedTools })
                   ] }),
                   /* @__PURE__ */ a("section", { children: [
                     /* @__PURE__ */ e("div", { className: "text-[10px] uppercase tracking-wider mb-1.5", style: { color: "var(--muted)" }, children: "Resources / skills" }),
-                    /* @__PURE__ */ e(it, { values: O.resources })
+                    /* @__PURE__ */ e(Ot, { values: q.resources })
                   ] }),
                   /* @__PURE__ */ a("section", { children: [
                     /* @__PURE__ */ e("div", { className: "text-[10px] uppercase tracking-wider mb-1.5", style: { color: "var(--muted)" }, children: "MCP servers" }),
-                    /* @__PURE__ */ e(it, { values: O.mcpServers })
+                    /* @__PURE__ */ e(Ot, { values: q.mcpServers })
                   ] }),
-                  _ && /* @__PURE__ */ a("details", { className: "rounded-lg p-3", style: { border: "1px solid var(--border)" }, children: [
+                  C && /* @__PURE__ */ a("details", { className: "rounded-lg p-3", style: { border: "1px solid var(--border)" }, children: [
                     /* @__PURE__ */ e("summary", { className: "text-[11px] cursor-pointer", style: { color: "var(--accent)" }, children: "Prompt preview" }),
-                    /* @__PURE__ */ e("pre", { className: "mt-2 text-[10px] whitespace-pre-wrap break-words max-h-56 overflow-y-auto", style: { color: "var(--muted)" }, children: _ })
+                    /* @__PURE__ */ e("pre", { className: "mt-2 text-[10px] whitespace-pre-wrap break-words max-h-56 overflow-y-auto", style: { color: "var(--muted)" }, children: C })
                   ] }),
                   /* @__PURE__ */ e("div", { className: "text-[10px] rounded-md p-2.5", style: { color: "var(--muted)", background: "color-mix(in srgb, var(--warn) 7%, transparent)", border: "1px solid color-mix(in srgb, var(--warn) 28%, var(--border))" }, children: "These are declarations from disk, not proof that a live session loaded or applied them. Runtime handshake evidence remains authoritative for observed access." })
                 ] }) : /* @__PURE__ */ e("div", { className: "text-[12px] italic", style: { color: "var(--muted)" }, children: "Select an agent template." }) })
-              ] }) : /* @__PURE__ */ a(He, { children: [
+              ] }) : /* @__PURE__ */ a(ze, { children: [
                 /* @__PURE__ */ a("aside", { className: "w-60 flex-shrink-0 overflow-y-auto p-2", style: { borderRight: "1px solid var(--border)", background: "var(--bg-elevated, var(--bg))" }, children: [
                   r.map((y) => /* @__PURE__ */ a(
                     "button",
                     {
-                      onClick: () => V(y.name),
+                      onClick: () => x(y.name),
                       className: "w-full text-left px-3 py-2 rounded-md mb-1",
-                      style: { background: y.name === w ? "color-mix(in srgb, var(--accent) 14%, transparent)" : "transparent", color: y.name === w ? "var(--accent)" : "var(--text)" },
+                      style: { background: y.name === b ? "color-mix(in srgb, var(--accent) 14%, transparent)" : "transparent", color: y.name === b ? "var(--accent)" : "var(--text)" },
                       children: [
                         /* @__PURE__ */ e("div", { className: "text-[12px] font-semibold truncate", children: y.name }),
                         /* @__PURE__ */ a("div", { className: "text-[9px] mt-0.5 truncate", style: { color: "var(--muted)" }, children: [
@@ -1488,25 +1725,25 @@ function qt({ profiles: t, crews: r, loading: i = !1, context: o, onRefresh: l, 
                   )),
                   !r.length && /* @__PURE__ */ e("div", { className: "p-3 text-[11px] italic", style: { color: "var(--muted)" }, children: "No global crews found." })
                 ] }),
-                /* @__PURE__ */ e("main", { className: "flex-1 min-w-0 overflow-y-auto p-5", children: R ? /* @__PURE__ */ a("div", { className: "flex flex-col gap-4", children: [
+                /* @__PURE__ */ e("main", { className: "flex-1 min-w-0 overflow-y-auto p-5", children: A ? /* @__PURE__ */ a("div", { className: "flex flex-col gap-4", children: [
                   /* @__PURE__ */ a("div", { className: "flex items-start gap-3", children: [
                     /* @__PURE__ */ a("div", { className: "min-w-0 flex-1", children: [
-                      /* @__PURE__ */ e("div", { className: "text-lg font-semibold", style: { color: "var(--text-strong, var(--text))" }, children: R.name }),
-                      /* @__PURE__ */ e("div", { className: "text-[11px] mt-1", style: { color: "var(--muted)" }, children: R.description || "No description declared." })
+                      /* @__PURE__ */ e("div", { className: "text-lg font-semibold", style: { color: "var(--text-strong, var(--text))" }, children: A.name }),
+                      /* @__PURE__ */ e("div", { className: "text-[11px] mt-1", style: { color: "var(--muted)" }, children: A.description || "No description declared." })
                     ] }),
-                    d && /* @__PURE__ */ e(
+                    c && /* @__PURE__ */ e(
                       "button",
                       {
-                        onClick: () => q({ mode: "update", crew: R }),
+                        onClick: () => D({ mode: "update", crew: A }),
                         className: "text-[11px] px-3 py-1.5 rounded-md font-semibold",
                         style: { color: "var(--accent)", border: "1px solid var(--border)" },
                         children: "Edit route"
                       }
                     ),
-                    g && /* @__PURE__ */ e(
+                    i && /* @__PURE__ */ e(
                       "button",
                       {
-                        onClick: () => g(R),
+                        onClick: () => i(A),
                         className: "text-[11px] px-3 py-1.5 rounded-md font-semibold",
                         style: { background: "var(--accent)", color: "var(--bg)" },
                         children: "Route step here"
@@ -1514,26 +1751,26 @@ function qt({ profiles: t, crews: r, loading: i = !1, context: o, onRefresh: l, 
                     )
                   ] }),
                   /* @__PURE__ */ a("div", { className: "rounded-lg p-3 flex flex-col gap-2", style: { border: "1px solid var(--border)", background: "var(--bg-elevated, var(--bg))" }, children: [
-                    /* @__PURE__ */ e(Me, { label: "kiro_agent", value: R.kiroAgent }),
-                    /* @__PURE__ */ e(Me, { label: "Workspace", value: R.workspace }),
-                    /* @__PURE__ */ e(Me, { label: "Memory store", value: R.memoryStore }),
-                    /* @__PURE__ */ e(Me, { label: "Model override", value: R.model }),
-                    /* @__PURE__ */ e(Me, { label: "Source", value: R.source })
+                    /* @__PURE__ */ e(Je, { label: "kiro_agent", value: A.kiroAgent }),
+                    /* @__PURE__ */ e(Je, { label: "Workspace", value: A.workspace }),
+                    /* @__PURE__ */ e(Je, { label: "Memory store", value: A.memoryStore }),
+                    /* @__PURE__ */ e(Je, { label: "Model override", value: A.model }),
+                    /* @__PURE__ */ e(Je, { label: "Source", value: A.source })
                   ] }),
                   /* @__PURE__ */ a("section", { children: [
                     /* @__PURE__ */ e("div", { className: "text-[10px] uppercase tracking-wider mb-1.5", style: { color: "var(--muted)" }, children: "Selection triggers" }),
-                    /* @__PURE__ */ e(it, { values: R.triggers })
+                    /* @__PURE__ */ e(Ot, { values: A.triggers })
                   ] }),
-                  R.kiroAgent && /* @__PURE__ */ a("div", { className: "rounded-lg p-3", style: { border: "1px solid var(--border)" }, children: [
+                  A.kiroAgent && /* @__PURE__ */ a("div", { className: "rounded-lg p-3", style: { border: "1px solid var(--border)" }, children: [
                     /* @__PURE__ */ e("div", { className: "text-[10px] uppercase tracking-wider", style: { color: "var(--muted)" }, children: "Authority profile" }),
                     /* @__PURE__ */ a("div", { className: "flex items-center gap-2 mt-1.5", children: [
-                      /* @__PURE__ */ e("code", { className: "text-[12px]", style: { color: "var(--accent)" }, children: R.kiroAgent }),
-                      /* @__PURE__ */ e("span", { className: "text-[10px]", style: { color: (B == null ? void 0 : B.status) === "loaded" ? "var(--ok)" : "var(--warn)" }, children: (B == null ? void 0 : B.status) === "loaded" ? "loaded" : "unavailable" }),
+                      /* @__PURE__ */ e("code", { className: "text-[12px]", style: { color: "var(--accent)" }, children: A.kiroAgent }),
+                      /* @__PURE__ */ e("span", { className: "text-[10px]", style: { color: (I == null ? void 0 : I.status) === "loaded" ? "var(--ok)" : "var(--warn)" }, children: (I == null ? void 0 : I.status) === "loaded" ? "loaded" : "unavailable" }),
                       /* @__PURE__ */ e(
                         "button",
                         {
                           onClick: () => {
-                            f(R.kiroAgent || ""), x("agents");
+                            f(A.kiroAgent || ""), v("agents");
                           },
                           className: "ml-auto text-[10px] px-2 py-1 rounded",
                           style: { color: "var(--accent)", border: "1px solid var(--border)" },
@@ -1552,14 +1789,14 @@ function qt({ profiles: t, crews: r, loading: i = !1, context: o, onRefresh: l, 
             ]
           }
         ),
-        I && d && /* @__PURE__ */ e(
-          Wr,
+        k && c && /* @__PURE__ */ e(
+          ya,
           {
             profiles: t,
-            initial: I.mode === "update" ? I.crew : void 0,
-            onClose: () => q(null),
+            initial: k.mode === "update" ? k.crew : void 0,
+            onClose: () => D(null),
             onSave: async (y) => {
-              await d(y), V(y.name), q(null);
+              await c(y), x(y.name), D(null);
             }
           }
         )
@@ -1567,7 +1804,7 @@ function qt({ profiles: t, crews: r, loading: i = !1, context: o, onRefresh: l, 
     }
   );
 }
-const rr = Object.freeze([
+const Tr = Object.freeze([
   "pipeline-orchestrator",
   "intent-agent",
   "spec-agent",
@@ -1578,82 +1815,82 @@ const rr = Object.freeze([
   "dlcyolo-authoring",
   "dlcyolo-builder",
   "dlcyolo-coordinator"
-]), Pr = /^[A-Za-z0-9._-]{1,128}$/;
-function Te(t) {
-  return typeof t == "string" && Pr.test(t);
+]), ka = /^[A-Za-z0-9._-]{1,128}$/;
+function Ge(t) {
+  return typeof t == "string" && ka.test(t);
 }
-function Ee(t) {
+function Ke(t) {
   return typeof t == "string" && t.trim() ? t.trim() : void 0;
 }
-function Tt(t) {
+function Kt(t) {
   return Array.isArray(t) ? [...new Set(t.filter((r) => typeof r == "string" && r.trim()).map((r) => r.trim()))] : [];
 }
-function Fr(t) {
-  return !t || typeof t != "object" || Array.isArray(t) ? [] : Object.entries(t).filter(([r, i]) => Te(r) && i && typeof i == "object" && !Array.isArray(i)).map(([r, i]) => ({
+function wa(t) {
+  return !t || typeof t != "object" || Array.isArray(t) ? [] : Object.entries(t).filter(([r, o]) => Ge(r) && o && typeof o == "object" && !Array.isArray(o)).map(([r, o]) => ({
     name: r,
-    kiroAgent: Te(i.kiro_agent) ? i.kiro_agent : void 0,
-    workspace: Ee(i.workspace),
-    memoryStore: Ee(i.memory_store ?? i.memoryStore),
-    model: Ee(i.model),
-    description: Ee(i.description),
-    triggers: Tt(i.triggers),
-    source: Ee(i.source)
-  })).sort((r, i) => r.name.localeCompare(i.name));
+    kiroAgent: Ge(o.kiro_agent) ? o.kiro_agent : void 0,
+    workspace: Ke(o.workspace),
+    memoryStore: Ke(o.memory_store ?? o.memoryStore),
+    model: Ke(o.model),
+    description: Ke(o.description),
+    triggers: Kt(o.triggers),
+    source: Ke(o.source)
+  })).sort((r, o) => r.name.localeCompare(o.name));
 }
-function Hr(t, r = rr) {
-  const i = [];
+function Na(t, r = Tr) {
+  const o = [];
   for (const l of r)
-    Te(l) && !i.includes(l) && i.push(l);
-  const o = (Array.isArray(t) ? t : []).map((l) => l == null ? void 0 : l.kiroAgent).filter(Te).sort((l, m) => l.localeCompare(m));
-  for (const l of o)
-    i.includes(l) || i.push(l);
-  return i;
+    Ge(l) && !o.includes(l) && o.push(l);
+  const s = (Array.isArray(t) ? t : []).map((l) => l == null ? void 0 : l.kiroAgent).filter(Ge).sort((l, p) => l.localeCompare(p));
+  for (const l of s)
+    o.includes(l) || o.push(l);
+  return o;
 }
-function Ur(t, r, i = rr) {
-  if (!Te(t)) return;
-  if (i.includes(t)) return `~/.kiro/crew/apps/dlc-yolo/agents/${t}.json`;
-  const o = [...new Set(
-    (Array.isArray(r) ? r : []).filter((l) => (l == null ? void 0 : l.kiroAgent) === t).map((l) => l == null ? void 0 : l.source).filter(Te)
+function _a(t, r, o = Tr) {
+  if (!Ge(t)) return;
+  if (o.includes(t)) return `~/.kiro/crew/apps/dlc-yolo/agents/${t}.json`;
+  const s = [...new Set(
+    (Array.isArray(r) ? r : []).filter((l) => (l == null ? void 0 : l.kiroAgent) === t).map((l) => l == null ? void 0 : l.source).filter(Ge)
   )];
-  if (o.length === 1)
-    return `~/.kiro/agents/${o[0]}--${t}.json`;
+  if (s.length === 1)
+    return `~/.kiro/agents/${s[0]}--${t}.json`;
 }
-function It(t, r, i) {
-  const o = Te(r) ? r : "unknown", l = !!t && typeof t == "object" && !Array.isArray(t), m = l && Te(t.name) ? t.name : o, u = l && t.mcpServers && typeof t.mcpServers == "object" ? Object.keys(t.mcpServers).filter(Te) : [];
+function Qt(t, r, o) {
+  const s = Ge(r) ? r : "unknown", l = !!t && typeof t == "object" && !Array.isArray(t), p = l && Ge(t.name) ? t.name : s, u = l && t.mcpServers && typeof t.mcpServers == "object" ? Object.keys(t.mcpServers).filter(Ge) : [];
   return {
-    name: m,
-    description: l ? Ee(t.description) : void 0,
-    prompt: l ? Ee(t.prompt) : void 0,
-    model: l ? Ee(t.model) : void 0,
-    tools: l ? Tt(t.tools) : [],
-    allowedTools: l ? Tt(t.allowedTools) : [],
-    resources: l ? Tt(t.resources) : [],
+    name: p,
+    description: l ? Ke(t.description) : void 0,
+    prompt: l ? Ke(t.prompt) : void 0,
+    model: l ? Ke(t.model) : void 0,
+    tools: l ? Kt(t.tools) : [],
+    allowedTools: l ? Kt(t.allowedTools) : [],
+    resources: l ? Kt(t.resources) : [],
     mcpServers: u,
     status: l ? "loaded" : "unavailable",
-    sourcePath: Ee(i)
+    sourcePath: Ke(o)
   };
 }
-function Kr(t) {
+function Ca(t) {
   const r = /^dlcyolo-(readonly|authoring|builder|coordinator)$/.exec(t || "");
   return r == null ? void 0 : r[1];
 }
-function Vr(t, r) {
-  if (!r || !Te(r.name)) return { ...t };
-  const i = Kr(r.name);
+function Sa(t, r) {
+  if (!r || !Ge(r.name)) return { ...t };
+  const o = Ca(r.name);
   return {
     ...t,
     name: r.name,
     tools: [...r.tools || []],
     model: r.model || "auto",
-    ...i ? { capability: i } : {}
+    ...o ? { capability: o } : {}
   };
 }
-let Pe = Mt;
-const Yt = (t) => ({
+let Qe = er;
+const gr = (t) => ({
   quick: { max_child_cards: 0, effort_ceiling: 3, max_feature_size: "S", addenda: "none" },
   standard: { max_child_cards: 3, effort_ceiling: 15, max_feature_size: "L", addenda: "obvious" },
   deep: { max_child_cards: 8, effort_ceiling: 40, max_feature_size: "XL", addenda: "proactive" }
-})[t], At = [
+})[t], Vt = [
   { id: "investigate", name: "Investigate", type: "agent", agent: { name: "spec-agent", role: "Classify the issue: summarize, propose labels, write a triage note (human-aided)" } },
   { id: "requirements", name: "Requirements", type: "agent", agent: { name: "spec-agent", role: "Produce requirements.md" } },
   { id: "gate-spec", name: "Gate: Spec", type: "gate" },
@@ -1664,11 +1901,11 @@ const Yt = (t) => ({
   { id: "review", name: "Review", type: "agent", agent: { name: "review-agent", role: "Severity-ranked review" } },
   { id: "gate-review", name: "Gate: Review", type: "gate" },
   { id: "pr", name: "PR", type: "agent", agent: { name: "orchestrator", role: "Open/update PR" } }
-], ar = /* @__PURE__ */ new Set([
+], Rr = /* @__PURE__ */ new Set([
   "example-org/web-app",
   "example-org/dashboard",
   "example-org/api-core"
-]), Yr = {
+]), $a = {
   intake: "orchestrator",
   requirements: "spec-agent",
   "gate-spec": "human",
@@ -1680,131 +1917,131 @@ const Yt = (t) => ({
   "gate-review": "human",
   pr: "orchestrator",
   done: "done"
-}, Fe = ["manual", "assisted", "autonomous"], Je = ["quick", "standard", "deep"], ct = { trust: "assisted", depth: "standard" }, Rt = {
+}, st = ["manual", "assisted", "autonomous"], xt = ["quick", "standard", "deep"], Lt = { trust: "assisted", depth: "standard" }, Xt = {
   manual: "var(--info)",
   assisted: "var(--accent)",
   autonomous: "var(--danger)"
-}, $t = {
+}, Yt = {
   quick: "var(--ok)",
   standard: "var(--muted)",
   deep: "var(--warn)"
 };
-function Ce({ color: t, children: r, title: i, onClick: o, active: l }) {
+function Be({ color: t, children: r, title: o, onClick: s, active: l }) {
   return /* @__PURE__ */ e(
     "button",
     {
       type: "button",
-      title: i,
-      onClick: o,
+      title: o,
+      onClick: s,
       className: "text-[10px] leading-none px-1.5 py-1 rounded font-semibold tracking-wide transition-all",
       style: {
         color: t,
         background: `color-mix(in srgb, ${t} 14%, transparent)`,
         boxShadow: l ? `inset 0 0 0 1px color-mix(in srgb, ${t} 55%, transparent)` : "none",
-        opacity: o && !l ? 0.85 : 1,
-        cursor: o ? "pointer" : "default"
+        opacity: s && !l ? 0.85 : 1,
+        cursor: s ? "pointer" : "default"
       },
       children: r
     }
   );
 }
-const Nt = ["#e74c3c", "#3498db", "#f39c12", "#9b59b6", "#1abc9c", "#e67e22", "#2ecc71", "#e84393"];
-function Xr({ steps: t, cardsByStage: r, onNodeClick: i }) {
-  const o = fe(null), l = fe(null), m = fe(0), u = fe(null), g = fe(t), d = fe(r), T = fe([]);
-  g.current = t, d.current = r;
-  const x = 3, j = 116, f = j / x, w = f - 26, [V, I] = N(880);
-  _e(() => {
-    const R = l.current;
-    if (!R) return;
-    const B = new ResizeObserver((_) => {
-      const M = Math.max(360, Math.floor(_[0].contentRect.width));
-      I(M);
+const Ft = ["#e74c3c", "#3498db", "#f39c12", "#9b59b6", "#1abc9c", "#e67e22", "#2ecc71", "#e84393"];
+function Ta({ steps: t, cardsByStage: r, onNodeClick: o }) {
+  const s = Ae(null), l = Ae(null), p = Ae(0), u = Ae(null), i = Ae(t), c = Ae(r), g = Ae([]);
+  i.current = t, c.current = r;
+  const v = 3, E = 116, f = E / v, b = f - 26, [x, k] = w(880);
+  Ee(() => {
+    const A = l.current;
+    if (!A) return;
+    const I = new ResizeObserver((C) => {
+      const B = Math.max(360, Math.floor(C[0].contentRect.width));
+      k(B);
     });
-    return B.observe(R), () => B.disconnect();
+    return I.observe(A), () => I.disconnect();
   }, []);
-  const q = (R) => R.type === "gate" || R.id.startsWith("gate-");
-  return _e(() => {
-    const R = o.current;
-    if (!R) return;
-    const B = Math.floor(V / x);
-    R.width = B * x, R.height = f * x;
-    const _ = R.getContext("2d");
-    if (!_) return;
-    const M = (ee, S, se, ie, ne) => {
-      _.fillStyle = ne, _.fillRect(ee * x, S * x, se * x, ie * x);
-    }, K = () => {
-      const ee = m.current, S = g.current, se = d.current, ie = Math.max(1, S.length);
-      Math.max(1, ...S.map((Z) => {
-        var D;
-        return ((D = se[Z.id]) == null ? void 0 : D.length) || 0;
-      })), M(0, 0, B, w, "#0f172a");
-      for (let Z = 0; Z < B / 5; Z++) {
-        const D = Z * 37 % B, X = Z * 13 % (w - 4);
-        Math.sin(ee * 0.03 + Z * 2.1) > 0.35 && M(D, X, 1, 1, "#e2e8f0");
+  const D = (A) => A.type === "gate" || A.id.startsWith("gate-");
+  return Ee(() => {
+    const A = s.current;
+    if (!A) return;
+    const I = Math.floor(x / v);
+    A.width = I * v, A.height = f * v;
+    const C = A.getContext("2d");
+    if (!C) return;
+    const B = (J, S, he, ye, ie) => {
+      C.fillStyle = ie, C.fillRect(J * v, S * v, he * v, ye * v);
+    }, X = () => {
+      const J = p.current, S = i.current, he = c.current, ye = Math.max(1, S.length);
+      Math.max(1, ...S.map((Q) => {
+        var z;
+        return ((z = he[Q.id]) == null ? void 0 : z.length) || 0;
+      })), B(0, 0, I, b, "#0f172a");
+      for (let Q = 0; Q < I / 5; Q++) {
+        const z = Q * 37 % I, ee = Q * 13 % (b - 4);
+        Math.sin(J * 0.03 + Q * 2.1) > 0.35 && B(z, ee, 1, 1, "#e2e8f0");
       }
-      M(B - 26, 8, 10, 10, "#fde68a"), M(B - 24, 7, 8, 8, "#0f172a");
-      for (let Z = 0; Z < B; Z += 16)
-        for (let D = w; D < f; D += 16)
-          M(Z, D, 16, 16, Z / 16 + D / 16 & 1 ? "#33261a" : "#2a1f14");
-      M(0, w - 2, B, 2, "#4a3520");
-      const ne = B / ie, oe = [];
-      for (let Z = 0; Z < S.length; Z++) {
-        const D = S[Z], X = Math.round(ne * (Z + 0.5)), ue = (se[D.id] || []).length, ve = ue > 0, h = Nt[Z % Nt.length], P = q(D), U = w - 2;
-        if (oe.push({ x: X - Math.floor(ne / 2), w: Math.floor(ne), id: D.id }), Z < S.length - 1) {
-          const W = Math.round(ne * (Z + 1.5));
-          for (let de = X + 8; de < W - 8; de += 4) M(de, w - 1, 2, 1, "#4a3520");
+      B(I - 26, 8, 10, 10, "#fde68a"), B(I - 24, 7, 8, 8, "#0f172a");
+      for (let Q = 0; Q < I; Q += 16)
+        for (let z = b; z < f; z += 16)
+          B(Q, z, 16, 16, Q / 16 + z / 16 & 1 ? "#33261a" : "#2a1f14");
+      B(0, b - 2, I, 2, "#4a3520");
+      const ie = I / ye, me = [];
+      for (let Q = 0; Q < S.length; Q++) {
+        const z = S[Q], ee = Math.round(ie * (Q + 0.5)), Te = (he[z.id] || []).length, _e = Te > 0, _ = Ft[Q % Ft.length], U = D(z), te = b - 2;
+        if (me.push({ x: ee - Math.floor(ie / 2), w: Math.floor(ie), id: z.id }), Q < S.length - 1) {
+          const oe = Math.round(ie * (Q + 1.5));
+          for (let Z = ee + 8; Z < oe - 8; Z += 4) B(Z, b - 1, 2, 1, "#4a3520");
         }
-        if (P) {
-          const W = U - 20, de = ve ? "#f39c12" : "#3a3222";
-          M(X - 3, W, 6, 20, ve ? "#5c4a2a" : "#2a2418");
-          for (let $ = 0; $ < 5; $++) M(X - $, W - 5 + $, $ * 2 + 1, 1, de);
-          for (let $ = 0; $ < 5; $++) M(X - (4 - $), W - $, (4 - $) * 2 + 1, 1, de);
-          if (ve) {
-            const $ = (Math.sin(ee * 0.08) + 1) / 2;
-            _.globalAlpha = 0.35 + $ * 0.4, M(X - 1, W - 6, 2, 2, "#ffd27a"), _.globalAlpha = 1;
+        if (U) {
+          const oe = te - 20, Z = _e ? "#f39c12" : "#3a3222";
+          B(ee - 3, oe, 6, 20, _e ? "#5c4a2a" : "#2a2418");
+          for (let F = 0; F < 5; F++) B(ee - F, oe - 5 + F, F * 2 + 1, 1, Z);
+          for (let F = 0; F < 5; F++) B(ee - (4 - F), oe - F, (4 - F) * 2 + 1, 1, Z);
+          if (_e) {
+            const F = (Math.sin(J * 0.08) + 1) / 2;
+            C.globalAlpha = 0.35 + F * 0.4, B(ee - 1, oe - 6, 2, 2, "#ffd27a"), C.globalAlpha = 1;
           }
         } else {
-          const W = U - 14;
-          if (M(X - 10, W, 20, 3, "#7a5c47"), M(X - 10, W - 1, 20, 1, h), M(X - 9, W + 3, 2, 8, "#5c4033"), M(X + 7, W + 3, 2, 8, "#5c4033"), M(X - 5, W - 9, 10, 9, "#333"), M(X - 4, W - 8, 8, 7, ve ? "#0a2a0a" : "#1a1a1a"), ve)
-            for (let de = 0; de < 3; de++) {
-              const $ = 2 + (ee + de * 7) % 5;
-              M(X - 3, W - 7 + de * 2, $, 0.8, "#33ff33");
+          const oe = te - 14;
+          if (B(ee - 10, oe, 20, 3, "#7a5c47"), B(ee - 10, oe - 1, 20, 1, _), B(ee - 9, oe + 3, 2, 8, "#5c4033"), B(ee + 7, oe + 3, 2, 8, "#5c4033"), B(ee - 5, oe - 9, 10, 9, "#333"), B(ee - 4, oe - 8, 8, 7, _e ? "#0a2a0a" : "#1a1a1a"), _e)
+            for (let Z = 0; Z < 3; Z++) {
+              const F = 2 + (J + Z * 7) % 5;
+              B(ee - 3, oe - 7 + Z * 2, F, 0.8, "#33ff33");
             }
         }
-        const le = Math.min(ue, 5);
-        for (let W = 0; W < le; W++) {
-          const de = le > 1 ? (W - (le - 1) / 2) * 8 : 0, $ = Math.round(X + de) - 3, C = U - (P ? 2 : 4), v = Nt[(Z + W) % Nt.length], re = Math.sin(ee * 0.08 + Z + W) > 0 ? 1 : 0;
-          _.fillStyle = "rgba(0,0,0,0.18)", _.fillRect($ * x, (C + 8) * x, 6 * x, x), M($, C + re, 6, 6, v), M($ + 1, C - 4 + re, 4, 4, "#fdd"), M($ + 1, C - 5 + re, 4, 1, "#333"), (ee + Z * 9 + W * 5) % 120 >= 3 && (M($ + 2, C - 3 + re, 1, 1, "#333"), M($ + 4, C - 3 + re, 1, 1, "#333")), M($ + 1, C + 6, 1, 2, v), M($ + 4, C + 6, 1, 2, v);
+        const we = Math.min(Te, 5);
+        for (let oe = 0; oe < we; oe++) {
+          const Z = we > 1 ? (oe - (we - 1) / 2) * 8 : 0, F = Math.round(ee + Z) - 3, ve = te - (U ? 2 : 4), O = Ft[(Q + oe) % Ft.length], ce = Math.sin(J * 0.08 + Q + oe) > 0 ? 1 : 0;
+          C.fillStyle = "rgba(0,0,0,0.18)", C.fillRect(F * v, (ve + 8) * v, 6 * v, v), B(F, ve + ce, 6, 6, O), B(F + 1, ve - 4 + ce, 4, 4, "#fdd"), B(F + 1, ve - 5 + ce, 4, 1, "#333"), (J + Q * 9 + oe * 5) % 120 >= 3 && (B(F + 2, ve - 3 + ce, 1, 1, "#333"), B(F + 4, ve - 3 + ce, 1, 1, "#333")), B(F + 1, ve + 6, 1, 2, O), B(F + 4, ve + 6, 1, 2, O);
         }
-        ue > 5 && (_.fillStyle = h, _.font = `${3 * x}px monospace`, _.fillText(`+${ue - 5}`, (X + 10) * x, (U - 6) * x)), ue > 0 && (_.fillStyle = h, _.fillRect((X + 6) * x, (U - 30) * x, 9 * x, 9 * x), _.fillStyle = "#0f172a", _.font = `bold ${5 * x}px monospace`, _.textAlign = "center", _.fillText(String(ue), (X + 10.5) * x, (U - 24) * x), _.textAlign = "left"), _.fillStyle = ve ? "#e2e8f0" : "#6b7280", _.font = `${3.4 * x}px monospace`, _.textAlign = "center";
-        const ke = D.name.length > 12 ? D.name.slice(0, 11) + "…" : D.name;
-        _.fillText(ke, X * x, (f - 4) * x), _.textAlign = "left";
+        Te > 5 && (C.fillStyle = _, C.font = `${3 * v}px monospace`, C.fillText(`+${Te - 5}`, (ee + 10) * v, (te - 6) * v)), Te > 0 && (C.fillStyle = _, C.fillRect((ee + 6) * v, (te - 30) * v, 9 * v, 9 * v), C.fillStyle = "#0f172a", C.font = `bold ${5 * v}px monospace`, C.textAlign = "center", C.fillText(String(Te), (ee + 10.5) * v, (te - 24) * v), C.textAlign = "left"), C.fillStyle = _e ? "#e2e8f0" : "#6b7280", C.font = `${3.4 * v}px monospace`, C.textAlign = "center";
+        const Oe = z.name.length > 12 ? z.name.slice(0, 11) + "…" : z.name;
+        C.fillText(Oe, ee * v, (f - 4) * v), C.textAlign = "left";
       }
-      T.current = oe;
-      const be = S.reduce((Z, D) => {
-        var X;
-        return Z + (((X = se[D.id]) == null ? void 0 : X.length) || 0);
+      g.current = me;
+      const Se = S.reduce((Q, z) => {
+        var ee;
+        return Q + (((ee = he[z.id]) == null ? void 0 : ee.length) || 0);
       }, 0);
-      _.fillStyle = "#f90", _.font = `bold ${3.6 * x}px monospace`, _.fillText(`${be} card${be !== 1 ? "s" : ""} · ${ie} milestone${ie !== 1 ? "s" : ""}`, 4 * x, 8 * x);
+      C.fillStyle = "#f90", C.font = `bold ${3.6 * v}px monospace`, C.fillText(`${Se} card${Se !== 1 ? "s" : ""} · ${ye} milestone${ye !== 1 ? "s" : ""}`, 4 * v, 8 * v);
     }, y = () => {
-      m.current++, K(), u.current = requestAnimationFrame(y);
+      p.current++, X(), u.current = requestAnimationFrame(y);
     };
     return u.current = requestAnimationFrame(y), () => {
       u.current && cancelAnimationFrame(u.current);
     };
-  }, [V, f, w]), /* @__PURE__ */ e("div", { ref: l, className: "w-full mb-5", children: /* @__PURE__ */ e(
+  }, [x, f, b]), /* @__PURE__ */ e("div", { ref: l, className: "w-full mb-5", children: /* @__PURE__ */ e(
     "canvas",
     {
-      ref: o,
-      onClick: (R) => {
-        const B = o.current;
-        if (!B) return;
-        const _ = B.getBoundingClientRect(), M = (R.clientX - _.left) / _.width * (B.width / x), K = T.current.find((y) => M >= y.x && M <= y.x + y.w);
-        K && i(K.id);
+      ref: s,
+      onClick: (A) => {
+        const I = s.current;
+        if (!I) return;
+        const C = I.getBoundingClientRect(), B = (A.clientX - C.left) / C.width * (I.width / v), X = g.current.find((y) => B >= y.x && B <= y.x + y.w);
+        X && o(X.id);
       },
       style: {
         width: "100%",
-        height: j + "px",
+        height: E + "px",
         imageRendering: "pixelated",
         borderRadius: 8,
         border: "1px solid var(--border, #333)",
@@ -1814,7 +2051,7 @@ function Xr({ steps: t, cardsByStage: r, onNodeClick: i }) {
     }
   ) });
 }
-function Zr({ active: t, onChange: r, counts: i }) {
+function Ra({ active: t, onChange: r, counts: o }) {
   return /* @__PURE__ */ e(
     "div",
     {
@@ -1824,18 +2061,17 @@ function Zr({ active: t, onChange: r, counts: i }) {
         { id: "pipeline", label: "Pipeline" },
         { id: "workspace", label: "Workspace" },
         { id: "crew", label: "Crew" },
-        { id: "status", label: "Status" },
-        { id: "backlog", label: "Backlog" }
+        { id: "status", label: "Status" }
       ].map((l) => {
-        const m = t === l.id, u = i[l.id];
+        const p = t === l.id, u = o[l.id];
         return /* @__PURE__ */ a(
           "button",
           {
             onClick: () => r(l.id),
             className: "px-3 py-1.5 text-xs font-medium rounded-md transition-all duration-150 flex items-center gap-1.5",
             style: {
-              background: m ? "var(--accent)" : "transparent",
-              color: m ? "var(--bg)" : "var(--muted)"
+              background: p ? "var(--accent)" : "transparent",
+              color: p ? "var(--bg)" : "var(--muted)"
             },
             children: [
               l.label,
@@ -1843,7 +2079,7 @@ function Zr({ active: t, onChange: r, counts: i }) {
                 "span",
                 {
                   className: "text-[10px] px-1 rounded-full font-semibold",
-                  style: { background: m ? "color-mix(in srgb, var(--bg) 25%, transparent)" : "var(--bg-hover, var(--border))", color: m ? "var(--bg)" : "var(--muted)" },
+                  style: { background: p ? "color-mix(in srgb, var(--bg) 25%, transparent)" : "var(--bg-hover, var(--border))", color: p ? "var(--bg)" : "var(--muted)" },
                   children: u
                 }
               )
@@ -1855,50 +2091,50 @@ function Zr({ active: t, onChange: r, counts: i }) {
     }
   );
 }
-function Ne({ title: t, children: r }) {
+function Me({ title: t, children: r }) {
   return /* @__PURE__ */ a("section", { className: "rounded-lg p-3", style: { background: "var(--bg, transparent)", border: "1px solid var(--border)" }, children: [
     /* @__PURE__ */ e("h3", { className: "text-[10px] uppercase tracking-wider font-semibold mb-2", style: { color: "var(--muted)" }, children: t }),
     r
   ] });
 }
-function qe({ rows: t, empty: r = "None recorded" }) {
-  return t.length ? /* @__PURE__ */ e("div", { className: "flex flex-col gap-1.5", children: t.map((i) => /* @__PURE__ */ a("div", { className: "rounded-md px-2 py-1.5", style: { background: "var(--bg-elevated, var(--card))", border: "1px solid color-mix(in srgb, var(--border) 78%, transparent)" }, children: [
+function et({ rows: t, empty: r = "None recorded" }) {
+  return t.length ? /* @__PURE__ */ e("div", { className: "flex flex-col gap-1.5", children: t.map((o) => /* @__PURE__ */ a("div", { className: "rounded-md px-2 py-1.5", style: { background: "var(--bg-elevated, var(--card))", border: "1px solid color-mix(in srgb, var(--border) 78%, transparent)" }, children: [
     /* @__PURE__ */ a("div", { className: "flex items-start gap-2 text-[11px]", children: [
-      /* @__PURE__ */ e("span", { className: "font-medium min-w-0 break-words", style: { color: "var(--text)" }, children: i.title }),
+      /* @__PURE__ */ e("span", { className: "font-medium min-w-0 break-words", style: { color: "var(--text)" }, children: o.title }),
       /* @__PURE__ */ a("span", { className: "ml-auto flex gap-1 flex-shrink-0", children: [
-        i.level && /* @__PURE__ */ e("span", { className: "px-1 py-0.5 rounded text-[9px] font-semibold", style: { color: i.level === "required" ? "var(--warn)" : "var(--muted)", background: "var(--bg-hover, var(--border))" }, children: i.level }),
-        i.status && /* @__PURE__ */ e("span", { className: "px-1 py-0.5 rounded text-[9px] font-semibold", style: { color: /fail|block|open|pending/i.test(i.status) ? "var(--warn)" : "var(--ok)", background: "var(--bg-hover, var(--border))" }, children: i.status })
+        o.level && /* @__PURE__ */ e("span", { className: "px-1 py-0.5 rounded text-[9px] font-semibold", style: { color: o.level === "required" ? "var(--warn)" : "var(--muted)", background: "var(--bg-hover, var(--border))" }, children: o.level }),
+        o.status && /* @__PURE__ */ e("span", { className: "px-1 py-0.5 rounded text-[9px] font-semibold", style: { color: /fail|block|open|pending/i.test(o.status) ? "var(--warn)" : "var(--ok)", background: "var(--bg-hover, var(--border))" }, children: o.status })
       ] })
     ] }),
-    i.detail && /* @__PURE__ */ e("div", { className: "mt-0.5 text-[10px] break-words", style: { color: "var(--muted)" }, children: i.detail }),
-    i.ref && (i.url ? /* @__PURE__ */ e("a", { href: i.url, target: "_blank", rel: "noreferrer", className: "mt-1 block text-[10px] underline break-all", style: { color: "var(--accent)" }, children: i.ref }) : /* @__PURE__ */ e("code", { className: "mt-1 block text-[10px] break-all", style: { color: "var(--muted)" }, children: i.ref }))
-  ] }, i.key)) }) : /* @__PURE__ */ e("div", { className: "text-[11px]", style: { color: "var(--muted)" }, children: r });
+    o.detail && /* @__PURE__ */ e("div", { className: "mt-0.5 text-[10px] break-words", style: { color: "var(--muted)" }, children: o.detail }),
+    o.ref && (o.url ? /* @__PURE__ */ e("a", { href: o.url, target: "_blank", rel: "noreferrer", className: "mt-1 block text-[10px] underline break-all", style: { color: "var(--accent)" }, children: o.ref }) : /* @__PURE__ */ e("code", { className: "mt-1 block text-[10px] break-all", style: { color: "var(--muted)" }, children: o.ref }))
+  ] }, o.key)) }) : /* @__PURE__ */ e("div", { className: "text-[11px]", style: { color: "var(--muted)" }, children: r });
 }
-function ge({ label: t, value: r, status: i }) {
+function Ne({ label: t, value: r, status: o }) {
   return /* @__PURE__ */ a("div", { className: "min-w-0", children: [
     /* @__PURE__ */ e("div", { className: "text-[9px] uppercase tracking-wide", style: { color: "var(--muted)" }, children: t }),
-    /* @__PURE__ */ a("div", { className: "text-[11px] mt-0.5 break-words", style: { color: De(r) === "unobservable" ? "var(--warn)" : "var(--text)" }, children: [
-      De(r),
-      i && /* @__PURE__ */ a("span", { className: "ml-1 text-[9px]", style: { color: "var(--muted)" }, children: [
+    /* @__PURE__ */ a("div", { className: "text-[11px] mt-0.5 break-words", style: { color: tt(r) === "unobservable" ? "var(--warn)" : "var(--text)" }, children: [
+      tt(r),
+      o && /* @__PURE__ */ a("span", { className: "ml-1 text-[9px]", style: { color: "var(--muted)" }, children: [
         "(",
-        De(i),
+        tt(o),
         ")"
       ] })
     ] })
   ] });
 }
-function Jr({ card: t, inspection: r, producerSession: i, onClose: o, onOpenProducer: l, onApprove: m, onReject: u, onInterject: g }) {
-  const d = r.routing, T = () => {
-    const x = window.prompt(`Why reject revision ${r.revision ?? "unknown"}?`);
-    x != null && x.trim() && u && (u(x.trim()), o());
+function Aa({ card: t, inspection: r, producerSession: o, onClose: s, onOpenProducer: l, onApprove: p, onReject: u, onInterject: i }) {
+  const c = r.routing, g = () => {
+    const v = window.prompt(`Why reject revision ${r.revision ?? "unknown"}?`);
+    v != null && v.trim() && u && (u(v.trim()), s());
   };
   return /* @__PURE__ */ e(
     "div",
     {
       className: "fixed inset-0 z-[70] flex items-center justify-center p-4",
       style: { background: "rgba(0,0,0,0.58)", backdropFilter: "blur(4px)" },
-      onMouseDown: (x) => {
-        x.currentTarget === x.target && o();
+      onMouseDown: (v) => {
+        v.currentTarget === v.target && s();
       },
       children: /* @__PURE__ */ a(
         "section",
@@ -1931,7 +2167,7 @@ function Jr({ card: t, inspection: r, producerSession: i, onClose: o, onOpenProd
               /* @__PURE__ */ e(
                 "button",
                 {
-                  onClick: o,
+                  onClick: s,
                   "aria-label": "Close gate inspection",
                   className: "w-8 h-8 rounded-lg flex items-center justify-center text-lg leading-none",
                   style: { color: "var(--muted)", background: "var(--bg-hover, transparent)", border: "1px solid var(--border)" },
@@ -1942,7 +2178,7 @@ function Jr({ card: t, inspection: r, producerSession: i, onClose: o, onOpenProd
             /* @__PURE__ */ a("div", { className: "overflow-y-auto p-4 flex flex-col gap-3", children: [
               /* @__PURE__ */ a("div", { className: "rounded-lg p-3", style: { background: r.ready ? "color-mix(in srgb, var(--ok) 8%, transparent)" : "color-mix(in srgb, var(--warn) 8%, transparent)", border: `1px solid color-mix(in srgb, ${r.ready ? "var(--ok)" : "var(--warn)"} 38%, var(--border))` }, children: [
                 /* @__PURE__ */ e("div", { className: "text-[11px] font-semibold", style: { color: r.ready ? "var(--ok)" : "var(--warn)" }, children: r.ready ? "Bundle is structurally ready for review" : `${r.missing.length} readiness gap${r.missing.length === 1 ? "" : "s"}` }),
-                !r.ready && /* @__PURE__ */ e("ul", { className: "mt-1.5 pl-4 list-disc text-[10px] space-y-0.5", style: { color: "var(--muted)" }, children: r.missing.map((x) => /* @__PURE__ */ e("li", { children: x }, x)) }),
+                !r.ready && /* @__PURE__ */ e("ul", { className: "mt-1.5 pl-4 list-disc text-[10px] space-y-0.5", style: { color: "var(--muted)" }, children: r.missing.map((v) => /* @__PURE__ */ e("li", { children: v }, v)) }),
                 r.preferredShortfalls.length > 0 && /* @__PURE__ */ a("div", { className: "mt-2 text-[10px]", style: { color: "var(--muted)" }, children: [
                   "Preferred shortfalls (non-blocking): ",
                   r.preferredShortfalls.join(" · ")
@@ -1950,86 +2186,86 @@ function Jr({ card: t, inspection: r, producerSession: i, onClose: o, onOpenProd
                 /* @__PURE__ */ e("div", { className: "text-[9px] mt-2", style: { color: "var(--muted)" }, children: "Inspection is read-only; deterministic runtime remains authoritative for movement and readiness enforcement." })
               ] }),
               /* @__PURE__ */ a("div", { className: "grid grid-cols-1 md:grid-cols-2 gap-3", children: [
-                /* @__PURE__ */ a(Ne, { title: "Result summary", children: [
+                /* @__PURE__ */ a(Me, { title: "Result summary", children: [
                   /* @__PURE__ */ e("div", { className: "text-[12px] leading-relaxed whitespace-pre-wrap", style: { color: r.summary ? "var(--text)" : "var(--warn)" }, children: r.summary || "No result summary was published." }),
                   /* @__PURE__ */ a("div", { className: "grid grid-cols-2 gap-2 mt-3", children: [
-                    /* @__PURE__ */ e(ge, { label: "Envelope", value: r.envelopeId }),
-                    /* @__PURE__ */ e(ge, { label: "Created", value: r.createdAt })
+                    /* @__PURE__ */ e(Ne, { label: "Envelope", value: r.envelopeId }),
+                    /* @__PURE__ */ e(Ne, { label: "Created", value: r.createdAt })
                   ] })
                 ] }),
-                /* @__PURE__ */ e(Ne, { title: "Changes since prior revision", children: /* @__PURE__ */ e(qe, { rows: r.changes, empty: "No revision delta recorded" }) })
+                /* @__PURE__ */ e(Me, { title: "Changes since prior revision", children: /* @__PURE__ */ e(et, { rows: r.changes, empty: "No revision delta recorded" }) })
               ] }),
-              /* @__PURE__ */ e(Ne, { title: "Artifacts and evidence references", children: r.artifacts.length ? /* @__PURE__ */ e("div", { className: "grid grid-cols-1 md:grid-cols-2 gap-2", children: r.artifacts.map((x) => /* @__PURE__ */ a("div", { className: "rounded-md p-2", style: { background: "var(--bg-elevated, var(--card))", border: "1px solid var(--border)" }, children: [
+              /* @__PURE__ */ e(Me, { title: "Artifacts and evidence references", children: r.artifacts.length ? /* @__PURE__ */ e("div", { className: "grid grid-cols-1 md:grid-cols-2 gap-2", children: r.artifacts.map((v) => /* @__PURE__ */ a("div", { className: "rounded-md p-2", style: { background: "var(--bg-elevated, var(--card))", border: "1px solid var(--border)" }, children: [
                 /* @__PURE__ */ a("div", { className: "flex gap-2 text-[11px]", children: [
-                  /* @__PURE__ */ e("span", { className: "font-medium", style: { color: "var(--text)" }, children: x.label }),
-                  x.kind && /* @__PURE__ */ e("span", { className: "ml-auto text-[9px]", style: { color: "var(--muted)" }, children: x.kind })
+                  /* @__PURE__ */ e("span", { className: "font-medium", style: { color: "var(--text)" }, children: v.label }),
+                  v.kind && /* @__PURE__ */ e("span", { className: "ml-auto text-[9px]", style: { color: "var(--muted)" }, children: v.kind })
                 ] }),
-                x.preview && /* @__PURE__ */ e("div", { className: "mt-1 text-[10px] leading-relaxed", style: { color: "var(--muted)" }, children: x.preview }),
-                x.ref && (x.url ? /* @__PURE__ */ e("a", { href: x.url, target: "_blank", rel: "noreferrer", className: "mt-1 block text-[10px] underline break-all", style: { color: "var(--accent)" }, children: x.ref }) : /* @__PURE__ */ e("code", { className: "mt-1 block text-[10px] break-all", style: { color: "var(--muted)" }, children: x.ref }))
-              ] }, x.key)) }) : /* @__PURE__ */ e("div", { className: "text-[11px]", style: { color: "var(--warn)" }, children: "No referenced artifacts were published." }) }),
+                v.preview && /* @__PURE__ */ e("div", { className: "mt-1 text-[10px] leading-relaxed", style: { color: "var(--muted)" }, children: v.preview }),
+                v.ref && (v.url ? /* @__PURE__ */ e("a", { href: v.url, target: "_blank", rel: "noreferrer", className: "mt-1 block text-[10px] underline break-all", style: { color: "var(--accent)" }, children: v.ref }) : /* @__PURE__ */ e("code", { className: "mt-1 block text-[10px] break-all", style: { color: "var(--muted)" }, children: v.ref }))
+              ] }, v.key)) }) : /* @__PURE__ */ e("div", { className: "text-[11px]", style: { color: "var(--warn)" }, children: "No referenced artifacts were published." }) }),
               /* @__PURE__ */ a("div", { className: "grid grid-cols-1 md:grid-cols-2 gap-3", children: [
-                /* @__PURE__ */ e(Ne, { title: "Alternatives and trade-offs", children: /* @__PURE__ */ e(qe, { rows: r.alternatives, empty: "No alternatives published" }) }),
-                /* @__PURE__ */ e(Ne, { title: "Research and citations", children: /* @__PURE__ */ e(qe, { rows: r.research, empty: "No research passes published" }) })
+                /* @__PURE__ */ e(Me, { title: "Alternatives and trade-offs", children: /* @__PURE__ */ e(et, { rows: r.alternatives, empty: "No alternatives published" }) }),
+                /* @__PURE__ */ e(Me, { title: "Research and citations", children: /* @__PURE__ */ e(et, { rows: r.research, empty: "No research passes published" }) })
               ] }),
               /* @__PURE__ */ a("div", { className: "grid grid-cols-1 md:grid-cols-2 gap-3", children: [
-                /* @__PURE__ */ e(Ne, { title: "Intent and requirement coverage", children: /* @__PURE__ */ e(qe, { rows: r.coverage, empty: "No coverage records published" }) }),
-                /* @__PURE__ */ e(Ne, { title: "Omissions and deviations", children: /* @__PURE__ */ e(qe, { rows: r.deviations, empty: "No omissions or deviations recorded" }) })
+                /* @__PURE__ */ e(Me, { title: "Intent and requirement coverage", children: /* @__PURE__ */ e(et, { rows: r.coverage, empty: "No coverage records published" }) }),
+                /* @__PURE__ */ e(Me, { title: "Omissions and deviations", children: /* @__PURE__ */ e(et, { rows: r.deviations, empty: "No omissions or deviations recorded" }) })
               ] }),
-              /* @__PURE__ */ a(Ne, { title: "Card topology and integration", children: [
+              /* @__PURE__ */ a(Me, { title: "Card topology and integration", children: [
                 /* @__PURE__ */ a("div", { className: "grid grid-cols-2 md:grid-cols-4 gap-3 mb-3", children: [
-                  /* @__PURE__ */ e(ge, { label: "Action", value: r.topology.action }),
-                  /* @__PURE__ */ e(ge, { label: "Integration owner", value: r.topology.integrationOwner }),
-                  /* @__PURE__ */ e(ge, { label: "Integration status", value: r.topology.integrationStatus }),
-                  /* @__PURE__ */ e(ge, { label: "Required children incomplete", value: r.topology.incompleteRequiredChildren.length })
+                  /* @__PURE__ */ e(Ne, { label: "Action", value: r.topology.action }),
+                  /* @__PURE__ */ e(Ne, { label: "Integration owner", value: r.topology.integrationOwner }),
+                  /* @__PURE__ */ e(Ne, { label: "Integration status", value: r.topology.integrationStatus }),
+                  /* @__PURE__ */ e(Ne, { label: "Required children incomplete", value: r.topology.incompleteRequiredChildren.length })
                 ] }),
-                r.topology.children.length > 0 ? /* @__PURE__ */ e("div", { className: "flex flex-col gap-1.5", children: r.topology.children.map((x) => /* @__PURE__ */ a("div", { className: "flex items-center gap-2 rounded-md px-2 py-1.5 text-[11px]", style: { background: "var(--bg-elevated, var(--card))", border: "1px solid var(--border)" }, children: [
-                  /* @__PURE__ */ e("span", { style: { color: "var(--text)" }, children: x.label }),
-                  /* @__PURE__ */ e("span", { className: "ml-auto text-[9px]", style: { color: x.required ? "var(--warn)" : "var(--muted)" }, children: x.required ? "required" : "optional" }),
-                  /* @__PURE__ */ e("span", { className: "text-[9px]", style: { color: /done|advanced|complete|consume|integrate|waive|omit/i.test(x.status) ? "var(--ok)" : "var(--warn)" }, children: x.status })
-                ] }, x.key)) }) : /* @__PURE__ */ e("div", { className: "text-[11px]", style: { color: "var(--muted)" }, children: "No child topology recorded." })
+                r.topology.children.length > 0 ? /* @__PURE__ */ e("div", { className: "flex flex-col gap-1.5", children: r.topology.children.map((v) => /* @__PURE__ */ a("div", { className: "flex items-center gap-2 rounded-md px-2 py-1.5 text-[11px]", style: { background: "var(--bg-elevated, var(--card))", border: "1px solid var(--border)" }, children: [
+                  /* @__PURE__ */ e("span", { style: { color: "var(--text)" }, children: v.label }),
+                  /* @__PURE__ */ e("span", { className: "ml-auto text-[9px]", style: { color: v.required ? "var(--warn)" : "var(--muted)" }, children: v.required ? "required" : "optional" }),
+                  /* @__PURE__ */ e("span", { className: "text-[9px]", style: { color: /done|advanced|complete|consume|integrate|waive|omit/i.test(v.status) ? "var(--ok)" : "var(--warn)" }, children: v.status })
+                ] }, v.key)) }) : /* @__PURE__ */ e("div", { className: "text-[11px]", style: { color: "var(--muted)" }, children: "No child topology recorded." })
               ] }),
               /* @__PURE__ */ a("div", { className: "grid grid-cols-1 md:grid-cols-2 gap-3", children: [
-                /* @__PURE__ */ e(Ne, { title: "Budget consumption", children: /* @__PURE__ */ a("div", { className: "grid grid-cols-1 gap-3", children: [
-                  /* @__PURE__ */ e(ge, { label: "Allocated", value: r.budget.allocated }),
-                  /* @__PURE__ */ e(ge, { label: "Consumed", value: r.budget.consumed }),
-                  /* @__PURE__ */ e(ge, { label: "Remaining", value: r.budget.remaining })
+                /* @__PURE__ */ e(Me, { title: "Budget consumption", children: /* @__PURE__ */ a("div", { className: "grid grid-cols-1 gap-3", children: [
+                  /* @__PURE__ */ e(Ne, { label: "Allocated", value: r.budget.allocated }),
+                  /* @__PURE__ */ e(Ne, { label: "Consumed", value: r.budget.consumed }),
+                  /* @__PURE__ */ e(Ne, { label: "Remaining", value: r.budget.remaining })
                 ] }) }),
-                /* @__PURE__ */ e(Ne, { title: "Routing and runtime provenance", children: /* @__PURE__ */ a("div", { className: "grid grid-cols-2 gap-3", children: [
-                  /* @__PURE__ */ e(ge, { label: "Assigned profile", value: d.assignedProfile }),
-                  /* @__PURE__ */ e(ge, { label: "Effective profile", value: d.effectiveProfile }),
-                  /* @__PURE__ */ e(ge, { label: "Model requested", value: d.model.requested }),
-                  /* @__PURE__ */ e(ge, { label: "Model applied", value: d.model.applied, status: d.model.status }),
-                  /* @__PURE__ */ e(ge, { label: "Provider / version", value: d.model.provider || d.model.version ? [d.model.provider, d.model.version].filter(Boolean) : null }),
-                  /* @__PURE__ */ e(ge, { label: "Effort requested", value: d.effort.requested }),
-                  /* @__PURE__ */ e(ge, { label: "Effort applied", value: d.effort.applied, status: d.effort.status }),
-                  /* @__PURE__ */ e(ge, { label: "Tools available", value: d.tools.actual, status: d.tools.status }),
-                  /* @__PURE__ */ e(ge, { label: "Skills available", value: d.skills.actual, status: d.skills.status }),
-                  /* @__PURE__ */ e(ge, { label: "Network scope", value: d.network.actual, status: d.network.status }),
-                  /* @__PURE__ */ e(ge, { label: "Write scope", value: d.write.actual, status: d.write.status }),
-                  /* @__PURE__ */ e(ge, { label: "Worktree / branch", value: d.worktree })
+                /* @__PURE__ */ e(Me, { title: "Routing and runtime provenance", children: /* @__PURE__ */ a("div", { className: "grid grid-cols-2 gap-3", children: [
+                  /* @__PURE__ */ e(Ne, { label: "Assigned profile", value: c.assignedProfile }),
+                  /* @__PURE__ */ e(Ne, { label: "Effective profile", value: c.effectiveProfile }),
+                  /* @__PURE__ */ e(Ne, { label: "Model requested", value: c.model.requested }),
+                  /* @__PURE__ */ e(Ne, { label: "Model applied", value: c.model.applied, status: c.model.status }),
+                  /* @__PURE__ */ e(Ne, { label: "Provider / version", value: c.model.provider || c.model.version ? [c.model.provider, c.model.version].filter(Boolean) : null }),
+                  /* @__PURE__ */ e(Ne, { label: "Effort requested", value: c.effort.requested }),
+                  /* @__PURE__ */ e(Ne, { label: "Effort applied", value: c.effort.applied, status: c.effort.status }),
+                  /* @__PURE__ */ e(Ne, { label: "Tools available", value: c.tools.actual, status: c.tools.status }),
+                  /* @__PURE__ */ e(Ne, { label: "Skills available", value: c.skills.actual, status: c.skills.status }),
+                  /* @__PURE__ */ e(Ne, { label: "Network scope", value: c.network.actual, status: c.network.status }),
+                  /* @__PURE__ */ e(Ne, { label: "Write scope", value: c.write.actual, status: c.write.status }),
+                  /* @__PURE__ */ e(Ne, { label: "Worktree / branch", value: c.worktree })
                 ] }) })
               ] }),
               /* @__PURE__ */ a("div", { className: "grid grid-cols-1 md:grid-cols-3 gap-3", children: [
-                /* @__PURE__ */ e(Ne, { title: "Validation and evidence", children: /* @__PURE__ */ e(qe, { rows: r.validation, empty: "No validation results published" }) }),
-                /* @__PURE__ */ e(Ne, { title: "Known risks", children: /* @__PURE__ */ e(qe, { rows: r.risks, empty: "No known risks recorded" }) }),
-                /* @__PURE__ */ e(Ne, { title: "Open decisions and questions", children: /* @__PURE__ */ e(qe, { rows: r.decisions, empty: "No open decisions recorded" }) })
+                /* @__PURE__ */ e(Me, { title: "Validation and evidence", children: /* @__PURE__ */ e(et, { rows: r.validation, empty: "No validation results published" }) }),
+                /* @__PURE__ */ e(Me, { title: "Known risks", children: /* @__PURE__ */ e(et, { rows: r.risks, empty: "No known risks recorded" }) }),
+                /* @__PURE__ */ e(Me, { title: "Open decisions and questions", children: /* @__PURE__ */ e(et, { rows: r.decisions, empty: "No open decisions recorded" }) })
               ] })
             ] }),
             /* @__PURE__ */ a("footer", { className: "px-5 py-3 flex items-center gap-2 flex-wrap", style: { borderTop: "1px solid var(--border)", background: "var(--bg-elevated, var(--bg))" }, children: [
-              m && /* @__PURE__ */ a("button", { onClick: () => {
-                m(), o();
+              p && /* @__PURE__ */ a("button", { onClick: () => {
+                p(), s();
               }, className: "text-[11px] px-3 py-1.5 rounded-md font-semibold", style: { background: "var(--ok)", color: "var(--bg)" }, children: [
                 "Approve",
                 r.revision != null ? ` r${r.revision}` : ""
               ] }),
-              u && /* @__PURE__ */ a("button", { onClick: T, className: "text-[11px] px-3 py-1.5 rounded-md font-semibold", style: { background: "var(--danger)", color: "var(--bg)" }, children: [
+              u && /* @__PURE__ */ a("button", { onClick: g, className: "text-[11px] px-3 py-1.5 rounded-md font-semibold", style: { background: "var(--danger)", color: "var(--bg)" }, children: [
                 "Reject",
                 r.revision != null ? ` r${r.revision}` : ""
               ] }),
-              g && /* @__PURE__ */ e("button", { onClick: g, className: "text-[11px] px-3 py-1.5 rounded-md font-semibold", style: { background: "var(--bg-hover, var(--border))", color: "var(--accent)", border: "1px solid var(--border)" }, children: "Interject on this revision" }),
-              i && l && /* @__PURE__ */ a("button", { onClick: l, className: "text-[11px] px-3 py-1.5 rounded-md font-semibold", style: { background: "var(--bg-hover, var(--border))", color: "var(--accent)", border: "1px solid var(--border)" }, children: [
+              i && /* @__PURE__ */ e("button", { onClick: i, className: "text-[11px] px-3 py-1.5 rounded-md font-semibold", style: { background: "var(--bg-hover, var(--border))", color: "var(--accent)", border: "1px solid var(--border)" }, children: "Interject on this revision" }),
+              o && l && /* @__PURE__ */ a("button", { onClick: l, className: "text-[11px] px-3 py-1.5 rounded-md font-semibold", style: { background: "var(--bg-hover, var(--border))", color: "var(--accent)", border: "1px solid var(--border)" }, children: [
                 "Open producer · ",
-                i.step
+                o.step
               ] }),
               /* @__PURE__ */ e("span", { className: "ml-auto text-[9px]", style: { color: "var(--muted)" }, children: r.producerSessionRef || "producer session reference unobservable" })
             ] })
@@ -2039,21 +2275,391 @@ function Jr({ card: t, inspection: r, producerSession: i, onClose: o, onOpenProd
     }
   );
 }
-function _t({ card: t, config: r, isGate: i, cardStatus: o, effectiveCapability: l, producerStep: m, producerSession: u, onOpenProducer: g, onApprove: d, onReject: T, onCycleTrust: x, onCycleDepth: j, onSetBudget: f, onInterject: w, onResolveDecision: V, onOpenOrchestrator: I, liveView: q, allCards: O, onOpenCard: R }) {
-  var le, ke, W, de, $;
-  const B = i ? "var(--warn)" : o.kind === "idle" ? "var(--border-strong, var(--border))" : o.color, _ = t.trust || r.trust, M = t.depth || r.depth, K = ((le = t.parked) == null ? void 0 : le.length) || 0, y = Object.values(t.step_sessions || {}).some(
-    (C) => !!C.last_response_at && !C.chat_disabled_at && !C.superseded && (!C.last_response_handled_at || C.last_response_handled_at < C.last_response_at)
-  ), [ee, S] = N(!1), [se, ie] = N(""), [ne, oe] = N(!1), [be, Z] = N(!1), D = xe(() => Dr(t), [t]), X = xe(() => Br(t, O || []), [t, O]), pe = xe(() => Gr(t), [t]), ue = xe(() => {
-    if (!pe) return null;
-    const C = (O || []).find((v) => v.id === pe);
-    return C ? { id: C.id, title: C.title } : null;
-  }, [pe, O]), ve = D.length > 0 || X.length > 0 || !!ue, h = xe(
-    () => i ? Cr(t, m) : null,
-    [t, i, m]
-  ), P = () => {
-    const C = window.prompt(`Why reject revision ${(h == null ? void 0 : h.revision) ?? "unknown"}?`);
-    C != null && C.trim() && T && T(C.trim());
-  }, U = (t.decisions || []).filter((C) => !C.chosen && !C.resolved_at && (!!C.action || !!C.options));
+function ja({ card: t, openChat: r }) {
+  const o = t.bootstrap, s = t.intent_contract || t.intent;
+  if (!o && !s) return null;
+  const l = `pipeline ${t.pipeline_id || ""} card ${t.id} (${t.title})`, p = (g, v) => /* @__PURE__ */ e(
+    "button",
+    {
+      className: "text-[10px] px-2 py-0.5 rounded hover:opacity-80",
+      style: { color: "var(--accent)", border: "1px solid var(--border)" },
+      title: "Opens /dlc-yolo with this context — nothing is created in the browser",
+      onClick: () => r({ message: `/dlc-yolo ${g} for ${l}` }),
+      children: v
+    }
+  ), u = o ? String(o.status || "not-run") : "n/a", i = Array.isArray(o == null ? void 0 : o.crews_created) ? o.crews_created : [], c = Array.isArray(o == null ? void 0 : o.issues_opened) ? o.issues_opened : [];
+  return /* @__PURE__ */ a("div", { className: "mt-2 pt-2", style: { borderTop: "1px dashed var(--border)" }, children: [
+    /* @__PURE__ */ e("div", { className: "text-[10px] uppercase tracking-wider mb-1", style: { color: "var(--muted)" }, children: "🌱 self-enablement" }),
+    /* @__PURE__ */ a("div", { className: "flex flex-col gap-1 text-[10px]", children: [
+      /* @__PURE__ */ a("div", { className: "flex items-center gap-2", children: [
+        /* @__PURE__ */ e("span", { style: { color: "var(--text)" }, children: "① setup" }),
+        /* @__PURE__ */ e("span", { style: { color: "var(--muted)" }, children: String(t.self_enable_mode || "default") })
+      ] }),
+      /* @__PURE__ */ a("div", { className: "flex items-center gap-2 flex-wrap", children: [
+        /* @__PURE__ */ e("span", { style: { color: "var(--text)" }, children: "② intent" }),
+        /* @__PURE__ */ e("span", { style: { color: "var(--muted)" }, children: s ? String(s.classification || s.status || "present") : "not run" }),
+        p("resolve intent", "Resolve intent"),
+        p("skip intent", "Skip intent")
+      ] }),
+      /* @__PURE__ */ a("div", { className: "flex items-center gap-2 flex-wrap", children: [
+        /* @__PURE__ */ e("span", { style: { color: "var(--text)" }, children: "③ per-step" }),
+        p(`elaborate step ${t.stage}`, "Elaborate step")
+      ] }),
+      /* @__PURE__ */ a("div", { className: "flex items-center gap-2 flex-wrap", children: [
+        /* @__PURE__ */ e("span", { style: { color: "var(--text)" }, children: "④ bootstrap" }),
+        /* @__PURE__ */ e("span", { style: { color: u === "done" ? "var(--ok)" : "var(--muted)" }, children: u }),
+        i.length > 0 && /* @__PURE__ */ a("span", { style: { color: "var(--muted)" }, children: [
+          "· crews ",
+          i.length
+        ] }),
+        c.length > 0 && /* @__PURE__ */ a("span", { style: { color: "var(--muted)" }, children: [
+          "· issues ",
+          c.length
+        ] }),
+        o != null && o.blocking_reason ? /* @__PURE__ */ a("span", { style: { color: "var(--warn)" }, children: [
+          "· ",
+          String(o.blocking_reason)
+        ] }) : null,
+        p("resume bootstrap", "Resume bootstrap")
+      ] }),
+      u === "done" && /* @__PURE__ */ e("div", { className: "text-[9px]", style: { color: "var(--muted)" }, children: "Replaying bootstrap is idempotent intent, not a promise." })
+    ] })
+  ] });
+}
+function Ea({ cards: t, schedulerState: r, statePath: o, readAppFile: s, onClose: l }) {
+  const p = Ce(() => fa(t, r), [t, r]), [u, i] = w(Gt(null)), [c, g] = w([]), [v, E] = w([]);
+  Ee(() => {
+    const x = `${o.replace(/\/state\.json$/, "")}/workspaces/default/data/ledger/projections/status.json`;
+    let k = !1;
+    return s(x).then((D) => {
+      if (!k)
+        try {
+          i(Gt(JSON.parse(D.content || "null")));
+        } catch {
+          i(Gt(null));
+        }
+    }).catch(() => {
+      k || i(Gt(null));
+    }), () => {
+      k = !0;
+    };
+  }, [o, s]), Ee(() => {
+    const b = [], x = [];
+    for (const k of t) {
+      const D = k.step_sessions;
+      if (D) for (const [A, I] of Object.entries(D)) b.push({ card: k.id, step: A, slot: I == null ? void 0 : I.slot_key });
+      const q = k.worktree_lease;
+      q && x.push({ card: k.id, branch: q.branch, status: q.status });
+    }
+    g(b.slice(0, 60)), E(x.slice(0, 60));
+  }, [t]);
+  const f = ({ title: b, children: x }) => /* @__PURE__ */ a("div", { className: "mb-4", children: [
+    /* @__PURE__ */ e("div", { className: "text-[10px] uppercase tracking-wider mb-1.5", style: { color: "var(--muted)" }, children: b }),
+    x
+  ] });
+  return /* @__PURE__ */ e(
+    "div",
+    {
+      className: "fixed inset-0 z-50 flex items-center justify-center p-4",
+      style: { background: "rgba(0,0,0,0.48)", backdropFilter: "blur(3px)" },
+      onMouseDown: (b) => {
+        b.currentTarget === b.target && l();
+      },
+      children: /* @__PURE__ */ a(
+        "section",
+        {
+          role: "dialog",
+          "aria-modal": "true",
+          "aria-label": "Operations",
+          className: "flex flex-col rounded-xl overflow-hidden",
+          style: { width: "min(760px, calc(100vw - 32px))", maxHeight: "min(88vh, 880px)", background: "var(--bg-elevated, var(--bg))", border: "1px solid var(--border-strong, var(--border))", boxShadow: "0 28px 90px rgba(0,0,0,0.5)" },
+          children: [
+            /* @__PURE__ */ a("header", { className: "px-5 py-3 flex items-center gap-3", style: { borderBottom: "1px solid var(--border)" }, children: [
+              /* @__PURE__ */ e("h2", { className: "text-[15px] font-semibold flex-1", style: { color: "var(--text-strong, var(--text))" }, children: "🛠 Operations" }),
+              /* @__PURE__ */ e("button", { onClick: l, className: "text-[13px] px-2 py-0.5 rounded hover:opacity-80", style: { color: "var(--muted)" }, "aria-label": "Close", children: "✕" })
+            ] }),
+            /* @__PURE__ */ a("div", { className: "px-5 py-3 overflow-y-auto text-[11px]", children: [
+              /* @__PURE__ */ a(f, { title: "Runtime / scheduler", children: [
+                /* @__PURE__ */ e("div", { className: "flex flex-wrap gap-2", children: $r.map((b) => /* @__PURE__ */ a("span", { className: "px-2 py-0.5 rounded-full", style: { background: "color-mix(in srgb, var(--accent) 10%, transparent)", color: p.counts[b] ? "var(--text)" : "var(--muted)" }, children: [
+                  b,
+                  " ",
+                  p.counts[b]
+                ] }, b)) }),
+                p.waitReasons.length > 0 && /* @__PURE__ */ e("div", { className: "mt-2", children: p.waitReasons.map((b, x) => /* @__PURE__ */ a("div", { style: { color: "var(--muted)" }, children: [
+                  "⛔ ",
+                  b.card,
+                  ": ",
+                  b.reason
+                ] }, x)) })
+              ] }),
+              /* @__PURE__ */ e(f, { title: "Projection parity", children: u.available ? /* @__PURE__ */ a("div", { children: [
+                /* @__PURE__ */ a("div", { style: { color: u.verified ? "var(--ok)" : "var(--warn)" }, children: [
+                  u.label,
+                  " · authority ",
+                  u.authority_active ? "active" : "inactive"
+                ] }),
+                u.digest_match !== null && /* @__PURE__ */ a("div", { style: { color: "var(--muted)" }, children: [
+                  "digest match: ",
+                  String(u.digest_match)
+                ] }),
+                u.failure_code && /* @__PURE__ */ a("div", { style: { color: "var(--warn)" }, children: [
+                  "failure: ",
+                  u.failure_code
+                ] }),
+                /* @__PURE__ */ e("div", { className: "text-[9px]", style: { color: "var(--muted)" }, children: "last-known-good runs.json preserved when blocked" })
+              ] }) : /* @__PURE__ */ e("div", { style: { color: "var(--muted)" }, children: "unavailable" }) }),
+              /* @__PURE__ */ e(f, { title: "Webhook", children: /* @__PURE__ */ e(Nr, {}) }),
+              /* @__PURE__ */ a(f, { title: "Sessions & worktrees", children: [
+                /* @__PURE__ */ a("div", { className: "mb-1", style: { color: "var(--muted)" }, children: [
+                  c.length,
+                  " session(s) · ",
+                  v.length,
+                  " lease(s)"
+                ] }),
+                c.slice(0, 12).map((b, x) => /* @__PURE__ */ a("div", { style: { color: "var(--text)" }, children: [
+                  b.card,
+                  " · ",
+                  b.step,
+                  b.slot ? ` · ${b.slot}` : ""
+                ] }, x)),
+                v.slice(0, 12).map((b, x) => /* @__PURE__ */ a("div", { style: { color: "var(--muted)" }, children: [
+                  "🌿 ",
+                  b.card,
+                  " · ",
+                  b.branch || "—",
+                  " · ",
+                  b.status || "—"
+                ] }, `l${x}`))
+              ] })
+            ] })
+          ]
+        }
+      )
+    }
+  );
+}
+function ue(t, r) {
+  return r == null || r === "" ? null : /* @__PURE__ */ a("div", { className: "flex gap-2 text-[11px] py-0.5", children: [
+    /* @__PURE__ */ e("span", { className: "flex-shrink-0", style: { color: "var(--muted)", minWidth: "110px" }, children: t }),
+    /* @__PURE__ */ e("span", { className: "min-w-0 break-words", style: { color: "var(--text)" }, children: String(r) })
+  ] });
+}
+function br(t) {
+  return typeof t == "string" && /^https?:\/\//i.test(t);
+}
+function Oa({ card: t, cardStatus: r, effectiveCapability: o, onClose: s }) {
+  var E, f, b;
+  const [l, p] = w("overview"), u = [
+    ["overview", "Overview"],
+    ["results", "Results"],
+    ["history", "Decisions & history"],
+    ["execution", "Execution"]
+  ], i = t.execution_schedule, c = i != null && i.current_node_id ? (E = i == null ? void 0 : i.nodes) == null ? void 0 : E[i.current_node_id] : void 0, g = t.worktree_lease, v = t.topology;
+  return /* @__PURE__ */ e(
+    "div",
+    {
+      className: "fixed inset-0 z-[70] flex items-center justify-center p-4",
+      style: { background: "rgba(0,0,0,0.58)", backdropFilter: "blur(4px)" },
+      onMouseDown: (x) => {
+        x.currentTarget === x.target && s();
+      },
+      children: /* @__PURE__ */ a(
+        "section",
+        {
+          role: "dialog",
+          "aria-modal": "true",
+          "aria-label": "Card details",
+          className: "flex flex-col rounded-xl overflow-hidden",
+          style: { width: "min(760px, calc(100vw - 32px))", maxHeight: "min(88vh, 860px)", background: "var(--bg-elevated, var(--bg))", border: "1px solid var(--border-strong, var(--border))", boxShadow: "0 28px 90px rgba(0,0,0,0.5)" },
+          children: [
+            /* @__PURE__ */ a("header", { className: "px-5 py-3 flex items-start gap-3", style: { borderBottom: "1px solid var(--border)" }, children: [
+              /* @__PURE__ */ a("div", { className: "min-w-0 flex-1", children: [
+                /* @__PURE__ */ e("div", { className: "text-[14px] font-semibold truncate", style: { color: "var(--text-strong, var(--text))" }, children: t.title }),
+                /* @__PURE__ */ a("div", { className: "text-[11px] mt-0.5", style: { color: "var(--muted)" }, children: [
+                  t.stage,
+                  " · ",
+                  r.label
+                ] })
+              ] }),
+              /* @__PURE__ */ e("button", { onClick: s, className: "text-[13px] px-2 py-0.5 rounded hover:opacity-80", style: { color: "var(--muted)" }, "aria-label": "Close", children: "✕" })
+            ] }),
+            /* @__PURE__ */ e("nav", { className: "flex gap-1 px-3 pt-2", style: { borderBottom: "1px solid var(--border)" }, children: u.map(([x, k]) => /* @__PURE__ */ e(
+              "button",
+              {
+                onClick: () => p(x),
+                className: "text-[11px] px-2.5 py-1 rounded-t-md",
+                style: {
+                  color: l === x ? "var(--accent)" : "var(--muted)",
+                  borderBottom: l === x ? "2px solid var(--accent)" : "2px solid transparent"
+                },
+                children: k
+              },
+              x
+            )) }),
+            /* @__PURE__ */ a("div", { className: "px-5 py-3 overflow-y-auto text-[11px]", children: [
+              l === "overview" && /* @__PURE__ */ a("div", { children: [
+                (f = t.source) != null && f.url && br(t.source.url) ? ue("source", null) || /* @__PURE__ */ a("div", { className: "text-[11px] py-0.5", children: [
+                  /* @__PURE__ */ e("span", { style: { color: "var(--muted)", minWidth: 110, display: "inline-block" }, children: "source" }),
+                  /* @__PURE__ */ a("a", { href: t.source.url, target: "_blank", rel: "noreferrer", className: "hover:underline", style: { color: "var(--accent)" }, children: [
+                    t.source.repo,
+                    t.source.issue ? `#${t.source.issue}` : ""
+                  ] })
+                ] }) : ue("source", (b = t.source) == null ? void 0 : b.repo),
+                ue("pipeline", t.pipeline_id),
+                ue("workspace", t.workspace),
+                ue("stage", t.stage),
+                ue("lifecycle", t.lifecycle),
+                ue("SoT", t.sot),
+                ue("status", `${r.label}${r.reason ? ` — ${r.reason}` : ""}`),
+                ue("trust", t.trust ? `${t.trust} (override)` : "inherited"),
+                ue("depth", t.depth ? `${t.depth} (override)` : "inherited"),
+                ue("capability", o),
+                ue("effort", t.effort ? JSON.stringify(t.effort) : null),
+                ue("writes_allowed", t.writes_allowed === !1 ? "false (cancel requested)" : null)
+              ] }),
+              l === "results" && /* @__PURE__ */ a("div", { children: [
+                Object.entries(t.step_summaries || {}).map(([x, k]) => /* @__PURE__ */ a("div", { className: "mb-2", children: [
+                  /* @__PURE__ */ a("div", { className: "font-medium", style: { color: "var(--text)" }, children: [
+                    x,
+                    ": ",
+                    (k == null ? void 0 : k.headline) || "—"
+                  ] }),
+                  (k == null ? void 0 : k.description) && /* @__PURE__ */ e("div", { style: { color: "var(--muted)" }, children: k.description }),
+                  (k == null ? void 0 : k.executor) && /* @__PURE__ */ a("div", { className: "text-[9px]", style: { color: "var(--muted)" }, children: [
+                    "executor ",
+                    k.executor
+                  ] })
+                ] }, x)),
+                Object.entries(t.artifacts || {}).map(([x, k]) => /* @__PURE__ */ e("div", { className: "py-0.5", children: br(k) ? /* @__PURE__ */ e("a", { href: k, target: "_blank", rel: "noreferrer", className: "hover:underline", style: { color: "var(--accent)" }, children: x }) : /* @__PURE__ */ a("span", { style: { color: "var(--text)" }, children: [
+                  x,
+                  ": ",
+                  /* @__PURE__ */ e("code", { style: { color: "var(--muted)" }, children: String(k) })
+                ] }) }, x)),
+                !t.step_summaries && !t.artifacts && /* @__PURE__ */ e("div", { style: { color: "var(--muted)" }, children: "No results recorded." })
+              ] }),
+              l === "history" && /* @__PURE__ */ a("div", { children: [
+                /* @__PURE__ */ e("div", { className: "text-[10px] uppercase tracking-wider mt-1 mb-1", style: { color: "var(--muted)" }, children: "Decisions" }),
+                (t.decisions || []).map((x, k) => /* @__PURE__ */ a("div", { className: "py-0.5", style: { color: "var(--text)" }, children: [
+                  String(x.status) === "open" ? "🔴 " : "✓ ",
+                  String(x.kind),
+                  " — ",
+                  String(x.question || x.chosen || x.action || "")
+                ] }, k)),
+                /* @__PURE__ */ e("div", { className: "text-[10px] uppercase tracking-wider mt-2 mb-1", style: { color: "var(--muted)" }, children: "Stage history" }),
+                (t.history || []).map((x, k) => /* @__PURE__ */ a("div", { className: "py-0.5", style: { color: "var(--muted)" }, children: [
+                  String(x.from),
+                  " → ",
+                  String(x.to),
+                  " · ",
+                  String(x.agent || ""),
+                  " · ",
+                  String(x.at || "")
+                ] }, k)),
+                (t.gate_history || []).length > 0 && /* @__PURE__ */ a(ze, { children: [
+                  /* @__PURE__ */ e("div", { className: "text-[10px] uppercase tracking-wider mt-2 mb-1", style: { color: "var(--muted)" }, children: "Gates" }),
+                  (t.gate_history || []).map((x, k) => /* @__PURE__ */ a("div", { className: "py-0.5", style: { color: "var(--muted)" }, children: [
+                    String(x.decision),
+                    " ",
+                    String(x.gate),
+                    " · ",
+                    String(x.actor || "")
+                  ] }, k))
+                ] }),
+                (t.interjection || []).length > 0 && /* @__PURE__ */ a(ze, { children: [
+                  /* @__PURE__ */ e("div", { className: "text-[10px] uppercase tracking-wider mt-2 mb-1", style: { color: "var(--muted)" }, children: "Requests / interjections" }),
+                  (t.interjection || []).map((x, k) => /* @__PURE__ */ a("div", { className: "py-0.5", style: { color: "var(--muted)" }, children: [
+                    String(x.kind),
+                    " · ",
+                    String(x.status),
+                    x.reason ? ` (${String(x.reason)})` : ""
+                  ] }, k))
+                ] })
+              ] }),
+              l === "execution" && /* @__PURE__ */ a("div", { children: [
+                ue("current node", i == null ? void 0 : i.current_node_id),
+                ue("node status", c == null ? void 0 : c.status),
+                ue("permit", c == null ? void 0 : c.permit_id),
+                ue("concurrency class", c == null ? void 0 : c.concurrency_class),
+                ue("model (requested)", t.model_request),
+                ue("model (applied)", t.model_applied),
+                v && /* @__PURE__ */ a(ze, { children: [
+                  ue("topology", v.action),
+                  ue("integration owner", v.integration_owner),
+                  ue("children", Array.isArray(v.children) ? `${v.children.length}` : null)
+                ] }),
+                g && /* @__PURE__ */ a(ze, { children: [
+                  ue("worktree branch", g.branch),
+                  ue("lease status", g.status),
+                  ue("lease locked", g.locked ? "true" : null)
+                ] }),
+                ue("cancel requested", t.cancel_requested_at),
+                t.writes_allowed === !1 && ue("terminal observed", "pending (cooperative cancel in progress)")
+              ] })
+            ] }),
+            /* @__PURE__ */ e("footer", { className: "px-5 py-2 text-[9px]", style: { borderTop: "1px solid var(--border)", color: "var(--muted)" }, children: "Read-only view. Use 🔧 maintain to request changes; gate actions use the gate controls." })
+          ]
+        }
+      )
+    }
+  );
+}
+function La({ onRequest: t }) {
+  const [r, o] = w(!1), s = (l) => {
+    const p = rr[l];
+    let u = "";
+    if (p.reasonRequired) {
+      const i = window.prompt(p.confirm);
+      if (!i || !i.trim()) return;
+      u = i.trim();
+    } else if (!window.confirm(p.confirm))
+      return;
+    t(l, u), o(!1);
+  };
+  return /* @__PURE__ */ a("div", { className: "relative inline-block", children: [
+    /* @__PURE__ */ e(
+      "button",
+      {
+        className: "text-[10px] hover:underline",
+        style: { color: "var(--muted)" },
+        title: "Request re-spec / retry / back-step / park / cancel",
+        onClick: () => o((l) => !l),
+        children: "🔧 maintain"
+      }
+    ),
+    r && /* @__PURE__ */ e(
+      "div",
+      {
+        className: "absolute z-20 mt-1 rounded-md py-1 text-[11px]",
+        style: { background: "var(--bg-elevated, var(--bg))", border: "1px solid var(--border-strong, var(--border))", boxShadow: "0 8px 28px rgba(0,0,0,0.4)", minWidth: "120px" },
+        children: Object.entries(rr).map(([l, p]) => /* @__PURE__ */ e(
+          "button",
+          {
+            className: "block w-full text-left px-3 py-1 hover:opacity-80",
+            style: { color: l === "request:cancel" ? "var(--danger, #e66)" : "var(--text)" },
+            onClick: () => s(l),
+            children: p.label
+          },
+          l
+        ))
+      }
+    )
+  ] });
+}
+function gt({ card: t, config: r, isGate: o, cardStatus: s, effectiveCapability: l, producerStep: p, producerSession: u, onOpenProducer: i, onApprove: c, onReject: g, onCycleTrust: v, onCycleDepth: E, onSetBudget: f, onInterject: b, onResolveDecision: x, onOpenOrchestrator: k, liveView: D, allCards: q, onOpenCard: A, onRequest: I, onOpenStepSession: C, onCancelCard: B }) {
+  var O, ce, Le, rt, ae, lt, pe;
+  const X = o ? "var(--warn)" : s.kind === "idle" ? "var(--border-strong, var(--border))" : s.color, y = t.trust || r.trust, J = t.depth || r.depth, S = ((O = t.parked) == null ? void 0 : O.length) || 0, he = Object.values(t.step_sessions || {}).some(
+    ($) => !!$.last_response_at && !$.chat_disabled_at && !$.superseded && (!$.last_response_handled_at || $.last_response_handled_at < $.last_response_at)
+  ), [ye, ie] = w(!1), [me, Se] = w(""), [Q, z] = w(!1), [ee, $e] = w(!1), [Te, _e] = w(!1), { openChat: _ } = fr(), U = Ce(() => sa(t), [t]), te = Ce(() => ia(t, q || []), [t, q]), we = Ce(() => ca(t), [t]), Oe = Ce(() => {
+    if (!we) return null;
+    const $ = (q || []).find((W) => W.id === we);
+    return $ ? { id: $.id, title: $.title } : null;
+  }, [we, q]), oe = U.length > 0 || te.length > 0 || !!Oe, Z = Ce(
+    () => o ? Vr(t, p) : null,
+    [t, o, p]
+  ), F = () => {
+    const $ = window.prompt(`Why reject revision ${(Z == null ? void 0 : Z.revision) ?? "unknown"}?`);
+    $ != null && $.trim() && g && g($.trim());
+  }, ve = (t.decisions || []).filter(($) => !$.chosen && !$.resolved_at && (!!$.action || !!$.options));
   return /* @__PURE__ */ a(
     "div",
     {
@@ -2063,11 +2669,26 @@ function _t({ card: t, config: r, isGate: i, cardStatus: o, effectiveCapability:
         background: "var(--card)",
         color: "var(--card-fg, var(--text))",
         border: "1px solid var(--border)",
-        borderLeft: `2px solid ${B}`
+        borderLeft: `2px solid ${X}`
       },
       children: [
-        /* @__PURE__ */ e("div", { className: "text-[13px] font-medium leading-snug truncate", style: { color: "var(--text-strong, var(--text))" }, children: t.title }),
-        ((ke = t.source) == null ? void 0 : ke.repo) && /* @__PURE__ */ a(
+        (() => {
+          const $ = (C || []).find((W) => W.step === t.stage);
+          return $ ? /* @__PURE__ */ a(
+            "button",
+            {
+              onClick: () => $.open(),
+              className: "text-[13px] font-medium leading-snug truncate text-left w-full hover:underline inline-flex items-center gap-1 group",
+              title: `Open the ${t.stage} step session`,
+              style: { color: "var(--text-strong, var(--text))", cursor: "pointer" },
+              children: [
+                /* @__PURE__ */ e("span", { className: "truncate", children: t.title }),
+                /* @__PURE__ */ e("span", { className: "opacity-40 group-hover:opacity-100 flex-shrink-0", style: { color: "var(--accent)" }, "aria-hidden": "true", children: "↗" })
+              ]
+            }
+          ) : /* @__PURE__ */ e("div", { className: "text-[13px] font-medium leading-snug truncate", style: { color: "var(--text-strong, var(--text))" }, children: t.title });
+        })(),
+        ((ce = t.source) == null ? void 0 : ce.repo) && /* @__PURE__ */ a(
           "a",
           {
             href: t.source.url || void 0,
@@ -2082,43 +2703,43 @@ function _t({ card: t, config: r, isGate: i, cardStatus: o, effectiveCapability:
           }
         ),
         (() => {
-          var v;
-          const C = (v = t.step_summaries) == null ? void 0 : v[t.stage];
-          return C != null && C.headline ? /* @__PURE__ */ a("div", { className: "mt-1 flex items-start gap-1 text-[11px] leading-snug", title: C.description || C.headline, children: [
-            C.needs_human ? /* @__PURE__ */ e("span", { "aria-label": "needs you", title: "Needs you", style: { color: "var(--warn)" }, children: "🔴" }) : /* @__PURE__ */ e("span", { "aria-hidden": "true", style: { color: "var(--muted)" }, children: "•" }),
-            /* @__PURE__ */ e("span", { className: "truncate", style: { color: C.needs_human ? "var(--warn)" : "var(--text)" }, children: C.headline })
+          var W;
+          const $ = (W = t.step_summaries) == null ? void 0 : W[t.stage];
+          return $ != null && $.headline ? /* @__PURE__ */ a("div", { className: "mt-1 flex items-start gap-1 text-[11px] leading-snug", title: $.description || $.headline, children: [
+            $.needs_human ? /* @__PURE__ */ e("span", { "aria-label": "needs you", title: "Needs you", style: { color: "var(--warn)" }, children: "🔴" }) : /* @__PURE__ */ e("span", { "aria-hidden": "true", style: { color: "var(--muted)" }, children: "•" }),
+            /* @__PURE__ */ e("span", { className: "truncate", style: { color: $.needs_human ? "var(--warn)" : "var(--text)" }, children: $.headline })
           ] }) : null;
         })(),
         /* @__PURE__ */ a("div", { className: "mt-2 flex items-center gap-1 flex-wrap", children: [
           /* @__PURE__ */ e("span", { className: "text-[9px] uppercase tracking-wider mr-0.5 select-none", style: { color: "var(--muted)" }, children: "⚙ modes" }),
           /* @__PURE__ */ a(
-            Ce,
+            Be,
             {
-              color: Rt[_],
+              color: Xt[y],
               active: !!t.trust,
-              onClick: x,
-              title: `trust: ${_}${t.trust ? " (override)" : " (inherited)"} — click to cycle`,
+              onClick: v,
+              title: `trust: ${y}${t.trust ? " (override)" : " (inherited)"} — click to cycle`,
               children: [
                 "🛡 ",
-                _
+                y
               ]
             }
           ),
           /* @__PURE__ */ a(
-            Ce,
+            Be,
             {
-              color: $t[M],
+              color: Yt[J],
               active: !!t.depth,
-              onClick: j,
-              title: `depth: ${M}${t.depth ? " (override)" : " (inherited)"} — click to cycle`,
+              onClick: E,
+              title: `depth: ${J}${t.depth ? " (override)" : " (inherited)"} — click to cycle`,
               children: [
                 "🔬 ",
-                M
+                J
               ]
             }
           ),
           /* @__PURE__ */ a(
-            Ce,
+            Be,
             {
               color: l === "coordinator" ? "var(--warn)" : "var(--info)",
               active: l !== "auto-derived",
@@ -2131,7 +2752,7 @@ function _t({ card: t, config: r, isGate: i, cardStatus: o, effectiveCapability:
           ),
           f && /* @__PURE__ */ a("span", { className: "inline-flex items-center gap-0.5", title: "Decomposition/effort budget for this card", children: [
             /* @__PURE__ */ e("span", { className: "text-[9px]", style: { color: "var(--muted)" }, children: "💰" }),
-            /* @__PURE__ */ e(Ir, { budget: t.budget, depth: M, onSave: f })
+            /* @__PURE__ */ e(aa, { budget: t.budget, depth: J, onSave: f })
           ] })
         ] }),
         /* @__PURE__ */ a(
@@ -2142,16 +2763,16 @@ function _t({ card: t, config: r, isGate: i, cardStatus: o, effectiveCapability:
             children: [
               /* @__PURE__ */ e("span", { className: "text-[9px] uppercase tracking-wider mr-0.5 select-none", style: { color: "var(--muted)" }, children: "🏷 state" }),
               /* @__PURE__ */ e(
-                Ce,
+                Be,
                 {
-                  color: o.color,
-                  active: o.kind !== "idle",
-                  title: `${o.label}${o.reason ? ` — ${o.reason}` : ""}`,
-                  children: o.label
+                  color: s.color,
+                  active: s.kind !== "idle",
+                  title: `${s.label}${s.reason ? ` — ${s.reason}` : ""}`,
+                  children: s.label
                 }
               ),
               /* @__PURE__ */ a(
-                Ce,
+                Be,
                 {
                   color: t.sot === "local" ? "var(--warn)" : t.sot === "github" ? "var(--info)" : "var(--muted)",
                   active: t.sot === "local",
@@ -2163,21 +2784,21 @@ function _t({ card: t, config: r, isGate: i, cardStatus: o, effectiveCapability:
                   ]
                 }
               ),
-              t.lifecycle && /* @__PURE__ */ a(Ce, { color: "var(--muted)", title: `card lifecycle: ${t.lifecycle}`, children: [
+              t.lifecycle && /* @__PURE__ */ a(Be, { color: "var(--muted)", title: `card lifecycle: ${t.lifecycle}`, children: [
                 "🔄 ",
                 t.lifecycle
               ] }),
-              K > 0 && /* @__PURE__ */ a(Ce, { color: "var(--warn)", title: `${K} parked idea(s)`, children: [
+              S > 0 && /* @__PURE__ */ a(Be, { color: "var(--warn)", title: `${S} parked idea(s)`, children: [
                 "⏸ ",
-                K
+                S
               ] }),
-              y && /* @__PURE__ */ e(Ce, { color: "var(--accent)", active: !0, title: "A response in an enabled linked agent chat is being applied to this card", children: "↪ chat response" }),
-              typeof ((W = t.effort) == null ? void 0 : W.total) == "number" && t.effort.total > 0 && /* @__PURE__ */ a(Ce, { color: "var(--info)", title: `estimated effort: ${t.effort.total} points`, children: [
+              he && /* @__PURE__ */ e(Be, { color: "var(--accent)", active: !0, title: "A response in an enabled linked agent chat is being applied to this card", children: "↪ chat response" }),
+              typeof ((Le = t.effort) == null ? void 0 : Le.total) == "number" && t.effort.total > 0 && /* @__PURE__ */ a(Be, { color: "var(--info)", title: `estimated effort: ${t.effort.total} points`, children: [
                 "⚡ ",
                 t.effort.total
               ] }),
               t.backstep_history && t.backstep_history.length > 0 && /* @__PURE__ */ a(
-                Ce,
+                Be,
                 {
                   color: "var(--danger)",
                   title: `stepped back ${t.backstep_history.length}× — last: ${t.backstep_history[t.backstep_history.length - 1].reason}`,
@@ -2188,13 +2809,13 @@ function _t({ card: t, config: r, isGate: i, cardStatus: o, effectiveCapability:
                 }
               ),
               t.decisions && t.decisions.length > 0 && (() => {
-                const C = t.decisions[t.decisions.length - 1];
+                const $ = t.decisions[t.decisions.length - 1];
                 return /* @__PURE__ */ a(
-                  Ce,
+                  Be,
                   {
                     color: "var(--accent)",
-                    title: `${t.decisions.length} decision${t.decisions.length === 1 ? "" : "s"} — last: ${C.question || C.kind || ""}${C.action ? ` → ${C.action}` : ""}${C.rationale ? `
-${C.rationale}` : ""}`,
+                    title: `${t.decisions.length} decision${t.decisions.length === 1 ? "" : "s"} — last: ${$.question || $.kind || ""}${$.action ? ` → ${$.action}` : ""}${$.rationale ? `
+${$.rationale}` : ""}`,
                     children: [
                       "⚖ ",
                       t.decisions.length
@@ -2205,32 +2826,32 @@ ${C.rationale}` : ""}`,
             ]
           }
         ),
-        i && h && /* @__PURE__ */ a(
+        o && Z && /* @__PURE__ */ a(
           "div",
           {
             "data-gate-inspection-summary": !0,
             className: "mt-2.5 rounded-md p-2",
-            style: { background: h.ready ? "color-mix(in srgb, var(--ok) 7%, transparent)" : "color-mix(in srgb, var(--warn) 7%, transparent)", border: `1px solid color-mix(in srgb, ${h.ready ? "var(--ok)" : "var(--warn)"} 32%, var(--border))` },
+            style: { background: Z.ready ? "color-mix(in srgb, var(--ok) 7%, transparent)" : "color-mix(in srgb, var(--warn) 7%, transparent)", border: `1px solid color-mix(in srgb, ${Z.ready ? "var(--ok)" : "var(--warn)"} 32%, var(--border))` },
             children: [
               /* @__PURE__ */ a("div", { className: "flex items-center gap-1.5 text-[10px]", children: [
-                /* @__PURE__ */ e("span", { className: "font-semibold", style: { color: h.ready ? "var(--ok)" : "var(--warn)" }, children: h.ready ? "Review-ready" : "Not review-ready" }),
+                /* @__PURE__ */ e("span", { className: "font-semibold", style: { color: Z.ready ? "var(--ok)" : "var(--warn)" }, children: Z.ready ? "Review-ready" : "Not review-ready" }),
                 /* @__PURE__ */ a("span", { className: "ml-auto", style: { color: "var(--muted)" }, children: [
                   "r",
-                  h.revision ?? "?"
+                  Z.revision ?? "?"
                 ] }),
-                /* @__PURE__ */ e("span", { className: "px-1 py-0.5 rounded", style: { color: "var(--muted)", background: "var(--bg-hover, var(--border))" }, children: h.reviewStatus })
+                /* @__PURE__ */ e("span", { className: "px-1 py-0.5 rounded", style: { color: "var(--muted)", background: "var(--bg-hover, var(--border))" }, children: Z.reviewStatus })
               ] }),
-              /* @__PURE__ */ e("div", { className: "mt-1 text-[11px] leading-snug overflow-hidden", style: { color: h.summary ? "var(--text)" : "var(--warn)", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }, children: h.summary || "No review bundle summary published." }),
-              !h.ready && /* @__PURE__ */ a("div", { className: "mt-1 text-[9px]", style: { color: "var(--muted)" }, children: [
-                h.missing.length,
+              /* @__PURE__ */ e("div", { className: "mt-1 text-[11px] leading-snug overflow-hidden", style: { color: Z.summary ? "var(--text)" : "var(--warn)", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }, children: Z.summary || "No review bundle summary published." }),
+              !Z.ready && /* @__PURE__ */ a("div", { className: "mt-1 text-[9px]", style: { color: "var(--muted)" }, children: [
+                Z.missing.length,
                 " readiness gap",
-                h.missing.length === 1 ? "" : "s"
+                Z.missing.length === 1 ? "" : "s"
               ] }),
               /* @__PURE__ */ e(
                 "button",
                 {
                   type: "button",
-                  onClick: () => oe(!0),
+                  onClick: () => z(!0),
                   className: "mt-1.5 text-[10px] font-semibold hover:underline",
                   style: { color: "var(--accent)" },
                   children: "Inspect result bundle →"
@@ -2239,70 +2860,70 @@ ${C.rationale}` : ""}`,
             ]
           }
         ),
-        i && d && T && /* @__PURE__ */ a("div", { className: "mt-2.5 flex gap-1.5 items-center flex-wrap", children: [
+        o && c && g && /* @__PURE__ */ a("div", { className: "mt-2.5 flex gap-1.5 items-center flex-wrap", children: [
           (() => {
-            const C = (t.gate_commands || []).filter((we) => we.gate === t.stage), v = C.length ? C[C.length - 1] : void 0, re = (v == null ? void 0 : v.status) === "pending", Ae = (v == null ? void 0 : v.status) === "rejected", Se = (v == null ? void 0 : v.status) === "applied" || (v == null ? void 0 : v.status) === "approved";
-            return /* @__PURE__ */ a(He, { children: [
+            const $ = (t.gate_commands || []).filter((Fe) => Fe.gate === t.stage), W = $.length ? $[$.length - 1] : void 0, ke = (W == null ? void 0 : W.status) === "pending", Xe = (W == null ? void 0 : W.status) === "rejected", De = (W == null ? void 0 : W.status) === "applied" || (W == null ? void 0 : W.status) === "approved";
+            return /* @__PURE__ */ a(ze, { children: [
               /* @__PURE__ */ a(
                 "button",
                 {
-                  disabled: re,
+                  disabled: ke,
                   className: "text-[11px] px-2.5 py-1 rounded-md font-semibold transition-opacity hover:opacity-85 disabled:opacity-60 disabled:cursor-wait inline-flex items-center gap-1",
                   style: { background: "var(--ok)", color: "var(--bg)" },
-                  onClick: d,
-                  title: re ? "A gate command is being processed…" : "Approve this gate",
+                  onClick: c,
+                  title: ke ? "A gate command is being processed…" : "Approve this gate",
                   children: [
-                    re && (v == null ? void 0 : v.action) === "approve" && /* @__PURE__ */ e(Qe, { size: 10 }),
-                    re && (v == null ? void 0 : v.action) === "approve" ? "Approving…" : "✓ Approve"
+                    ke && (W == null ? void 0 : W.action) === "approve" && /* @__PURE__ */ e(ft, { size: 10 }),
+                    ke && (W == null ? void 0 : W.action) === "approve" ? "Approving…" : "✓ Approve"
                   ]
                 }
               ),
               /* @__PURE__ */ a(
                 "button",
                 {
-                  disabled: re,
+                  disabled: ke,
                   className: "text-[11px] px-2.5 py-1 rounded-md font-semibold transition-opacity hover:opacity-85 disabled:opacity-60 disabled:cursor-wait inline-flex items-center gap-1",
                   style: { background: "var(--danger)", color: "var(--bg)" },
-                  onClick: P,
+                  onClick: F,
                   children: [
-                    re && (v == null ? void 0 : v.action) === "reject" && /* @__PURE__ */ e(Qe, { size: 10 }),
-                    re && (v == null ? void 0 : v.action) === "reject" ? "Rejecting…" : "✕ Reject"
+                    ke && (W == null ? void 0 : W.action) === "reject" && /* @__PURE__ */ e(ft, { size: 10 }),
+                    ke && (W == null ? void 0 : W.action) === "reject" ? "Rejecting…" : "✕ Reject"
                   ]
                 }
               ),
-              re && /* @__PURE__ */ a("span", { className: "text-[10px] inline-flex items-center gap-1", style: { color: "var(--muted)" }, children: [
-                /* @__PURE__ */ e(Qe, { size: 10 }),
+              ke && /* @__PURE__ */ a("span", { className: "text-[10px] inline-flex items-center gap-1", style: { color: "var(--muted)" }, children: [
+                /* @__PURE__ */ e(ft, { size: 10 }),
                 " ",
-                v == null ? void 0 : v.action,
+                W == null ? void 0 : W.action,
                 " sent — runtime processing…"
               ] }),
-              Ae && /* @__PURE__ */ a(
+              Xe && /* @__PURE__ */ a(
                 "span",
                 {
                   className: "text-[10px]",
                   style: { color: "var(--danger)" },
-                  title: (v == null ? void 0 : v.rejection_reason) || "rejected",
+                  title: (W == null ? void 0 : W.rejection_reason) || "rejected",
                   children: [
                     "⚠ ",
-                    v == null ? void 0 : v.action,
+                    W == null ? void 0 : W.action,
                     " rejected: ",
-                    (v == null ? void 0 : v.rejection_reason) || "see gate result"
+                    (W == null ? void 0 : W.rejection_reason) || "see gate result"
                   ]
                 }
               ),
-              Se && /* @__PURE__ */ a("span", { className: "text-[10px]", style: { color: "var(--ok)" }, children: [
+              De && /* @__PURE__ */ a("span", { className: "text-[10px]", style: { color: "var(--ok)" }, children: [
                 "✓ ",
-                v == null ? void 0 : v.action,
+                W == null ? void 0 : W.action,
                 " applied"
               ] })
             ] });
           })(),
-          u && g && /* @__PURE__ */ a(
+          u && i && /* @__PURE__ */ a(
             "button",
             {
               className: "text-[11px] px-2.5 py-1 rounded-md font-semibold transition-opacity hover:opacity-85 inline-flex items-center gap-1",
               style: { background: "var(--bg-hover, var(--border))", color: "var(--accent)", border: "1px solid color-mix(in srgb, var(--accent) 40%, var(--border))" },
-              onClick: g,
+              onClick: i,
               title: `Open the ${u.step} producer session${u.retained ? " (held for this gate)" : ""}`,
               children: [
                 /* @__PURE__ */ e("span", { "aria-hidden": "true", children: "↗" }),
@@ -2312,15 +2933,15 @@ ${C.rationale}` : ""}`,
             }
           ),
           (t.stage === "gate-review" || /review/i.test(t.stage || "")) && (() => {
-            var Se, we, ye;
-            const C = (Se = t.source) == null ? void 0 : Se.repo;
-            if (!C) return null;
-            const v = (we = t.artifacts) == null ? void 0 : we.pr_url, re = v && ((ye = /\/pull\/(\d+)/.exec(v)) == null ? void 0 : ye[1]), Ae = `/code-review-sage?repo=${encodeURIComponent("https://github.com/" + C)}` + (re ? `&pr=${re}` : "");
+            var De, Fe, qe;
+            const $ = (De = t.source) == null ? void 0 : De.repo;
+            if (!$) return null;
+            const W = (Fe = t.artifacts) == null ? void 0 : Fe.pr_url, ke = W && ((qe = /\/pull\/(\d+)/.exec(W)) == null ? void 0 : qe[1]), Xe = `/code-review-sage?repo=${encodeURIComponent("https://github.com/" + $)}` + (ke ? `&pr=${ke}` : "");
             return /* @__PURE__ */ a(
               "a",
               {
-                href: Ae,
-                title: v ? `Deep-review PR #${re} in Code Review Sage` : `Open Code Review Sage for ${C}`,
+                href: Xe,
+                title: W ? `Deep-review PR #${ke} in Code Review Sage` : `Open Code Review Sage for ${$}`,
                 className: "text-[11px] px-2.5 py-1 rounded-md font-semibold transition-opacity hover:opacity-85 inline-flex items-center gap-1",
                 style: { background: "var(--bg-hover, var(--border))", color: "var(--accent)", border: "1px solid color-mix(in srgb, var(--accent) 40%, var(--border))" },
                 children: [
@@ -2334,7 +2955,7 @@ ${C.rationale}` : ""}`,
             );
           })()
         ] }),
-        V && U.map((C) => /* @__PURE__ */ a(
+        x && ve.map(($) => /* @__PURE__ */ a(
           "div",
           {
             className: "mt-2 p-1.5 rounded-md text-[11px]",
@@ -2342,11 +2963,11 @@ ${C.rationale}` : ""}`,
             children: [
               /* @__PURE__ */ a("div", { style: { color: "var(--text, var(--muted))" }, children: [
                 "⚖ ",
-                C.question || C.kind
+                $.question || $.kind
               ] }),
               /* @__PURE__ */ a("div", { className: "mt-1 text-[10px]", style: { color: "var(--muted)" }, children: [
                 "This records acknowledgement only; it does not enact ",
-                C.action || "the proposed pipeline change",
+                $.action || "the proposed pipeline change",
                 "."
               ] }),
               /* @__PURE__ */ e(
@@ -2354,28 +2975,29 @@ ${C.rationale}` : ""}`,
                 {
                   className: "mt-1 px-2 py-0.5 rounded font-semibold",
                   style: { background: "var(--bg-hover, var(--border))", color: "var(--accent)" },
-                  onClick: () => V(C.id),
+                  onClick: () => x($.id),
                   children: "Acknowledge & continue"
                 }
               )
             ]
           },
-          C.id
+          $.id
         )),
-        q && /* @__PURE__ */ e(sa, { live: q }),
-        (w || I) && /* @__PURE__ */ a(
+        D && /* @__PURE__ */ e(Ga, { live: D }),
+        /* @__PURE__ */ e(ja, { card: t, openChat: _ }),
+        (b || k || C && C.length || B) && /* @__PURE__ */ a(
           "div",
           {
             className: "mt-2 flex items-center gap-2 flex-wrap",
             style: { borderTop: "1px dashed var(--border)", paddingTop: "6px" },
             children: [
               /* @__PURE__ */ e("span", { className: "text-[9px] uppercase tracking-wider select-none", style: { color: "var(--muted)" }, children: "⚡ actions" }),
-              w && (ee ? /* @__PURE__ */ a("div", { className: "w-full flex flex-col gap-1", children: [
+              b && (ye ? /* @__PURE__ */ a("div", { className: "w-full flex flex-col gap-1", children: [
                 /* @__PURE__ */ e(
                   "textarea",
                   {
-                    value: se,
-                    onChange: (C) => ie(C.target.value),
+                    value: me,
+                    onChange: ($) => Se($.target.value),
                     placeholder: "Interject: design/spec note, re-scope…",
                     rows: 2,
                     className: "w-full text-[11px] px-2 py-1 rounded outline-none resize-none",
@@ -2389,7 +3011,7 @@ ${C.rationale}` : ""}`,
                       className: "text-[11px] px-2 py-0.5 rounded font-semibold",
                       style: { background: "var(--accent)", color: "var(--bg)" },
                       onClick: () => {
-                        se.trim() && (w("note", se.trim()), ie(""), S(!1));
+                        me.trim() && (b("note", me.trim()), Se(""), ie(!1));
                       },
                       children: "Send"
                     }
@@ -2400,7 +3022,7 @@ ${C.rationale}` : ""}`,
                       className: "text-[11px] px-2 py-0.5 rounded",
                       style: { color: "var(--muted)" },
                       onClick: () => {
-                        S(!1), ie("");
+                        ie(!1), Se("");
                       },
                       children: "Cancel"
                     }
@@ -2411,60 +3033,104 @@ ${C.rationale}` : ""}`,
                 {
                   className: "text-[10px] hover:underline",
                   style: { color: "var(--muted)" },
-                  onClick: () => S(!0),
+                  onClick: () => ie(!0),
                   children: "✏️ interject"
                 }
               )),
-              I && /* @__PURE__ */ e(
+              k && /* @__PURE__ */ e(
                 "button",
                 {
                   className: "text-[10px] hover:underline",
                   style: { color: "var(--muted)" },
-                  title: (de = t.orchestrator_session) != null && de.slot_key ? "Open this pipeline’s orchestrator session" : "Trigger an inspectable orchestrator session for this card",
-                  onClick: () => I(),
-                  children: ($ = t.orchestrator_session) != null && $.slot_key ? "⚙ open orchestrator" : "⚙ orchestrator"
+                  title: (rt = t.orchestrator_session) != null && rt.slot_key || (ae = t.orchestrator_session) != null && ae.session_key ? "Open this pipeline’s orchestrator session" : "Trigger an inspectable orchestrator session for this card",
+                  onClick: () => k(),
+                  children: (lt = t.orchestrator_session) != null && lt.slot_key || (pe = t.orchestrator_session) != null && pe.session_key ? "⚙ open orchestrator" : "⚙ orchestrator"
                 }
               ),
-              ve && /* @__PURE__ */ a(
+              oe && /* @__PURE__ */ a(
                 "button",
                 {
                   className: "text-[10px] hover:underline inline-flex items-center gap-0.5",
                   style: { color: "var(--muted)" },
                   title: "Card timeline — the ordered story of what happened",
-                  onClick: () => Z(!0),
+                  onClick: () => $e(!0),
                   children: [
                     "📜 timeline",
-                    D.some((C) => C.needs_human) ? " 🔴" : "",
-                    X.length > 0 ? ` 🌿${X.length}` : ""
+                    U.some(($) => $.needs_human) ? " 🔴" : "",
+                    te.length > 0 ? ` 🌿${te.length}` : ""
                   ]
+                }
+              ),
+              I && /* @__PURE__ */ e(La, { onRequest: I }),
+              (C || []).map(($) => /* @__PURE__ */ a(
+                "button",
+                {
+                  className: "text-[10px] hover:underline",
+                  style: { color: "var(--accent)" },
+                  title: `Open the ${$.step} step session`,
+                  onClick: () => $.open(),
+                  children: [
+                    "⚙ ",
+                    $.step
+                  ]
+                },
+                $.step
+              )),
+              B && !["cancelled", "canceled", "retired", "merged"].includes(String(t.lifecycle || "")) && /* @__PURE__ */ e(
+                "button",
+                {
+                  className: "text-[10px] hover:underline",
+                  style: { color: "var(--danger, #e66)" },
+                  title: "Cancel this card (cooperative — revokes writes, retains worktree until terminal)",
+                  onClick: () => B(),
+                  children: "⏹ cancel"
+                }
+              ),
+              /* @__PURE__ */ e(
+                "button",
+                {
+                  className: "text-[10px] hover:underline",
+                  style: { color: "var(--muted)" },
+                  title: "Card details (read-only)",
+                  onClick: () => _e(!0),
+                  children: "🔍 details"
                 }
               )
             ]
           }
         ),
-        be && /* @__PURE__ */ e(
-          ca,
+        ee && /* @__PURE__ */ e(
+          Ka,
           {
             card: t,
-            events: D,
-            children: X,
-            parent: ue,
-            onOpenCard: R,
-            onClose: () => Z(!1)
+            events: U,
+            children: te,
+            parent: Oe,
+            onOpenCard: A,
+            onClose: () => $e(!1)
           }
         ),
-        ne && h && /* @__PURE__ */ e(
-          Jr,
+        Te && /* @__PURE__ */ e(
+          Oa,
           {
             card: t,
-            inspection: h,
+            cardStatus: s,
+            effectiveCapability: String(l),
+            onClose: () => _e(!1)
+          }
+        ),
+        Q && Z && /* @__PURE__ */ e(
+          Aa,
+          {
+            card: t,
+            inspection: Z,
             producerSession: u,
-            onClose: () => oe(!1),
-            onOpenProducer: g,
-            onApprove: d,
-            onReject: T,
-            onInterject: w ? () => {
-              oe(!1), S(!0);
+            onClose: () => z(!1),
+            onOpenProducer: i,
+            onApprove: c,
+            onReject: g,
+            onInterject: b ? () => {
+              z(!1), ie(!0);
             } : void 0
           }
         )
@@ -2472,8 +3138,8 @@ ${C.rationale}` : ""}`,
     }
   );
 }
-function Ct({ title: t, count: r, children: i, id: o }) {
-  return /* @__PURE__ */ a("div", { id: o, className: "min-w-[210px] max-w-[240px] flex-shrink-0", children: [
+function bt({ title: t, count: r, children: o, id: s }) {
+  return /* @__PURE__ */ a("div", { id: s, className: "min-w-[210px] max-w-[240px] flex-shrink-0", children: [
     /* @__PURE__ */ a("div", { className: "flex items-center gap-2 mb-2 px-0.5 sticky top-0", children: [
       /* @__PURE__ */ e("span", { className: "text-[11px] font-semibold uppercase tracking-wide truncate", style: { color: "var(--muted-strong, var(--muted))" }, children: t }),
       /* @__PURE__ */ e(
@@ -2492,28 +3158,28 @@ function Ct({ title: t, count: r, children: i, id: o }) {
         style: { color: "var(--muted)", border: "1px dashed var(--border)" },
         children: "empty"
       }
-    ) : i })
+    ) : o })
   ] });
 }
-function Qr({ config: t, onSet: r }) {
-  function i({ label: o, value: l, options: m, tokens: u, onPick: g }) {
+function qa({ config: t, onSet: r }) {
+  function o({ label: s, value: l, options: p, tokens: u, onPick: i }) {
     return /* @__PURE__ */ a("div", { className: "flex items-center gap-2", children: [
-      /* @__PURE__ */ e("span", { className: "text-[10px] uppercase tracking-wider", style: { color: "var(--muted)" }, children: o }),
-      /* @__PURE__ */ e("div", { className: "flex gap-0.5 p-0.5 rounded-md", style: { background: "var(--bg-elevated, var(--card))", border: "1px solid var(--border)" }, children: m.map((d) => {
-        const T = l === d;
+      /* @__PURE__ */ e("span", { className: "text-[10px] uppercase tracking-wider", style: { color: "var(--muted)" }, children: s }),
+      /* @__PURE__ */ e("div", { className: "flex gap-0.5 p-0.5 rounded-md", style: { background: "var(--bg-elevated, var(--card))", border: "1px solid var(--border)" }, children: p.map((c) => {
+        const g = l === c;
         return /* @__PURE__ */ e(
           "button",
           {
-            onClick: () => g(d),
+            onClick: () => i(c),
             className: "text-[11px] px-2 py-0.5 rounded font-semibold transition-all",
             style: {
-              color: T ? u[d] : "var(--muted)",
-              background: T ? `color-mix(in srgb, ${u[d]} 16%, transparent)` : "transparent",
-              boxShadow: T ? `inset 0 0 0 1px color-mix(in srgb, ${u[d]} 45%, transparent)` : "none"
+              color: g ? u[c] : "var(--muted)",
+              background: g ? `color-mix(in srgb, ${u[c]} 16%, transparent)` : "transparent",
+              boxShadow: g ? `inset 0 0 0 1px color-mix(in srgb, ${u[c]} 45%, transparent)` : "none"
             },
-            children: d
+            children: c
           },
-          d
+          c
         );
       }) })
     ] });
@@ -2525,20 +3191,88 @@ function Qr({ config: t, onSet: r }) {
       style: { background: "var(--card)", border: "1px solid var(--border)" },
       children: [
         /* @__PURE__ */ e("span", { className: "text-xs font-semibold", style: { color: "var(--muted-strong, var(--muted))" }, children: "Defaults" }),
-        /* @__PURE__ */ e(i, { label: "Trust", value: t.trust, options: Fe, tokens: Rt, onPick: (o) => r({ trust: o }) }),
-        /* @__PURE__ */ e(i, { label: "Depth", value: t.depth, options: Je, tokens: $t, onPick: (o) => r({ depth: o }) }),
+        /* @__PURE__ */ e(o, { label: "Trust", value: t.trust, options: st, tokens: Xt, onPick: (s) => r({ trust: s }) }),
+        /* @__PURE__ */ e(o, { label: "Depth", value: t.depth, options: xt, tokens: Yt, onPick: (s) => r({ depth: s }) }),
         /* @__PURE__ */ e("span", { className: "text-[10px] ml-auto", style: { color: "var(--muted)" }, children: "click a card badge to override per-card" })
       ]
     }
   );
 }
-function ea({ cards: t }) {
+const Ia = {
+  "step-completed": "var(--ok)",
+  completed: "var(--ok)",
+  "step-running": "var(--info)",
+  "step-blocked": "var(--warn)",
+  blocked: "var(--warn)",
+  errored: "var(--danger, #e66)",
+  "decision-open": "var(--warn)",
+  "decision-resolved": "var(--accent)",
+  "gate-approved": "var(--ok)",
+  "gate-rejected": "var(--danger, #e66)",
+  promoted: "var(--muted)"
+};
+function Ma({ pipeline: t, cards: r, extras: o, onOpenCard: s }) {
+  const { events: l, actors: p, now: u } = Ce(
+    () => ma(t, r, o),
+    [t, r, o]
+  );
+  return t ? l.length === 0 ? /* @__PURE__ */ e("div", { className: "text-sm p-3", style: { color: "var(--muted)" }, children: "No recorded events for this pipeline yet." }) : /* @__PURE__ */ a("div", { className: "w-full overflow-x-auto pb-4", children: [
+    u && /* @__PURE__ */ a("div", { className: "text-[10px] mb-2 flex flex-wrap gap-2", style: { color: "var(--muted)" }, children: [
+      /* @__PURE__ */ e("span", { children: "now:" }),
+      /* @__PURE__ */ a("span", { children: [
+        "▶ running ",
+        (u.running_node_ids || []).length
+      ] }),
+      /* @__PURE__ */ a("span", { children: [
+        "◷ ready ",
+        (u.ready_node_ids || []).length
+      ] }),
+      /* @__PURE__ */ a("span", { style: { color: "var(--warn)" }, children: [
+        "⛔ blocked ",
+        (u.blocked_node_ids || []).length
+      ] })
+    ] }),
+    /* @__PURE__ */ e("div", { className: "text-[10px] mb-2 flex flex-wrap gap-3", style: { color: "var(--muted)" }, children: p.map((i) => /* @__PURE__ */ a("span", { children: [
+      Sr[i] || "•",
+      " ",
+      i
+    ] }, i)) }),
+    /* @__PURE__ */ e("ol", { className: "flex flex-col gap-1.5", style: { borderLeft: "1px solid var(--border)", paddingLeft: "10px" }, children: l.map((i) => {
+      const c = Ia[i.kind] || "var(--text)";
+      return /* @__PURE__ */ a("li", { className: "flex items-start gap-2 text-[11px]", children: [
+        /* @__PURE__ */ e("span", { className: "text-[9px] flex-shrink-0 mt-0.5 tabular-nums", style: { color: "var(--muted)", minWidth: "62px" }, children: i.at ? i.at.replace("T", " ").replace("Z", "").slice(5) : "" }),
+        /* @__PURE__ */ e("span", { "aria-hidden": "true", className: "flex-shrink-0 mt-0.5", title: i.actor, children: i.glyph }),
+        /* @__PURE__ */ a("div", { className: "min-w-0 flex-1", children: [
+          /* @__PURE__ */ a(
+            "button",
+            {
+              className: "text-left hover:underline",
+              onClick: () => i.cardId && (s == null ? void 0 : s(i.cardId)),
+              title: i.cardId ? "Open card" : void 0,
+              style: { color: c },
+              children: [
+                i.headline,
+                i.inferred && /* @__PURE__ */ e("span", { className: "ml-1 text-[8px] px-1 rounded-full", style: { color: "var(--muted)", border: "1px solid var(--border)" }, children: "~inferred" }),
+                i.needs_human && /* @__PURE__ */ e("span", { className: "ml-1", children: "🔴" })
+              ]
+            }
+          ),
+          i.detail && /* @__PURE__ */ a("div", { className: "text-[9px]", style: { color: "var(--muted)" }, children: [
+            i.detail,
+            i.cardId ? ` · ${i.cardId}` : ""
+          ] })
+        ] })
+      ] }, i.id);
+    }) })
+  ] }) : /* @__PURE__ */ e("div", { className: "text-sm p-3", style: { color: "var(--muted)" }, children: "No pipeline selected." });
+}
+function Da({ cards: t }) {
   const r = t.flatMap(
-    (i) => (i.parked || []).map((o) => {
+    (o) => (o.parked || []).map((s) => {
       var l;
-      return { ...o, cardTitle: i.title, repo: (l = i.source) == null ? void 0 : l.repo };
+      return { ...s, cardTitle: o.title, repo: (l = o.source) == null ? void 0 : l.repo };
     })
-  ).sort((i, o) => (o.at || "").localeCompare(i.at || ""));
+  ).sort((o, s) => (s.at || "").localeCompare(o.at || ""));
   return r.length === 0 ? /* @__PURE__ */ a("div", { className: "rounded-lg p-6 text-center max-w-xl", style: { border: "1px dashed var(--border)", color: "var(--muted)" }, children: [
     /* @__PURE__ */ e("div", { className: "text-sm font-medium", style: { color: "var(--text)" }, children: "No parked ideas yet" }),
     /* @__PURE__ */ a("div", { className: "text-xs mt-1", children: [
@@ -2546,33 +3280,33 @@ function ea({ cards: t }) {
       /* @__PURE__ */ e("code", { style: { color: "var(--warn)" }, children: "dlc-backlog" }),
       " issues on each card's owned repo. The intake cron back-feeds them as new cards."
     ] })
-  ] }) : /* @__PURE__ */ e("div", { className: "flex flex-col gap-2 max-w-2xl", children: r.map((i) => /* @__PURE__ */ a("div", { className: "rounded-lg p-3", style: { background: "var(--card)", border: "1px solid var(--border)", borderLeft: "2px solid var(--warn)" }, children: [
-    /* @__PURE__ */ e("div", { className: "text-[13px] font-medium", style: { color: "var(--text-strong, var(--text))" }, children: i.note }),
+  ] }) : /* @__PURE__ */ e("div", { className: "flex flex-col gap-2 max-w-2xl", children: r.map((o) => /* @__PURE__ */ a("div", { className: "rounded-lg p-3", style: { background: "var(--card)", border: "1px solid var(--border)", borderLeft: "2px solid var(--warn)" }, children: [
+    /* @__PURE__ */ e("div", { className: "text-[13px] font-medium", style: { color: "var(--text-strong, var(--text))" }, children: o.note }),
     /* @__PURE__ */ a("div", { className: "text-[11px] mt-1 flex items-center gap-2 flex-wrap", style: { color: "var(--muted)" }, children: [
       /* @__PURE__ */ a("span", { children: [
         "from ",
-        /* @__PURE__ */ e("span", { style: { color: "var(--text)" }, children: i.cardTitle })
+        /* @__PURE__ */ e("span", { style: { color: "var(--text)" }, children: o.cardTitle })
       ] }),
-      i.phase && /* @__PURE__ */ a("span", { children: [
+      o.phase && /* @__PURE__ */ a("span", { children: [
         "· parked at ",
-        i.phase
+        o.phase
       ] }),
-      i.repo && /* @__PURE__ */ a("span", { children: [
+      o.repo && /* @__PURE__ */ a("span", { children: [
         "· ",
-        i.repo
+        o.repo
       ] }),
-      i.issue_url && /* @__PURE__ */ e("a", { href: i.issue_url, target: "_blank", rel: "noreferrer", className: "hover:underline", style: { color: "var(--accent)" }, children: "view issue →" })
+      o.issue_url && /* @__PURE__ */ e("a", { href: o.issue_url, target: "_blank", rel: "noreferrer", className: "hover:underline", style: { color: "var(--accent)" }, children: "view issue →" })
     ] })
-  ] }, i.id)) });
+  ] }, o.id)) });
 }
-function ta({ repos: t, selected: r, onToggle: i, onClear: o, onAddWorkspace: l, onEdit: m }) {
-  const u = t.reduce((T, x) => T + x.count, 0), g = r.size === 0, d = ({ name: T, count: x, label: j, checked: f, onClick: w, isAll: V }) => {
-    const [I, q] = N(!1);
+function Ba({ repos: t, selected: r, onToggle: o, onClear: s, onAddWorkspace: l, onEdit: p }) {
+  const u = t.reduce((g, v) => g + v.count, 0), i = r.size === 0, c = ({ name: g, count: v, label: E, checked: f, onClick: b, isAll: x }) => {
+    const [k, D] = w(!1);
     return /* @__PURE__ */ a(
       "div",
       {
-        onMouseEnter: () => q(!0),
-        onMouseLeave: () => q(!1),
+        onMouseEnter: () => D(!0),
+        onMouseLeave: () => D(!1),
         className: "relative w-full rounded-md transition-all flex items-center",
         style: {
           background: f ? "color-mix(in srgb, var(--accent) 16%, transparent)" : "transparent",
@@ -2582,10 +3316,10 @@ function ta({ repos: t, selected: r, onToggle: i, onClear: o, onAddWorkspace: l,
           /* @__PURE__ */ a(
             "button",
             {
-              onClick: w,
+              onClick: b,
               className: "flex-1 min-w-0 text-left px-2.5 py-2 flex items-center gap-2",
               children: [
-                V ? /* @__PURE__ */ e("span", { className: "w-1.5 h-1.5 rounded-full flex-shrink-0", style: { background: f ? "var(--accent)" : "var(--border-strong, var(--border))" } }) : /* @__PURE__ */ e(
+                x ? /* @__PURE__ */ e("span", { className: "w-1.5 h-1.5 rounded-full flex-shrink-0", style: { background: f ? "var(--accent)" : "var(--border-strong, var(--border))" } }) : /* @__PURE__ */ e(
                   "span",
                   {
                     className: "w-3.5 h-3.5 rounded flex items-center justify-center flex-shrink-0",
@@ -2601,7 +3335,7 @@ function ta({ repos: t, selected: r, onToggle: i, onClear: o, onAddWorkspace: l,
                   {
                     className: "text-[12px] font-medium truncate flex-1",
                     style: { color: f ? "var(--text-strong, var(--text))" : "var(--muted-strong, var(--muted))" },
-                    children: j
+                    children: E
                   }
                 ),
                 /* @__PURE__ */ e(
@@ -2609,35 +3343,35 @@ function ta({ repos: t, selected: r, onToggle: i, onClear: o, onAddWorkspace: l,
                   {
                     className: "text-[10px] px-1.5 py-0.5 rounded-full font-semibold flex-shrink-0",
                     style: { background: "var(--bg-hover, var(--border))", color: "var(--muted)" },
-                    children: x
+                    children: v
                   }
                 )
               ]
             }
           ),
-          !V && T && /* @__PURE__ */ e(
+          !x && g && /* @__PURE__ */ e(
             "button",
             {
-              onClick: (O) => {
-                O.stopPropagation(), m(T);
+              onClick: (q) => {
+                q.stopPropagation(), p(g);
               },
-              title: `Edit pipeline "${j}"`,
-              "aria-label": `Edit pipeline ${j}`,
+              title: `Edit pipeline "${E}"`,
+              "aria-label": `Edit pipeline ${E}`,
               className: "mr-1.5 w-6 h-6 rounded flex items-center justify-center flex-shrink-0 transition-all",
               style: {
-                opacity: I ? 1 : 0,
-                pointerEvents: I ? "auto" : "none",
+                opacity: k ? 1 : 0,
+                pointerEvents: k ? "auto" : "none",
                 color: "var(--text-strong, var(--text))",
                 background: "var(--bg-hover, color-mix(in srgb, var(--accent) 12%, transparent))",
                 border: "1px solid var(--border-strong, var(--border))"
               },
-              onMouseEnter: (O) => {
-                const R = O.currentTarget;
-                R.style.color = "var(--accent)", R.style.borderColor = "var(--accent)";
+              onMouseEnter: (q) => {
+                const A = q.currentTarget;
+                A.style.color = "var(--accent)", A.style.borderColor = "var(--accent)";
               },
-              onMouseLeave: (O) => {
-                const R = O.currentTarget;
-                R.style.color = "var(--text-strong, var(--text))", R.style.borderColor = "var(--border-strong, var(--border))";
+              onMouseLeave: (q) => {
+                const A = q.currentTarget;
+                A.style.color = "var(--text-strong, var(--text))", A.style.borderColor = "var(--border-strong, var(--border))";
               },
               children: /* @__PURE__ */ e("svg", { width: "13", height: "13", viewBox: "0 0 16 16", fill: "none", children: /* @__PURE__ */ e("path", { d: "M11.5 1.5l3 3L5 14l-3.5.5L2 11 11.5 1.5z", stroke: "currentColor", strokeWidth: "1.6", strokeLinejoin: "round" }) })
             }
@@ -2654,19 +3388,19 @@ function ta({ repos: t, selected: r, onToggle: i, onClear: o, onAddWorkspace: l,
       children: [
         /* @__PURE__ */ a("div", { className: "flex items-center justify-between px-2.5 mb-1", children: [
           /* @__PURE__ */ e("span", { className: "text-[10px] uppercase tracking-wider", style: { color: "var(--muted)" }, children: "Workspaces" }),
-          r.size > 0 && /* @__PURE__ */ e("button", { onClick: o, className: "text-[10px] hover:underline", style: { color: "var(--accent)" }, children: "clear" })
+          r.size > 0 && /* @__PURE__ */ e("button", { onClick: s, className: "text-[10px] hover:underline", style: { color: "var(--accent)" }, children: "clear" })
         ] }),
-        /* @__PURE__ */ e(d, { isAll: !0, count: u, label: "All repos", checked: g, onClick: o }),
-        t.map((T) => /* @__PURE__ */ e(
-          d,
+        /* @__PURE__ */ e(c, { isAll: !0, count: u, label: "All repos", checked: i, onClick: s }),
+        t.map((g) => /* @__PURE__ */ e(
+          c,
           {
-            name: T.name,
-            count: T.count,
-            label: (ar.has(T.name) ? "Example: " : "") + (T.name.includes("/") ? T.name.split("/")[1] : T.name),
-            checked: r.has(T.name),
-            onClick: () => i(T.name)
+            name: g.name,
+            count: g.count,
+            label: (Rr.has(g.name) ? "Example: " : "") + (g.name.includes("/") ? g.name.split("/")[1] : g.name),
+            checked: r.has(g.name),
+            onClick: () => o(g.name)
           },
-          T.name
+          g.name
         )),
         /* @__PURE__ */ a(
           "button",
@@ -2689,7 +3423,7 @@ function ta({ repos: t, selected: r, onToggle: i, onClear: o, onAddWorkspace: l,
     }
   );
 }
-const ra = [
+const za = [
   "read",
   "write",
   "shell",
@@ -2700,17 +3434,17 @@ const ra = [
   "task_run",
   "send_message"
 ];
-function aa({ initial: t, agentProfiles: r, crews: i, repo: o, stepName: l, onSave: m, onSaveCrew: u, onClose: g }) {
-  const [d, T] = N(t.name || ""), [x, j] = N(t.role || ""), [f, w] = N(t.tools || ["read"]), [V, I] = N(t.model || "auto"), [q, O] = N(t.crew || ""), [R, B] = N(t.addenda || []), [_, M] = N(t.capability || ""), [K, y] = N(t.trust || ""), [ee, S] = N(t.depth || ""), [se, ie] = N(!1), ne = r.find((h) => h.name === d), oe = i.find((h) => h.name === q), be = [.../* @__PURE__ */ new Set([...ra, ...f])], Z = (h) => {
-    const P = Vr({ name: d, role: x, tools: f, model: V, crew: q, addenda: R, capability: _, trust: K, depth: ee }, h);
-    T(P.name), w(P.tools || []), I(P.model || "auto"), P.capability && M(P.capability);
-  }, D = (h) => w((P) => P.includes(h) ? P.filter((U) => U !== h) : [...P, h]), X = () => B((h) => {
-    var P;
-    return h.length >= 3 ? h : [...h, { crew: ((P = i[0]) == null ? void 0 : P.name) || "", when: "always", writes: "" }];
-  }), pe = (h, P) => B((U) => U.map((le, ke) => ke === h ? { ...le, ...P } : le)), ue = (h) => B((P) => P.filter((U, le) => le !== h)), ve = d.trim().length > 0;
+function Pa({ initial: t, agentProfiles: r, crews: o, repo: s, stepName: l, onSave: p, onSaveCrew: u, onClose: i }) {
+  const [c, g] = w(t.name || ""), [v, E] = w(t.role || ""), [f, b] = w(t.tools || ["read"]), [x, k] = w(t.model || "auto"), [D, q] = w(t.crew || ""), [A, I] = w(t.addenda || []), [C, B] = w(t.capability || ""), [X, y] = w(t.trust || ""), [J, S] = w(t.depth || ""), [he, ye] = w(!1), ie = r.find((_) => _.name === c), me = o.find((_) => _.name === D), Se = [.../* @__PURE__ */ new Set([...za, ...f])], Q = (_) => {
+    const U = Sa({ name: c, role: v, tools: f, model: x, crew: D, addenda: A, capability: C, trust: X, depth: J }, _);
+    g(U.name), b(U.tools || []), k(U.model || "auto"), U.capability && B(U.capability);
+  }, z = (_) => b((U) => U.includes(_) ? U.filter((te) => te !== _) : [...U, _]), ee = () => I((_) => {
+    var U;
+    return _.length >= 3 ? _ : [..._, { crew: ((U = o[0]) == null ? void 0 : U.name) || "", when: "always", writes: "" }];
+  }), $e = (_, U) => I((te) => te.map((we, Oe) => Oe === _ ? { ...we, ...U } : we)), Te = (_) => I((U) => U.filter((te, we) => we !== _)), _e = c.trim().length > 0;
   return /* @__PURE__ */ a("div", { className: "flex flex-col h-full", children: [
     /* @__PURE__ */ a("div", { className: "px-5 py-3 flex items-center gap-2", style: { borderBottom: "1px solid var(--border)" }, children: [
-      /* @__PURE__ */ e("button", { onClick: g, className: "text-sm leading-none", style: { color: "var(--accent)" }, children: "← Steps" }),
+      /* @__PURE__ */ e("button", { onClick: i, className: "text-sm leading-none", style: { color: "var(--accent)" }, children: "← Steps" }),
       /* @__PURE__ */ a("div", { className: "ml-1", children: [
         /* @__PURE__ */ e("div", { className: "text-sm font-semibold", style: { color: "var(--text-strong, var(--text))" }, children: "Configure step execution" }),
         /* @__PURE__ */ e("div", { className: "text-[11px]", style: { color: "var(--muted)" }, children: "Step request + capability profile + optional global crew route" })
@@ -2731,38 +3465,38 @@ function aa({ initial: t, agentProfiles: r, crews: i, repo: o, stepName: l, onSa
           /* @__PURE__ */ e(
             "button",
             {
-              onClick: () => ie(!0),
+              onClick: () => ye(!0),
               className: "text-[10px] px-2 py-1 rounded-md font-semibold",
               style: { color: "var(--accent)", border: "1px solid var(--border)" },
               children: "Browse agents & crews"
             }
           )
         ] }),
-        /* @__PURE__ */ e("div", { className: "mt-1 flex flex-wrap gap-1.5", children: r.map((h) => /* @__PURE__ */ e(
+        /* @__PURE__ */ e("div", { className: "mt-1 flex flex-wrap gap-1.5", children: r.map((_) => /* @__PURE__ */ e(
           "button",
           {
-            onClick: () => Z(h),
-            disabled: h.status !== "loaded",
-            title: h.description || h.name,
+            onClick: () => Q(_),
+            disabled: _.status !== "loaded",
+            title: _.description || _.name,
             className: "text-[11px] px-2 py-1 rounded-md font-medium disabled:opacity-40",
             style: {
-              background: d === h.name ? "color-mix(in srgb, var(--accent) 16%, transparent)" : "var(--bg-hover, var(--border))",
-              color: d === h.name ? "var(--accent)" : "var(--muted-strong, var(--muted))",
-              boxShadow: d === h.name ? "inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent)" : "none"
+              background: c === _.name ? "color-mix(in srgb, var(--accent) 16%, transparent)" : "var(--bg-hover, var(--border))",
+              color: c === _.name ? "var(--accent)" : "var(--muted-strong, var(--muted))",
+              boxShadow: c === _.name ? "inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent)" : "none"
             },
-            children: h.name
+            children: _.name
           },
-          h.name
+          _.name
         )) }),
-        ne && /* @__PURE__ */ a("div", { className: "text-[10px] mt-1.5 rounded-md px-2 py-1.5", style: { color: "var(--muted)", background: "var(--bg-elevated, var(--bg))", border: "1px solid var(--border)" }, children: [
+        ie && /* @__PURE__ */ a("div", { className: "text-[10px] mt-1.5 rounded-md px-2 py-1.5", style: { color: "var(--muted)", background: "var(--bg-elevated, var(--bg))", border: "1px solid var(--border)" }, children: [
           "Loaded config: model ",
-          /* @__PURE__ */ e("code", { children: ne.model || "auto" }),
+          /* @__PURE__ */ e("code", { children: ie.model || "auto" }),
           " · ",
-          ne.tools.length,
+          ie.tools.length,
           " declared tool",
-          ne.tools.length === 1 ? "" : "s",
+          ie.tools.length === 1 ? "" : "s",
           " · ",
-          ne.allowedTools.length,
+          ie.allowedTools.length,
           " auto-approved. The step objective below remains pipeline-local."
         ] })
       ] }),
@@ -2771,8 +3505,8 @@ function aa({ initial: t, agentProfiles: r, crews: i, repo: o, stepName: l, onSa
         /* @__PURE__ */ e(
           "input",
           {
-            value: d,
-            onChange: (h) => T(h.target.value),
+            value: c,
+            onChange: (_) => g(_.target.value),
             placeholder: "e.g. impl-agent",
             className: "mt-1 w-full px-3 py-2 rounded-md text-sm outline-none",
             style: { background: "var(--bg-elevated, var(--bg))", border: "1px solid var(--border)", color: "var(--text)" }
@@ -2784,8 +3518,8 @@ function aa({ initial: t, agentProfiles: r, crews: i, repo: o, stepName: l, onSa
         /* @__PURE__ */ e(
           "textarea",
           {
-            value: x,
-            onChange: (h) => j(h.target.value),
+            value: v,
+            onChange: (_) => E(_.target.value),
             rows: 3,
             placeholder: "What this agent does in this step…",
             className: "mt-1 w-full px-3 py-2 rounded-md text-sm outline-none resize-y",
@@ -2795,21 +3529,21 @@ function aa({ initial: t, agentProfiles: r, crews: i, repo: o, stepName: l, onSa
       ] }),
       /* @__PURE__ */ a("div", { children: [
         /* @__PURE__ */ e("label", { className: "text-[11px] uppercase tracking-wider", style: { color: "var(--muted)" }, children: "Tools" }),
-        /* @__PURE__ */ e("div", { className: "mt-1 flex flex-wrap gap-1.5", children: be.map((h) => {
-          const P = f.includes(h);
+        /* @__PURE__ */ e("div", { className: "mt-1 flex flex-wrap gap-1.5", children: Se.map((_) => {
+          const U = f.includes(_);
           return /* @__PURE__ */ e(
             "button",
             {
-              onClick: () => D(h),
+              onClick: () => z(_),
               className: "text-[11px] px-2 py-1 rounded-md font-medium transition-all",
               style: {
-                background: P ? "color-mix(in srgb, var(--accent) 16%, transparent)" : "var(--bg-hover, var(--border))",
-                color: P ? "var(--accent)" : "var(--muted)",
-                boxShadow: P ? "inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent)" : "none"
+                background: U ? "color-mix(in srgb, var(--accent) 16%, transparent)" : "var(--bg-hover, var(--border))",
+                color: U ? "var(--accent)" : "var(--muted)",
+                boxShadow: U ? "inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent)" : "none"
               },
-              children: h
+              children: _
             },
-            h
+            _
           );
         }) })
       ] }),
@@ -2822,18 +3556,18 @@ function aa({ initial: t, agentProfiles: r, crews: i, repo: o, stepName: l, onSa
           /* @__PURE__ */ a(
             "select",
             {
-              value: _,
-              onChange: (h) => M(h.target.value),
+              value: C,
+              onChange: (_) => B(_.target.value),
               className: "w-40 px-2 py-1 rounded-md text-sm outline-none",
               style: { background: "var(--card)", border: "1px solid var(--border)", color: "var(--text)" },
               children: [
                 /* @__PURE__ */ e("option", { value: "", children: "auto-derived" }),
-                ["readonly", "authoring", "builder", "coordinator"].map((h) => /* @__PURE__ */ e("option", { value: h, children: h }, h))
+                ["readonly", "authoring", "builder", "coordinator"].map((_) => /* @__PURE__ */ e("option", { value: _, children: _ }, _))
               ]
             }
           )
         ] }),
-        /* @__PURE__ */ a("div", { className: "text-[10px] mt-2", style: { color: _ === "coordinator" ? "var(--warn)" : "var(--muted)" }, children: [
+        /* @__PURE__ */ a("div", { className: "text-[10px] mt-2", style: { color: C === "coordinator" ? "var(--warn)" : "var(--muted)" }, children: [
           "The tools above are requested/declared—not proof of runtime access. Actual crew authority comes from its ",
           /* @__PURE__ */ e("code", { children: "kiro_agent" }),
           " profile; widening remains trust-gated and handshake-verified."
@@ -2844,8 +3578,8 @@ function aa({ initial: t, agentProfiles: r, crews: i, repo: o, stepName: l, onSa
         /* @__PURE__ */ e(
           "input",
           {
-            value: V,
-            onChange: (h) => I(h.target.value),
+            value: x,
+            onChange: (_) => k(_.target.value),
             placeholder: "auto",
             className: "w-40 px-2 py-1 rounded-md text-sm outline-none",
             style: { background: "var(--bg-elevated, var(--bg))", border: "1px solid var(--border)", color: "var(--text)" }
@@ -2858,24 +3592,24 @@ function aa({ initial: t, agentProfiles: r, crews: i, repo: o, stepName: l, onSa
           /* @__PURE__ */ a(
             "select",
             {
-              value: q,
-              onChange: (h) => O(h.target.value),
+              value: D,
+              onChange: (_) => q(_.target.value),
               className: "w-52 px-2 py-1 rounded-md text-sm outline-none",
               style: { background: "var(--bg-elevated, var(--bg))", border: "1px solid var(--border)", color: "var(--text)" },
               children: [
                 /* @__PURE__ */ e("option", { value: "", children: "— none (use step agent) —" }),
-                i.map((h) => /* @__PURE__ */ e("option", { value: h.name, children: h.name }, h.name))
+                o.map((_) => /* @__PURE__ */ e("option", { value: _.name, children: _.name }, _.name))
               ]
             }
           )
         ] }),
-        oe && /* @__PURE__ */ a("div", { className: "text-[10px] mt-1 text-right", style: { color: "var(--muted)" }, children: [
+        me && /* @__PURE__ */ a("div", { className: "text-[10px] mt-1 text-right", style: { color: "var(--muted)" }, children: [
           "Global route ",
-          /* @__PURE__ */ e("code", { children: oe.name }),
+          /* @__PURE__ */ e("code", { children: me.name }),
           " → ",
-          /* @__PURE__ */ e("code", { children: oe.kiroAgent || "profile unknown" }),
-          oe.workspace ? ` · workspace ${oe.workspace}` : "",
-          oe.description ? ` · ${oe.description}` : ""
+          /* @__PURE__ */ e("code", { children: me.kiroAgent || "profile unknown" }),
+          me.workspace ? ` · workspace ${me.workspace}` : "",
+          me.description ? ` · ${me.description}` : ""
         ] })
       ] }),
       /* @__PURE__ */ a("div", { children: [
@@ -2884,8 +3618,8 @@ function aa({ initial: t, agentProfiles: r, crews: i, repo: o, stepName: l, onSa
           /* @__PURE__ */ e(
             "button",
             {
-              onClick: X,
-              disabled: R.length >= 3,
+              onClick: ee,
+              disabled: A.length >= 3,
               className: "text-[11px] px-2 py-0.5 rounded font-semibold disabled:opacity-40",
               style: { color: "var(--accent)", border: "1px dashed color-mix(in srgb, var(--accent) 50%, var(--border))" },
               children: "+ addendum"
@@ -2893,23 +3627,23 @@ function aa({ initial: t, agentProfiles: r, crews: i, repo: o, stepName: l, onSa
           )
         ] }),
         /* @__PURE__ */ e("div", { className: "text-[10px] mb-1.5", style: { color: "var(--muted)" }, children: "Run after the canon crew as separate passes (e.g. research, secure-design). Max 3." }),
-        R.length === 0 && /* @__PURE__ */ e("div", { className: "text-[11px] italic", style: { color: "var(--muted)" }, children: "none" }),
-        R.map((h, P) => /* @__PURE__ */ a("div", { className: "flex items-center gap-1.5 mb-1.5", children: [
+        A.length === 0 && /* @__PURE__ */ e("div", { className: "text-[11px] italic", style: { color: "var(--muted)" }, children: "none" }),
+        A.map((_, U) => /* @__PURE__ */ a("div", { className: "flex items-center gap-1.5 mb-1.5", children: [
           /* @__PURE__ */ e(
             "select",
             {
-              value: h.crew,
-              onChange: (U) => pe(P, { crew: U.target.value }),
+              value: _.crew,
+              onChange: (te) => $e(U, { crew: te.target.value }),
               className: "flex-1 min-w-0 px-2 py-1 rounded-md text-[12px] outline-none",
               style: { background: "var(--bg-elevated, var(--bg))", border: "1px solid var(--border)", color: "var(--text)" },
-              children: i.map((U) => /* @__PURE__ */ e("option", { value: U.name, children: U.name }, U.name))
+              children: o.map((te) => /* @__PURE__ */ e("option", { value: te.name, children: te.name }, te.name))
             }
           ),
           /* @__PURE__ */ a(
             "select",
             {
-              value: h.when || "always",
-              onChange: (U) => pe(P, { when: U.target.value }),
+              value: _.when || "always",
+              onChange: (te) => $e(U, { when: te.target.value }),
               title: "Integration trigger — when this addendum runs",
               className: "px-1.5 py-1 rounded-md text-[11px] outline-none",
               style: { background: "var(--bg-elevated, var(--bg))", border: "1px solid var(--border)", color: "var(--text)" },
@@ -2924,65 +3658,65 @@ function aa({ initial: t, agentProfiles: r, crews: i, repo: o, stepName: l, onSa
           /* @__PURE__ */ e(
             "input",
             {
-              value: h.writes || "",
-              onChange: (U) => pe(P, { writes: U.target.value }),
+              value: _.writes || "",
+              onChange: (te) => $e(U, { writes: te.target.value }),
               placeholder: "writes (e.g. research.md)",
               className: "w-32 px-2 py-1 rounded-md text-[11px] outline-none",
               style: { background: "var(--bg-elevated, var(--bg))", border: "1px solid var(--border)", color: "var(--text)" }
             }
           ),
-          /* @__PURE__ */ e("button", { onClick: () => ue(P), className: "w-5 h-5 flex items-center justify-center flex-shrink-0", style: { color: "var(--muted)" }, "aria-label": "Remove addendum", children: /* @__PURE__ */ e("svg", { width: "10", height: "10", viewBox: "0 0 12 12", children: /* @__PURE__ */ e("path", { d: "M2 2l8 8M10 2l-8 8", fill: "none", stroke: "currentColor", strokeWidth: "1.6", strokeLinecap: "round" }) }) })
-        ] }, P))
+          /* @__PURE__ */ e("button", { onClick: () => Te(U), className: "w-5 h-5 flex items-center justify-center flex-shrink-0", style: { color: "var(--muted)" }, "aria-label": "Remove addendum", children: /* @__PURE__ */ e("svg", { width: "10", height: "10", viewBox: "0 0 12 12", children: /* @__PURE__ */ e("path", { d: "M2 2l8 8M10 2l-8 8", fill: "none", stroke: "currentColor", strokeWidth: "1.6", strokeLinecap: "round" }) }) })
+        ] }, U))
       ] }),
       /* @__PURE__ */ a("div", { className: "flex items-center justify-between", children: [
         /* @__PURE__ */ e("span", { className: "text-[11px] uppercase tracking-wider", style: { color: "var(--muted)" }, children: "Trust" }),
-        /* @__PURE__ */ e("div", { className: "flex gap-0.5 p-0.5 rounded-md", style: { background: "var(--bg-elevated, var(--card))", border: "1px solid var(--border)" }, children: ["", ...Fe].map((h) => {
-          const P = K === h;
+        /* @__PURE__ */ e("div", { className: "flex gap-0.5 p-0.5 rounded-md", style: { background: "var(--bg-elevated, var(--card))", border: "1px solid var(--border)" }, children: ["", ...st].map((_) => {
+          const U = X === _;
           return /* @__PURE__ */ e(
             "button",
             {
-              onClick: () => y(h),
+              onClick: () => y(_),
               className: "text-[11px] px-2 py-0.5 rounded font-semibold",
-              style: { color: P ? h ? Rt[h] : "var(--text)" : "var(--muted)", background: P ? "var(--bg-hover, var(--border))" : "transparent" },
-              children: h || "inherit"
+              style: { color: U ? _ ? Xt[_] : "var(--text)" : "var(--muted)", background: U ? "var(--bg-hover, var(--border))" : "transparent" },
+              children: _ || "inherit"
             },
-            h || "inherit"
+            _ || "inherit"
           );
         }) })
       ] }),
       /* @__PURE__ */ a("div", { className: "flex items-center justify-between", children: [
         /* @__PURE__ */ e("span", { className: "text-[11px] uppercase tracking-wider", style: { color: "var(--muted)" }, children: "Depth" }),
-        /* @__PURE__ */ e("div", { className: "flex gap-0.5 p-0.5 rounded-md", style: { background: "var(--bg-elevated, var(--card))", border: "1px solid var(--border)" }, children: ["", ...Je].map((h) => {
-          const P = ee === h;
+        /* @__PURE__ */ e("div", { className: "flex gap-0.5 p-0.5 rounded-md", style: { background: "var(--bg-elevated, var(--card))", border: "1px solid var(--border)" }, children: ["", ...xt].map((_) => {
+          const U = J === _;
           return /* @__PURE__ */ e(
             "button",
             {
-              onClick: () => S(h),
+              onClick: () => S(_),
               className: "text-[11px] px-2 py-0.5 rounded font-semibold",
-              style: { color: P ? h ? $t[h] : "var(--text)" : "var(--muted)", background: P ? "var(--bg-hover, var(--border))" : "transparent" },
-              children: h || "inherit"
+              style: { color: U ? _ ? Yt[_] : "var(--text)" : "var(--muted)", background: U ? "var(--bg-hover, var(--border))" : "transparent" },
+              children: _ || "inherit"
             },
-            h || "inherit"
+            _ || "inherit"
           );
         }) })
       ] })
     ] }),
     /* @__PURE__ */ a("div", { className: "px-5 py-3 flex justify-end gap-2", style: { borderTop: "1px solid var(--border)", background: "var(--bg-elevated, var(--card))" }, children: [
-      /* @__PURE__ */ e("button", { onClick: g, className: "text-xs px-3 py-1.5 rounded-md font-medium", style: { color: "var(--muted)" }, children: "Back" }),
+      /* @__PURE__ */ e("button", { onClick: i, className: "text-xs px-3 py-1.5 rounded-md font-medium", style: { color: "var(--muted)" }, children: "Back" }),
       /* @__PURE__ */ e(
         "button",
         {
-          disabled: !ve,
-          onClick: () => m({
-            name: d.trim(),
-            role: x.trim() || void 0,
+          disabled: !_e,
+          onClick: () => p({
+            name: c.trim(),
+            role: v.trim() || void 0,
             tools: f,
-            model: V.trim() && V.trim() !== "auto" ? V.trim() : void 0,
-            crew: q || void 0,
-            addenda: R.length ? R.filter((h) => h.crew) : void 0,
-            capability: _ || void 0,
-            trust: K || void 0,
-            depth: ee || void 0
+            model: x.trim() && x.trim() !== "auto" ? x.trim() : void 0,
+            crew: D || void 0,
+            addenda: A.length ? A.filter((_) => _.crew) : void 0,
+            capability: C || void 0,
+            trust: X || void 0,
+            depth: J || void 0
           }),
           className: "text-xs px-3 py-1.5 rounded-md font-semibold transition-opacity disabled:opacity-40",
           style: { background: "var(--accent)", color: "var(--bg)" },
@@ -2990,220 +3724,220 @@ function aa({ initial: t, agentProfiles: r, crews: i, repo: o, stepName: l, onSa
         }
       )
     ] }),
-    se && /* @__PURE__ */ e(
-      qt,
+    he && /* @__PURE__ */ e(
+      ar,
       {
         profiles: r,
-        crews: i,
-        context: `${o || "unassigned pipeline"} · ${l || "unnamed step"}`,
+        crews: o,
+        context: `${s || "unassigned pipeline"} · ${l || "unnamed step"}`,
         onSaveCrew: u,
-        onClose: () => ie(!1),
-        onSelectProfile: (h) => {
-          Z(h), ie(!1);
+        onClose: () => ye(!1),
+        onSelectProfile: (_) => {
+          Q(_), ye(!1);
         },
-        onSelectCrew: (h) => {
-          O(h.name), ie(!1);
+        onSelectCrew: (_) => {
+          q(_.name), ye(!1);
         }
       }
     )
   ] });
 }
-function Xt({ candidates: t, existingRepos: r, defaults: i, agentProfiles: o, crews: l, onCreate: m, onSaveCrew: u, onClose: g, editPipeline: d, cardCount: T, isExample: x, onDelete: j }) {
-  var nt, vt, ht, bt, xt, ot, ft, Oe, ze, Be, n, c, p, k, E;
-  const f = !!d, [w, V] = N((d == null ? void 0 : d.repo) || ""), [I, q] = N((d == null ? void 0 : d.workspace) || "default"), [O, R] = N((d == null ? void 0 : d.repo_path) || ""), [B, _] = N((d == null ? void 0 : d.source) || "manual"), [M, K] = N((d == null ? void 0 : d.trust) || i.trust), [y, ee] = N((d == null ? void 0 : d.depth) || i.depth), S = d == null ? void 0 : d.budget, [se, ie] = N(
+function xr({ candidates: t, existingRepos: r, defaults: o, agentProfiles: s, crews: l, onCreate: p, onSaveCrew: u, onClose: i, editPipeline: c, cardCount: g, isExample: v, onDelete: E }) {
+  var qt, It, Mt, Ct, St, $t, Dt, ct, dt, pt, Bt, Tt, Rt, zt, ut;
+  const f = !!c, [b, x] = w((c == null ? void 0 : c.repo) || ""), [k, D] = w((c == null ? void 0 : c.workspace) || "default"), [q, A] = w((c == null ? void 0 : c.repo_path) || ""), [I, C] = w((c == null ? void 0 : c.source) || "manual"), [B, X] = w((c == null ? void 0 : c.trust) || o.trust), [y, J] = w((c == null ? void 0 : c.depth) || o.depth), S = c == null ? void 0 : c.budget, [he, ye] = w(
     S ? S.max_child_cards === "unlimited" && S.effort_ceiling === "unlimited" ? "unlimited" : "custom" : "depth"
-  ), [ne, oe] = N(
-    () => S && S.max_child_cards !== "unlimited" && S.effort_ceiling !== "unlimited" ? { ...S } : Yt((d == null ? void 0 : d.depth) || i.depth)
-  ), [be, Z] = N((d == null ? void 0 : d.backlog_intake) ?? !0), [D, X] = N((d == null ? void 0 : d.results_in_repo) ?? !1), [pe, ue] = N((d == null ? void 0 : d.conversation_log) ?? !1), [ve, h] = N(((d == null ? void 0 : d.trusted_authors) || []).join(`
-`)), [P, U] = N((d == null ? void 0 : d.self_enabling) ?? !1), [le, ke] = N((d == null ? void 0 : d.approach) || "simplified"), [W, de] = N((d == null ? void 0 : d.sync_mode) || "poll"), [$, C] = N(() => {
-    var s;
-    return (s = d == null ? void 0 : d.steps) != null && s.length ? d.steps.map((b) => ({ ...b })) : At.map((b) => ({ ...b }));
-  }), [v, re] = N(null), [Ae, Se] = N(""), [we, ye] = N("settings"), [Et, et] = N(!1), tt = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "step", me = (s, b) => C((L) => L.map((F, G) => G === s ? { ...F, ...b } : F)), Lt = (s) => C((b) => b.filter((L, F) => F !== s)), Ue = (s, b) => C((L) => {
-    const F = s + b;
-    if (F < 0 || F >= L.length) return L;
-    const G = [...L];
-    return [G[s], G[F]] = [G[F], G[s]], G;
-  }), dt = (s) => C((b) => [...b, {
-    id: `${s}-${Math.random().toString(36).slice(2, 6)}`,
-    name: s === "gate" ? "New Gate" : "New Step",
-    type: s,
-    agent: s === "agent" ? { name: "impl-agent", role: "" } : void 0
-  }]), jt = (s) => {
-    V(s.repo || ""), q(s.workspace || "default"), R(s.path || ""), _(s.source);
-  }, je = (s) => {
-    let b = (s || "").trim();
-    if (!b) return "";
-    const L = b.match(/^(?:https?:\/\/)?(?:www\.)?(?:github|gitlab)\.com\/([^/\s]+\/[^/\s#?]+)/i);
-    return L && (b = L[1]), b.replace(/\.git$/i, "").replace(/\/+$/, "");
-  }, pt = (s) => {
-    const b = /github\.com|gitlab\.com/i.test(s);
-    V(b ? je(s) : s), _("manual");
-  }, ut = [...new Map(
-    ve.split(/[\n,]/).map((s) => s.trim()).filter(Boolean).map((s) => [s.toLowerCase(), s])
-  ).values()], rt = ut.every((s) => /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/.test(s)), Ke = /^[A-Za-z0-9_.-]{1,80}$/.test(I), mt = (/^[^/\s]+\/[^/\s]+$/.test(je(w)) || t.some((s) => s.repo && s.repo === w)) && rt && Ke, Ve = !f && r.has(je(w)), at = ({ value: s, options: b, tokens: L, onPick: F }) => /* @__PURE__ */ e("div", { className: "flex gap-0.5 p-0.5 rounded-md", style: { background: "var(--bg-elevated, var(--card))", border: "1px solid var(--border)" }, children: b.map((G) => {
-    const Y = s === G;
+  ), [ie, me] = w(
+    () => S && S.max_child_cards !== "unlimited" && S.effort_ceiling !== "unlimited" ? { ...S } : gr((c == null ? void 0 : c.depth) || o.depth)
+  ), [Se, Q] = w((c == null ? void 0 : c.backlog_intake) ?? !0), [z, ee] = w((c == null ? void 0 : c.results_in_repo) ?? !1), [$e, Te] = w((c == null ? void 0 : c.conversation_log) ?? !1), [_e, _] = w(((c == null ? void 0 : c.trusted_authors) || []).join(`
+`)), [U, te] = w((c == null ? void 0 : c.self_enabling) ?? !1), [we, Oe] = w((c == null ? void 0 : c.approach) || "simplified"), [oe, Z] = w((c == null ? void 0 : c.sync_mode) || "poll"), [F, ve] = w(() => {
+    var h;
+    return (h = c == null ? void 0 : c.steps) != null && h.length ? c.steps.map((T) => ({ ...T })) : Vt.map((T) => ({ ...T }));
+  }), [O, ce] = w(null), [Le, rt] = w(""), [ae, lt] = w("settings"), [pe, $] = w(!1), W = (h) => h.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "step", ke = (h, T) => ve((ge) => ge.map((be, de) => de === h ? { ...be, ...T } : be)), Xe = (h) => ve((T) => T.filter((ge, be) => be !== h)), De = (h, T) => ve((ge) => {
+    const be = h + T;
+    if (be < 0 || be >= ge.length) return ge;
+    const de = [...ge];
+    return [de[h], de[be]] = [de[be], de[h]], de;
+  }), Fe = (h) => ve((T) => [...T, {
+    id: `${h}-${Math.random().toString(36).slice(2, 6)}`,
+    name: h === "gate" ? "New Gate" : "New Step",
+    type: h,
+    agent: h === "agent" ? { name: "impl-agent", role: "" } : void 0
+  }]), qe = (h) => {
+    x(h.repo || ""), D(h.workspace || "default"), A(h.path || ""), C(h.source);
+  }, Ye = (h) => {
+    let T = (h || "").trim();
+    if (!T) return "";
+    const ge = T.match(/^(?:https?:\/\/)?(?:www\.)?(?:github|gitlab)\.com\/([^/\s]+\/[^/\s#?]+)/i);
+    return ge && (T = ge[1]), T.replace(/\.git$/i, "").replace(/\/+$/, "");
+  }, yt = (h) => {
+    const T = /github\.com|gitlab\.com/i.test(h);
+    x(T ? Ye(h) : h), C("manual");
+  }, it = [...new Map(
+    _e.split(/[\n,]/).map((h) => h.trim()).filter(Boolean).map((h) => [h.toLowerCase(), h])
+  ).values()], fe = it.every((h) => /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/.test(h)), kt = /^[A-Za-z0-9_.-]{1,80}$/.test(k), wt = (/^[^/\s]+\/[^/\s]+$/.test(Ye(b)) || t.some((h) => h.repo && h.repo === b)) && fe && kt, Nt = !f && r.has(Ye(b)), _t = ({ value: h, options: T, tokens: ge, onPick: be }) => /* @__PURE__ */ e("div", { className: "flex gap-0.5 p-0.5 rounded-md", style: { background: "var(--bg-elevated, var(--card))", border: "1px solid var(--border)" }, children: T.map((de) => {
+    const He = h === de;
     return /* @__PURE__ */ e(
       "button",
       {
-        onClick: () => F(G),
+        onClick: () => be(de),
         className: "text-[11px] px-2.5 py-1 rounded font-semibold transition-all",
         style: {
-          color: Y ? L[G] : "var(--muted)",
-          background: Y ? `color-mix(in srgb, ${L[G]} 16%, transparent)` : "transparent",
-          boxShadow: Y ? `inset 0 0 0 1px color-mix(in srgb, ${L[G]} 45%, transparent)` : "none"
+          color: He ? ge[de] : "var(--muted)",
+          background: He ? `color-mix(in srgb, ${ge[de]} 16%, transparent)` : "transparent",
+          boxShadow: He ? `inset 0 0 0 1px color-mix(in srgb, ${ge[de]} 45%, transparent)` : "none"
         },
-        children: G
+        children: de
       },
-      G
+      de
     );
-  }) }), Re = { "issue-radar": [], workspace: [], manual: [] };
-  t.forEach((s) => {
-    var b;
-    (Re[b = s.source] || (Re[b] = [])).push(s);
+  }) }), at = { "issue-radar": [], workspace: [], manual: [] };
+  t.forEach((h) => {
+    var T;
+    (at[T = h.source] || (at[T] = [])).push(h);
   });
-  const Ot = { "issue-radar": "Issue Radar", workspace: "KiroCrew Workspaces", manual: "Manual" }, gt = f ? ["settings", "webhook", "danger"] : ["settings", "webhook"];
+  const Zt = { "issue-radar": "Issue Radar", workspace: "KiroCrew Workspaces", manual: "Manual" }, Jt = f ? ["settings", "webhook", "danger"] : ["settings", "webhook"];
   return /* @__PURE__ */ e(
     "div",
     {
       className: "fixed inset-0 z-50 flex items-center justify-center p-4",
       style: { background: "color-mix(in srgb, black 55%, transparent)" },
-      onClick: g,
+      onClick: i,
       children: /* @__PURE__ */ a(
         "div",
         {
           className: "w-full max-w-lg rounded-xl overflow-hidden flex flex-col",
           style: { background: "var(--card)", border: "1px solid var(--border-strong, var(--border))", boxShadow: "0 20px 60px rgba(0,0,0,0.4)", maxHeight: "82vh" },
-          onClick: (s) => s.stopPropagation(),
+          onClick: (h) => h.stopPropagation(),
           children: [
-            Et && /* @__PURE__ */ e(
-              qt,
+            pe && /* @__PURE__ */ e(
+              ar,
               {
-                profiles: o,
+                profiles: s,
                 crews: l,
-                context: w || I,
+                context: b || k,
                 onSaveCrew: u,
-                onClose: () => et(!1)
+                onClose: () => $(!1)
               }
             ),
-            v !== null ? /* @__PURE__ */ e(
-              aa,
+            O !== null ? /* @__PURE__ */ e(
+              Pa,
               {
                 initial: {
-                  name: ((vt = (nt = $[v]) == null ? void 0 : nt.agent) == null ? void 0 : vt.name) || "",
-                  role: (bt = (ht = $[v]) == null ? void 0 : ht.agent) == null ? void 0 : bt.role,
-                  tools: (ot = (xt = $[v]) == null ? void 0 : xt.agent) == null ? void 0 : ot.tools,
-                  model: (Oe = (ft = $[v]) == null ? void 0 : ft.agent) == null ? void 0 : Oe.model,
-                  crew: (Be = (ze = $[v]) == null ? void 0 : ze.agent) == null ? void 0 : Be.crew,
-                  addenda: (n = $[v]) == null ? void 0 : n.addenda,
-                  capability: (c = $[v]) == null ? void 0 : c.capability,
-                  trust: (p = $[v]) == null ? void 0 : p.trust,
-                  depth: (k = $[v]) == null ? void 0 : k.depth
+                  name: ((It = (qt = F[O]) == null ? void 0 : qt.agent) == null ? void 0 : It.name) || "",
+                  role: (Ct = (Mt = F[O]) == null ? void 0 : Mt.agent) == null ? void 0 : Ct.role,
+                  tools: ($t = (St = F[O]) == null ? void 0 : St.agent) == null ? void 0 : $t.tools,
+                  model: (ct = (Dt = F[O]) == null ? void 0 : Dt.agent) == null ? void 0 : ct.model,
+                  crew: (pt = (dt = F[O]) == null ? void 0 : dt.agent) == null ? void 0 : pt.crew,
+                  addenda: (Bt = F[O]) == null ? void 0 : Bt.addenda,
+                  capability: (Tt = F[O]) == null ? void 0 : Tt.capability,
+                  trust: (Rt = F[O]) == null ? void 0 : Rt.trust,
+                  depth: (zt = F[O]) == null ? void 0 : zt.depth
                 },
-                agentProfiles: o,
+                agentProfiles: s,
                 crews: l,
-                repo: w,
-                stepName: ((E = $[v]) == null ? void 0 : E.name) || "",
+                repo: b,
+                stepName: ((ut = F[O]) == null ? void 0 : ut.name) || "",
                 onSaveCrew: u,
-                onClose: () => re(null),
-                onSave: (s) => {
-                  me(v, {
-                    agent: { name: s.name, role: s.role, tools: s.tools, model: s.model, crew: s.crew },
-                    addenda: s.addenda,
-                    capability: s.capability,
-                    trust: s.trust,
-                    depth: s.depth
-                  }), re(null);
+                onClose: () => ce(null),
+                onSave: (h) => {
+                  ke(O, {
+                    agent: { name: h.name, role: h.role, tools: h.tools, model: h.model, crew: h.crew },
+                    addenda: h.addenda,
+                    capability: h.capability,
+                    trust: h.trust,
+                    depth: h.depth
+                  }), ce(null);
                 }
               }
-            ) : /* @__PURE__ */ a(He, { children: [
+            ) : /* @__PURE__ */ a(ze, { children: [
               /* @__PURE__ */ a("div", { className: "px-5 py-4 flex items-center justify-between", style: { borderBottom: "1px solid var(--border)" }, children: [
                 /* @__PURE__ */ a("div", { children: [
                   /* @__PURE__ */ e("div", { className: "text-base font-semibold", style: { color: "var(--text-strong, var(--text))" }, children: f ? "Edit Pipeline" : "New Pipeline" }),
-                  /* @__PURE__ */ e("div", { className: "text-xs mt-0.5", style: { color: "var(--muted)" }, children: f ? w.includes("/") ? w.split("/")[1] : w : "Configure a pipeline for a repository or workspace" })
+                  /* @__PURE__ */ e("div", { className: "text-xs mt-0.5", style: { color: "var(--muted)" }, children: f ? b.includes("/") ? b.split("/")[1] : b : "Configure a pipeline for a repository or workspace" })
                 ] }),
-                /* @__PURE__ */ e("button", { onClick: g, className: "text-lg leading-none px-2", style: { color: "var(--muted)" }, children: "×" })
+                /* @__PURE__ */ e("button", { onClick: i, className: "text-lg leading-none px-2", style: { color: "var(--muted)" }, children: "×" })
               ] }),
-              /* @__PURE__ */ e("div", { className: "px-5 pt-3 flex gap-1", style: { borderBottom: "1px solid var(--border)" }, children: gt.map((s) => {
-                const b = we === s, L = s === "danger";
+              /* @__PURE__ */ e("div", { className: "px-5 pt-3 flex gap-1", style: { borderBottom: "1px solid var(--border)" }, children: Jt.map((h) => {
+                const T = ae === h, ge = h === "danger";
                 return /* @__PURE__ */ e(
                   "button",
                   {
-                    onClick: () => ye(s),
+                    onClick: () => lt(h),
                     className: "text-[12px] px-3 py-2 font-semibold transition-all",
                     style: {
-                      color: b ? L ? "var(--danger, #ef4444)" : "var(--accent)" : "var(--muted)",
-                      borderBottom: `2px solid ${b ? L ? "var(--danger, #ef4444)" : "var(--accent)" : "transparent"}`,
+                      color: T ? ge ? "var(--danger, #ef4444)" : "var(--accent)" : "var(--muted)",
+                      borderBottom: `2px solid ${T ? ge ? "var(--danger, #ef4444)" : "var(--accent)" : "transparent"}`,
                       marginBottom: "-1px"
                     },
-                    children: s === "settings" ? "Settings" : s === "webhook" ? "Webhook · app-wide" : "Danger Zone"
+                    children: h === "settings" ? "Settings" : h === "webhook" ? "Webhook · app-wide" : "Danger Zone"
                   },
-                  s
+                  h
                 );
               }) }),
               /* @__PURE__ */ a(
                 "div",
                 {
                   className: "px-5 py-4 flex flex-col gap-4 overflow-y-auto flex-1",
-                  style: { display: we === "settings" ? "flex" : "none" },
+                  style: { display: ae === "settings" ? "flex" : "none" },
                   children: [
                     /* @__PURE__ */ a("div", { children: [
                       /* @__PURE__ */ e("label", { className: "text-[11px] uppercase tracking-wider", style: { color: "var(--muted)" }, children: "Repository — paste a GitHub URL or owner/name" }),
                       /* @__PURE__ */ e(
                         "input",
                         {
-                          value: w,
-                          onChange: (s) => pt(s.target.value),
-                          onPaste: (s) => {
-                            const b = s.clipboardData.getData("text");
-                            /github\.com|gitlab\.com/i.test(b) && (s.preventDefault(), pt(b));
+                          value: b,
+                          onChange: (h) => yt(h.target.value),
+                          onPaste: (h) => {
+                            const T = h.clipboardData.getData("text");
+                            /github\.com|gitlab\.com/i.test(T) && (h.preventDefault(), yt(T));
                           },
                           placeholder: "https://github.com/owner/name  ·  or  owner/name",
                           disabled: f,
                           className: "mt-1 w-full px-3 py-2 rounded-md text-sm outline-none disabled:opacity-60",
-                          style: { background: "var(--bg-elevated, var(--bg))", border: `1px solid ${Ve ? "var(--danger)" : "var(--border)"}`, color: "var(--text)" }
+                          style: { background: "var(--bg-elevated, var(--bg))", border: `1px solid ${Nt ? "var(--danger)" : "var(--border)"}`, color: "var(--text)" }
                         }
                       ),
-                      !f && w && je(w) !== w && /* @__PURE__ */ a("div", { className: "text-[11px] mt-1", style: { color: "var(--muted)" }, children: [
+                      !f && b && Ye(b) !== b && /* @__PURE__ */ a("div", { className: "text-[11px] mt-1", style: { color: "var(--muted)" }, children: [
                         "→ ",
-                        /* @__PURE__ */ e("code", { style: { color: "var(--accent)" }, children: je(w) })
+                        /* @__PURE__ */ e("code", { style: { color: "var(--accent)" }, children: Ye(b) })
                       ] }),
-                      Ve && /* @__PURE__ */ e("div", { className: "text-[11px] mt-1", style: { color: "var(--danger)" }, children: "A pipeline for this repo already exists." }),
-                      /* @__PURE__ */ e("div", { className: "mt-2 flex flex-col gap-2", children: ["issue-radar", "workspace"].map((s) => Re[s].length > 0 && /* @__PURE__ */ a("div", { children: [
-                        /* @__PURE__ */ e("div", { className: "text-[10px] uppercase tracking-wider mb-1", style: { color: "var(--muted)" }, children: Ot[s] }),
-                        /* @__PURE__ */ e("div", { className: "flex flex-wrap gap-1.5", children: Re[s].map((b) => {
-                          const L = `${s}:${b.workspace || b.repo}:${b.path || ""}`, F = b.source === "workspace" ? I === b.workspace && O === (b.path || "") : w === b.repo;
+                      Nt && /* @__PURE__ */ e("div", { className: "text-[11px] mt-1", style: { color: "var(--danger)" }, children: "A pipeline for this repo already exists." }),
+                      /* @__PURE__ */ e("div", { className: "mt-2 flex flex-col gap-2", children: ["issue-radar", "workspace"].map((h) => at[h].length > 0 && /* @__PURE__ */ a("div", { children: [
+                        /* @__PURE__ */ e("div", { className: "text-[10px] uppercase tracking-wider mb-1", style: { color: "var(--muted)" }, children: Zt[h] }),
+                        /* @__PURE__ */ e("div", { className: "flex flex-wrap gap-1.5", children: at[h].map((T) => {
+                          const ge = `${h}:${T.workspace || T.repo}:${T.path || ""}`, be = T.source === "workspace" ? k === T.workspace && q === (T.path || "") : b === T.repo;
                           return /* @__PURE__ */ e(
                             "button",
                             {
-                              onClick: () => jt(b),
-                              disabled: !!b.repo && r.has(b.repo),
-                              title: b.detail || b.repo || b.workspace,
+                              onClick: () => qe(T),
+                              disabled: !!T.repo && r.has(T.repo),
+                              title: T.detail || T.repo || T.workspace,
                               className: "text-[11px] px-2 py-1 rounded-md font-medium transition-all disabled:opacity-40",
                               style: {
-                                background: F ? "color-mix(in srgb, var(--accent) 16%, transparent)" : "var(--bg-hover, var(--border))",
-                                color: F ? "var(--accent)" : "var(--muted-strong, var(--muted))",
-                                boxShadow: F ? "inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent)" : "none"
+                                background: be ? "color-mix(in srgb, var(--accent) 16%, transparent)" : "var(--bg-hover, var(--border))",
+                                color: be ? "var(--accent)" : "var(--muted-strong, var(--muted))",
+                                boxShadow: be ? "inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent)" : "none"
                               },
-                              children: b.label || (b.repo.includes("/") ? b.repo.split("/")[1] : b.repo) || b.workspace
+                              children: T.label || (T.repo.includes("/") ? T.repo.split("/")[1] : T.repo) || T.workspace
                             },
-                            L
+                            ge
                           );
                         }) })
-                      ] }, s)) })
+                      ] }, h)) })
                     ] }),
                     /* @__PURE__ */ a("div", { children: [
                       /* @__PURE__ */ e("label", { className: "text-[11px] uppercase tracking-wider", style: { color: "var(--muted)" }, children: "Workspace partition" }),
                       /* @__PURE__ */ e(
                         "input",
                         {
-                          value: I,
-                          onChange: (s) => q(s.target.value.trim()),
+                          value: k,
+                          onChange: (h) => D(h.target.value.trim()),
                           placeholder: "default",
                           className: "mt-1 w-full px-3 py-2 rounded-md text-sm outline-none",
-                          style: { background: "var(--bg-elevated, var(--bg))", border: `1px solid ${Ke ? "var(--border)" : "var(--danger)"}`, color: "var(--text)" }
+                          style: { background: "var(--bg-elevated, var(--bg))", border: `1px solid ${kt ? "var(--border)" : "var(--danger)"}`, color: "var(--text)" }
                         }
                       ),
-                      /* @__PURE__ */ a("div", { className: "text-[10px] mt-1", style: { color: Ke ? "var(--muted)" : "var(--danger)" }, children: [
+                      /* @__PURE__ */ a("div", { className: "text-[10px] mt-1", style: { color: kt ? "var(--muted)" : "var(--danger)" }, children: [
                         "Partitions results and ledgers. It is independent from ",
                         /* @__PURE__ */ e("code", { children: "owner/name" }),
                         " and never inferred from a filesystem path."
@@ -3214,8 +3948,8 @@ function Xt({ candidates: t, existingRepos: r, defaults: i, agentProfiles: o, cr
                       /* @__PURE__ */ e(
                         "input",
                         {
-                          value: O,
-                          onChange: (s) => R(s.target.value),
+                          value: q,
+                          onChange: (h) => A(h.target.value),
                           placeholder: "/absolute/path/to/checkout",
                           className: "mt-1 w-full px-3 py-2 rounded-md text-sm outline-none",
                           style: { background: "var(--bg-elevated, var(--bg))", border: "1px solid var(--border)", color: "var(--text)" }
@@ -3225,11 +3959,11 @@ function Xt({ candidates: t, existingRepos: r, defaults: i, agentProfiles: o, cr
                     ] }),
                     /* @__PURE__ */ a("div", { className: "flex items-center justify-between", children: [
                       /* @__PURE__ */ e("span", { className: "text-[11px] uppercase tracking-wider", style: { color: "var(--muted)" }, children: "Default Trust" }),
-                      /* @__PURE__ */ e(at, { value: M, options: Fe, tokens: Rt, onPick: K })
+                      /* @__PURE__ */ e(_t, { value: B, options: st, tokens: Xt, onPick: X })
                     ] }),
                     /* @__PURE__ */ a("div", { className: "flex items-center justify-between", children: [
                       /* @__PURE__ */ e("span", { className: "text-[11px] uppercase tracking-wider", style: { color: "var(--muted)" }, children: "Default Depth" }),
-                      /* @__PURE__ */ e(at, { value: y, options: Je, tokens: $t, onPick: ee })
+                      /* @__PURE__ */ e(_t, { value: y, options: xt, tokens: Yt, onPick: J })
                     ] }),
                     /* @__PURE__ */ a("div", { className: "flex items-center justify-between", children: [
                       /* @__PURE__ */ a("div", { children: [
@@ -3237,33 +3971,33 @@ function Xt({ candidates: t, existingRepos: r, defaults: i, agentProfiles: o, cr
                         /* @__PURE__ */ e("div", { className: "text-[10px]", style: { color: "var(--muted)" }, children: "Controls fan-out and effort spend" })
                       ] }),
                       /* @__PURE__ */ e(
-                        at,
+                        _t,
                         {
-                          value: se,
+                          value: he,
                           options: ["depth", "custom", "unlimited"],
                           tokens: { depth: "var(--muted)", custom: "var(--accent)", unlimited: "var(--ok)" },
-                          onPick: ie
+                          onPick: ye
                         }
                       )
                     ] }),
-                    se === "depth" && (() => {
-                      const s = Yt(y);
+                    he === "depth" && (() => {
+                      const h = gr(y);
                       return /* @__PURE__ */ a("div", { className: "text-[11px] px-3 py-2 rounded-md", style: { color: "var(--muted)", background: "var(--bg-elevated, var(--bg))", border: "1px solid var(--border)" }, children: [
                         "Follows ",
                         /* @__PURE__ */ e("strong", { children: y }),
                         ": ",
-                        String(s.max_child_cards),
+                        String(h.max_child_cards),
                         " child cards · ",
-                        String(s.effort_ceiling),
+                        String(h.effort_ceiling),
                         " effort points · max ",
-                        s.max_feature_size,
+                        h.max_feature_size,
                         " · ",
-                        s.addenda,
+                        h.addenda,
                         " addenda"
                       ] });
                     })(),
-                    se === "unlimited" && /* @__PURE__ */ e("div", { className: "text-[11px] px-3 py-2 rounded-md", style: { color: "var(--ok)", background: "color-mix(in srgb, var(--ok) 7%, transparent)", border: "1px solid color-mix(in srgb, var(--ok) 35%, var(--border))" }, children: "No child-card or effort ceiling · max XL · proactive addenda" }),
-                    se === "custom" && /* @__PURE__ */ a("div", { className: "grid grid-cols-2 gap-2 p-3 rounded-md", style: { background: "var(--bg-elevated, var(--bg))", border: "1px solid var(--border)" }, children: [
+                    he === "unlimited" && /* @__PURE__ */ e("div", { className: "text-[11px] px-3 py-2 rounded-md", style: { color: "var(--ok)", background: "color-mix(in srgb, var(--ok) 7%, transparent)", border: "1px solid color-mix(in srgb, var(--ok) 35%, var(--border))" }, children: "No child-card or effort ceiling · max XL · proactive addenda" }),
+                    he === "custom" && /* @__PURE__ */ a("div", { className: "grid grid-cols-2 gap-2 p-3 rounded-md", style: { background: "var(--bg-elevated, var(--bg))", border: "1px solid var(--border)" }, children: [
                       /* @__PURE__ */ a("label", { className: "text-[10px] uppercase tracking-wide", style: { color: "var(--muted)" }, children: [
                         "Max child cards",
                         /* @__PURE__ */ e(
@@ -3271,8 +4005,8 @@ function Xt({ candidates: t, existingRepos: r, defaults: i, agentProfiles: o, cr
                           {
                             type: "number",
                             min: 0,
-                            value: ne.max_child_cards,
-                            onChange: (s) => oe((b) => ({ ...b, max_child_cards: Math.max(0, Number(s.target.value) || 0) })),
+                            value: ie.max_child_cards,
+                            onChange: (h) => me((T) => ({ ...T, max_child_cards: Math.max(0, Number(h.target.value) || 0) })),
                             className: "mt-1 w-full px-2 py-1.5 rounded text-[12px] outline-none",
                             style: { background: "var(--card)", border: "1px solid var(--border)", color: "var(--text)" }
                           }
@@ -3285,8 +4019,8 @@ function Xt({ candidates: t, existingRepos: r, defaults: i, agentProfiles: o, cr
                           {
                             type: "number",
                             min: 0,
-                            value: ne.effort_ceiling,
-                            onChange: (s) => oe((b) => ({ ...b, effort_ceiling: Math.max(0, Number(s.target.value) || 0) })),
+                            value: ie.effort_ceiling,
+                            onChange: (h) => me((T) => ({ ...T, effort_ceiling: Math.max(0, Number(h.target.value) || 0) })),
                             className: "mt-1 w-full px-2 py-1.5 rounded text-[12px] outline-none",
                             style: { background: "var(--card)", border: "1px solid var(--border)", color: "var(--text)" }
                           }
@@ -3297,11 +4031,11 @@ function Xt({ candidates: t, existingRepos: r, defaults: i, agentProfiles: o, cr
                         /* @__PURE__ */ e(
                           "select",
                           {
-                            value: ne.max_feature_size,
-                            onChange: (s) => oe((b) => ({ ...b, max_feature_size: s.target.value })),
+                            value: ie.max_feature_size,
+                            onChange: (h) => me((T) => ({ ...T, max_feature_size: h.target.value })),
                             className: "mt-1 w-full px-2 py-1.5 rounded text-[12px] outline-none",
                             style: { background: "var(--card)", border: "1px solid var(--border)", color: "var(--text)" },
-                            children: ["S", "M", "L", "XL"].map((s) => /* @__PURE__ */ e("option", { children: s }, s))
+                            children: ["S", "M", "L", "XL"].map((h) => /* @__PURE__ */ e("option", { children: h }, h))
                           }
                         )
                       ] }),
@@ -3310,11 +4044,11 @@ function Xt({ candidates: t, existingRepos: r, defaults: i, agentProfiles: o, cr
                         /* @__PURE__ */ e(
                           "select",
                           {
-                            value: ne.addenda,
-                            onChange: (s) => oe((b) => ({ ...b, addenda: s.target.value })),
+                            value: ie.addenda,
+                            onChange: (h) => me((T) => ({ ...T, addenda: h.target.value })),
                             className: "mt-1 w-full px-2 py-1.5 rounded text-[12px] outline-none",
                             style: { background: "var(--card)", border: "1px solid var(--border)", color: "var(--text)" },
-                            children: ["none", "obvious", "proactive"].map((s) => /* @__PURE__ */ e("option", { children: s }, s))
+                            children: ["none", "obvious", "proactive"].map((h) => /* @__PURE__ */ e("option", { children: h }, h))
                           }
                         )
                       ] })
@@ -3322,20 +4056,20 @@ function Xt({ candidates: t, existingRepos: r, defaults: i, agentProfiles: o, cr
                     /* @__PURE__ */ a("div", { className: "flex items-center justify-between", children: [
                       /* @__PURE__ */ a("div", { className: "min-w-0 pr-3", children: [
                         /* @__PURE__ */ e("div", { className: "text-sm", style: { color: "var(--text)" }, children: "GitHub sync mode" }),
-                        /* @__PURE__ */ e("div", { className: "text-[11px]", style: { color: "var(--muted)" }, children: W === "webhook" ? "Webhook is the fast path; the safety-net poll reconciles this pipeline on a longer window. Requires the app-wide webhook receiver enabled — falls back to polling if it is not." : "Poll reconciles this pipeline every cycle (default). Correct when no webhook is configured." })
+                        /* @__PURE__ */ e("div", { className: "text-[11px]", style: { color: "var(--muted)" }, children: oe === "webhook" ? "Webhook is the fast path; the safety-net poll reconciles this pipeline on a longer window. Requires the app-wide webhook receiver enabled — falls back to polling if it is not." : "Poll reconciles this pipeline every cycle (default). Correct when no webhook is configured." })
                       ] }),
-                      /* @__PURE__ */ e("div", { className: "flex rounded-md overflow-hidden flex-shrink-0", style: { border: "1px solid var(--border)" }, children: ["poll", "webhook"].map((s) => /* @__PURE__ */ e(
+                      /* @__PURE__ */ e("div", { className: "flex rounded-md overflow-hidden flex-shrink-0", style: { border: "1px solid var(--border)" }, children: ["poll", "webhook"].map((h) => /* @__PURE__ */ e(
                         "button",
                         {
-                          onClick: () => de(s),
+                          onClick: () => Z(h),
                           className: "text-[11px] px-2.5 py-1 font-semibold",
                           style: {
-                            background: W === s ? "var(--accent)" : "transparent",
-                            color: W === s ? "var(--bg)" : "var(--muted)"
+                            background: oe === h ? "var(--accent)" : "transparent",
+                            color: oe === h ? "var(--bg)" : "var(--muted)"
                           },
-                          children: s === "poll" ? "Poll" : "Webhook"
+                          children: h === "poll" ? "Poll" : "Webhook"
                         },
-                        s
+                        h
                       )) })
                     ] }),
                     /* @__PURE__ */ a("label", { className: "flex items-center justify-between cursor-pointer", children: [
@@ -3350,14 +4084,14 @@ function Xt({ candidates: t, existingRepos: r, defaults: i, agentProfiles: o, cr
                       /* @__PURE__ */ e(
                         "button",
                         {
-                          onClick: () => Z((s) => !s),
+                          onClick: () => Q((h) => !h),
                           className: "w-10 h-5.5 rounded-full transition-all relative flex-shrink-0",
-                          style: { background: be ? "var(--accent)" : "var(--border-strong, var(--border))", height: 22, width: 40 },
+                          style: { background: Se ? "var(--accent)" : "var(--border-strong, var(--border))", height: 22, width: 40 },
                           children: /* @__PURE__ */ e(
                             "span",
                             {
                               className: "absolute top-0.5 rounded-full transition-all",
-                              style: { height: 18, width: 18, background: "var(--bg)", left: be ? 20 : 2 }
+                              style: { height: 18, width: 18, background: "var(--bg)", left: Se ? 20 : 2 }
                             }
                           )
                         }
@@ -3375,14 +4109,14 @@ function Xt({ candidates: t, existingRepos: r, defaults: i, agentProfiles: o, cr
                       /* @__PURE__ */ e(
                         "button",
                         {
-                          onClick: () => X((s) => !s),
+                          onClick: () => ee((h) => !h),
                           className: "w-10 h-5.5 rounded-full transition-all relative flex-shrink-0",
-                          style: { background: D ? "var(--accent)" : "var(--border-strong, var(--border))", height: 22, width: 40 },
+                          style: { background: z ? "var(--accent)" : "var(--border-strong, var(--border))", height: 22, width: 40 },
                           children: /* @__PURE__ */ e(
                             "span",
                             {
                               className: "absolute top-0.5 rounded-full transition-all",
-                              style: { height: 18, width: 18, background: "var(--bg)", left: D ? 20 : 2 }
+                              style: { height: 18, width: 18, background: "var(--bg)", left: z ? 20 : 2 }
                             }
                           )
                         }
@@ -3396,14 +4130,14 @@ function Xt({ candidates: t, existingRepos: r, defaults: i, agentProfiles: o, cr
                       /* @__PURE__ */ e(
                         "button",
                         {
-                          onClick: () => ue((s) => !s),
+                          onClick: () => Te((h) => !h),
                           className: "w-10 h-5.5 rounded-full transition-all relative flex-shrink-0",
-                          style: { background: pe ? "var(--accent)" : "var(--border-strong, var(--border))", height: 22, width: 40 },
+                          style: { background: $e ? "var(--accent)" : "var(--border-strong, var(--border))", height: 22, width: 40 },
                           children: /* @__PURE__ */ e(
                             "span",
                             {
                               className: "absolute top-0.5 rounded-full transition-all",
-                              style: { height: 18, width: 18, background: "var(--bg)", left: pe ? 20 : 2 }
+                              style: { height: 18, width: 18, background: "var(--bg)", left: $e ? 20 : 2 }
                             }
                           )
                         }
@@ -3414,15 +4148,15 @@ function Xt({ candidates: t, existingRepos: r, defaults: i, agentProfiles: o, cr
                       /* @__PURE__ */ e(
                         "textarea",
                         {
-                          value: ve,
-                          onChange: (s) => h(s.target.value),
+                          value: _e,
+                          onChange: (h) => _(h.target.value),
                           rows: 2,
                           placeholder: "Defaults to the authenticated GitHub user",
                           className: "mt-1 w-full px-3 py-2 rounded-md text-sm font-mono outline-none resize-y",
-                          style: { background: "var(--bg-elevated, var(--bg))", border: `1px solid ${rt ? "var(--border)" : "var(--danger)"}`, color: "var(--text)" }
+                          style: { background: "var(--bg-elevated, var(--bg))", border: `1px solid ${fe ? "var(--border)" : "var(--danger)"}`, color: "var(--text)" }
                         }
                       ),
-                      /* @__PURE__ */ a("div", { className: "text-[10px] mt-1", style: { color: rt ? "var(--muted)" : "var(--danger)" }, children: [
+                      /* @__PURE__ */ a("div", { className: "text-[10px] mt-1", style: { color: fe ? "var(--muted)" : "var(--danger)" }, children: [
                         "One login per line. Empty never means allow-all; it falls back to the authenticated ",
                         /* @__PURE__ */ e("code", { children: "gh" }),
                         " user."
@@ -3436,37 +4170,37 @@ function Xt({ candidates: t, existingRepos: r, defaults: i, agentProfiles: o, cr
                       /* @__PURE__ */ e(
                         "button",
                         {
-                          onClick: () => U((s) => !s),
+                          onClick: () => te((h) => !h),
                           className: "w-10 h-5.5 rounded-full transition-all relative flex-shrink-0",
-                          style: { background: P ? "var(--accent)" : "var(--border-strong, var(--border))", height: 22, width: 40 },
+                          style: { background: U ? "var(--accent)" : "var(--border-strong, var(--border))", height: 22, width: 40 },
                           children: /* @__PURE__ */ e(
                             "span",
                             {
                               className: "absolute top-0.5 rounded-full transition-all",
-                              style: { height: 18, width: 18, background: "var(--bg)", left: P ? 20 : 2 }
+                              style: { height: 18, width: 18, background: "var(--bg)", left: U ? 20 : 2 }
                             }
                           )
                         }
                       )
                     ] }),
-                    P && /* @__PURE__ */ a("div", { className: "flex items-center justify-between", children: [
+                    U && /* @__PURE__ */ a("div", { className: "flex items-center justify-between", children: [
                       /* @__PURE__ */ a("div", { children: [
                         /* @__PURE__ */ e("div", { className: "text-sm", style: { color: "var(--text)" }, children: "Setup approach" }),
                         /* @__PURE__ */ e("div", { className: "text-[11px]", style: { color: "var(--muted)" }, children: "Simplified = lean ladder · Enhanced = research gate + addendum crews + deeper" })
                       ] }),
-                      /* @__PURE__ */ e("div", { className: "flex gap-1", children: ["simplified", "enhanced"].map((s) => /* @__PURE__ */ e(
+                      /* @__PURE__ */ e("div", { className: "flex gap-1", children: ["simplified", "enhanced"].map((h) => /* @__PURE__ */ e(
                         "button",
                         {
-                          onClick: () => ke(s),
+                          onClick: () => Oe(h),
                           className: "text-[11px] px-2 py-1 rounded-md font-semibold transition-all capitalize",
                           style: {
-                            background: le === s ? "var(--accent)" : "transparent",
-                            color: le === s ? "var(--bg)" : "var(--muted)",
-                            border: `1px solid ${le === s ? "var(--accent)" : "var(--border)"}`
+                            background: we === h ? "var(--accent)" : "transparent",
+                            color: we === h ? "var(--bg)" : "var(--muted)",
+                            border: `1px solid ${we === h ? "var(--accent)" : "var(--border)"}`
                           },
-                          children: s
+                          children: h
                         },
-                        s
+                        h
                       )) })
                     ] }),
                     /* @__PURE__ */ a("div", { children: [
@@ -3476,7 +4210,7 @@ function Xt({ candidates: t, existingRepos: r, defaults: i, agentProfiles: o, cr
                           /* @__PURE__ */ e(
                             "button",
                             {
-                              onClick: () => et(!0),
+                              onClick: () => $(!0),
                               className: "text-[10px] px-1.5 py-0.5 rounded font-semibold",
                               style: { color: "var(--muted)", border: "1px solid var(--border)" },
                               children: "Agents & crews"
@@ -3485,7 +4219,7 @@ function Xt({ candidates: t, existingRepos: r, defaults: i, agentProfiles: o, cr
                           /* @__PURE__ */ e(
                             "button",
                             {
-                              onClick: () => dt("agent"),
+                              onClick: () => Fe("agent"),
                               className: "text-[10px] px-1.5 py-0.5 rounded font-semibold",
                               style: { color: "var(--accent)", border: "1px solid color-mix(in srgb, var(--accent) 40%, var(--border))" },
                               children: "+ agent"
@@ -3494,7 +4228,7 @@ function Xt({ candidates: t, existingRepos: r, defaults: i, agentProfiles: o, cr
                           /* @__PURE__ */ e(
                             "button",
                             {
-                              onClick: () => dt("gate"),
+                              onClick: () => Fe("gate"),
                               className: "text-[10px] px-1.5 py-0.5 rounded font-semibold",
                               style: { color: "var(--warn)", border: "1px solid color-mix(in srgb, var(--warn) 40%, var(--border))" },
                               children: "+ gate"
@@ -3502,24 +4236,24 @@ function Xt({ candidates: t, existingRepos: r, defaults: i, agentProfiles: o, cr
                           )
                         ] })
                       ] }),
-                      /* @__PURE__ */ e("div", { className: "flex flex-col gap-1.5", children: $.map((s, b) => {
-                        var L, F;
+                      /* @__PURE__ */ e("div", { className: "flex flex-col gap-1.5", children: F.map((h, T) => {
+                        var ge, be;
                         return /* @__PURE__ */ a(
                           "div",
                           {
                             className: "rounded-md p-2",
-                            style: { background: "var(--bg-elevated, var(--bg))", border: "1px solid var(--border)", borderLeft: `2px solid ${s.type === "gate" ? "var(--warn)" : "var(--accent)"}` },
+                            style: { background: "var(--bg-elevated, var(--bg))", border: "1px solid var(--border)", borderLeft: `2px solid ${h.type === "gate" ? "var(--warn)" : "var(--accent)"}` },
                             children: [
                               /* @__PURE__ */ a("div", { className: "flex items-center gap-1.5", children: [
                                 /* @__PURE__ */ a("div", { className: "flex flex-col", children: [
-                                  /* @__PURE__ */ e("button", { onClick: () => Ue(b, -1), disabled: b === 0, className: "text-[8px] leading-none disabled:opacity-30", style: { color: "var(--muted)" }, children: "▲" }),
-                                  /* @__PURE__ */ e("button", { onClick: () => Ue(b, 1), disabled: b === $.length - 1, className: "text-[8px] leading-none disabled:opacity-30", style: { color: "var(--muted)" }, children: "▼" })
+                                  /* @__PURE__ */ e("button", { onClick: () => De(T, -1), disabled: T === 0, className: "text-[8px] leading-none disabled:opacity-30", style: { color: "var(--muted)" }, children: "▲" }),
+                                  /* @__PURE__ */ e("button", { onClick: () => De(T, 1), disabled: T === F.length - 1, className: "text-[8px] leading-none disabled:opacity-30", style: { color: "var(--muted)" }, children: "▼" })
                                 ] }),
                                 /* @__PURE__ */ e(
                                   "input",
                                   {
-                                    value: s.name,
-                                    onChange: (G) => me(b, { name: G.target.value, id: tt(G.target.value) }),
+                                    value: h.name,
+                                    onChange: (de) => ke(T, { name: de.target.value, id: W(de.target.value) }),
                                     className: "flex-1 min-w-0 px-2 py-1 rounded text-[12px] outline-none",
                                     style: { background: "var(--card)", border: "1px solid var(--border)", color: "var(--text)" }
                                   }
@@ -3528,22 +4262,22 @@ function Xt({ candidates: t, existingRepos: r, defaults: i, agentProfiles: o, cr
                                   "span",
                                   {
                                     className: "text-[9px] px-1.5 py-0.5 rounded font-semibold uppercase",
-                                    style: { color: s.type === "gate" ? "var(--warn)" : "var(--accent)", background: `color-mix(in srgb, ${s.type === "gate" ? "var(--warn)" : "var(--accent)"} 14%, transparent)` },
-                                    children: s.type
+                                    style: { color: h.type === "gate" ? "var(--warn)" : "var(--accent)", background: `color-mix(in srgb, ${h.type === "gate" ? "var(--warn)" : "var(--accent)"} 14%, transparent)` },
+                                    children: h.type
                                   }
                                 ),
-                                /* @__PURE__ */ e("button", { onClick: () => Lt(b), className: "text-[13px] leading-none px-1", style: { color: "var(--muted)" }, children: "×" })
+                                /* @__PURE__ */ e("button", { onClick: () => Xe(T), className: "text-[13px] leading-none px-1", style: { color: "var(--muted)" }, children: "×" })
                               ] }),
-                              s.type === "agent" && /* @__PURE__ */ a("div", { className: "mt-1.5 pl-5 flex items-center gap-2 flex-wrap", children: [
+                              h.type === "agent" && /* @__PURE__ */ a("div", { className: "mt-1.5 pl-5 flex items-center gap-2 flex-wrap", children: [
                                 /* @__PURE__ */ a(
                                   "button",
                                   {
-                                    onClick: () => re(b),
+                                    onClick: () => ce(T),
                                     className: "text-[11px] px-2 py-1 rounded-md font-medium flex items-center gap-1.5",
                                     style: { background: "var(--bg-hover, var(--border))", color: "var(--accent)" },
                                     children: [
                                       "⚙ ",
-                                      (L = s.agent) != null && L.name ? `Agent: ${s.agent.name}` : "Configure agent"
+                                      (ge = h.agent) != null && ge.name ? `Agent: ${h.agent.name}` : "Configure agent"
                                     ]
                                   }
                                 ),
@@ -3551,8 +4285,8 @@ function Xt({ candidates: t, existingRepos: r, defaults: i, agentProfiles: o, cr
                                 /* @__PURE__ */ a(
                                   "select",
                                   {
-                                    value: s.trigger || "ask",
-                                    onChange: (G) => me(b, { trigger: G.target.value === "ask" ? void 0 : G.target.value }),
+                                    value: h.trigger || "ask",
+                                    onChange: (de) => ke(T, { trigger: de.target.value === "ask" ? void 0 : de.target.value }),
                                     title: "Which engine runs this phase (ask = prompt at runtime)",
                                     className: "text-[10px] px-1 py-0.5 rounded outline-none",
                                     style: { background: "var(--card)", border: "1px solid var(--border)", color: "var(--text)" },
@@ -3565,48 +4299,48 @@ function Xt({ candidates: t, existingRepos: r, defaults: i, agentProfiles: o, cr
                                     ]
                                   }
                                 ),
-                                /* @__PURE__ */ a("span", { className: "text-[10px]", style: { color: s.capability ? "var(--accent)" : "var(--muted)" }, title: "Actual authority is verified from the assigned capability profile at runtime", children: [
+                                /* @__PURE__ */ a("span", { className: "text-[10px]", style: { color: h.capability ? "var(--accent)" : "var(--muted)" }, title: "Actual authority is verified from the assigned capability profile at runtime", children: [
                                   "cap: ",
-                                  s.capability || "auto"
+                                  h.capability || "auto"
                                 ] }),
-                                (s.trust || s.depth) && /* @__PURE__ */ e("span", { className: "text-[10px]", style: { color: "var(--muted)" }, children: [s.trust, s.depth].filter(Boolean).join(" · ") }),
-                                s.addenda && s.addenda.length > 0 && /* @__PURE__ */ a("span", { className: "text-[10px]", style: { color: "var(--accent)" }, children: [
+                                (h.trust || h.depth) && /* @__PURE__ */ e("span", { className: "text-[10px]", style: { color: "var(--muted)" }, children: [h.trust, h.depth].filter(Boolean).join(" · ") }),
+                                h.addenda && h.addenda.length > 0 && /* @__PURE__ */ a("span", { className: "text-[10px]", style: { color: "var(--accent)" }, children: [
                                   "+",
-                                  s.addenda.length,
+                                  h.addenda.length,
                                   " addendum",
-                                  s.addenda.length === 1 ? "" : "s"
+                                  h.addenda.length === 1 ? "" : "s"
                                 ] }),
-                                ((F = s.agent) == null ? void 0 : F.role) && /* @__PURE__ */ e("span", { className: "text-[10px] truncate", style: { color: "var(--muted)" }, children: s.agent.role })
+                                ((be = h.agent) == null ? void 0 : be.role) && /* @__PURE__ */ e("span", { className: "text-[10px] truncate", style: { color: "var(--muted)" }, children: h.agent.role })
                               ] }),
-                              s.type === "gate" && /* @__PURE__ */ a("div", { className: "mt-1.5 pl-5 flex items-center gap-1", children: [
+                              h.type === "gate" && /* @__PURE__ */ a("div", { className: "mt-1.5 pl-5 flex items-center gap-1", children: [
                                 /* @__PURE__ */ e("span", { className: "text-[9px] uppercase", style: { color: "var(--muted)" }, children: "trust" }),
                                 /* @__PURE__ */ a(
                                   "select",
                                   {
-                                    value: s.trust || "",
-                                    onChange: (G) => me(b, { trust: G.target.value || void 0 }),
+                                    value: h.trust || "",
+                                    onChange: (de) => ke(T, { trust: de.target.value || void 0 }),
                                     className: "text-[10px] px-1 py-0.5 rounded outline-none",
                                     style: { background: "var(--card)", border: "1px solid var(--border)", color: "var(--text)" },
                                     children: [
                                       /* @__PURE__ */ e("option", { value: "", children: "inherit" }),
-                                      Fe.map((G) => /* @__PURE__ */ e("option", { value: G, children: G }, G))
+                                      st.map((de) => /* @__PURE__ */ e("option", { value: de, children: de }, de))
                                     ]
                                   }
                                 )
                               ] })
                             ]
                           },
-                          s.id
+                          h.id
                         );
                       }) })
                     ] })
                   ]
                 }
               ),
-              we === "webhook" && /* @__PURE__ */ e("div", { className: "px-5 py-4 overflow-y-auto flex-1", children: /* @__PURE__ */ e(jr, {}) }),
-              f && we === "danger" && j && (() => {
-                const s = w.includes("/") ? w.split("/")[1] : w, b = Ae.trim() === s;
-                return /* @__PURE__ */ e("div", { className: "px-5 pb-4 pt-4", children: x ? /* @__PURE__ */ a(
+              ae === "webhook" && /* @__PURE__ */ e("div", { className: "px-5 py-4 overflow-y-auto flex-1", children: /* @__PURE__ */ e(Nr, {}) }),
+              f && ae === "danger" && E && (() => {
+                const h = b.includes("/") ? b.split("/")[1] : b, T = Le.trim() === h;
+                return /* @__PURE__ */ e("div", { className: "px-5 pb-4 pt-4", children: v ? /* @__PURE__ */ a(
                   "div",
                   {
                     className: "rounded-lg p-4 flex flex-col gap-3",
@@ -3616,16 +4350,16 @@ function Xt({ candidates: t, existingRepos: r, defaults: i, agentProfiles: o, cr
                         "This is a bundled ",
                         /* @__PURE__ */ e("strong", { children: "example" }),
                         " pipeline (",
-                        T ?? 0,
+                        g ?? 0,
                         " sample card",
-                        (T ?? 0) === 1 ? "" : "s",
+                        (g ?? 0) === 1 ? "" : "s",
                         "). Remove it any time — it's demo data, not real work."
                       ] }),
                       /* @__PURE__ */ e(
                         "button",
                         {
                           onClick: () => {
-                            j(w), g();
+                            E(b), i();
                           },
                           className: "w-full px-3 py-2 rounded-md text-[13px] font-semibold transition-all",
                           style: { background: "var(--accent)", color: "var(--bg)" },
@@ -3643,24 +4377,24 @@ function Xt({ candidates: t, existingRepos: r, defaults: i, agentProfiles: o, cr
                       /* @__PURE__ */ e("div", { className: "text-[12px] font-semibold uppercase tracking-wide", style: { color: "var(--danger, #ef4444)" }, children: "Danger Zone" }),
                       /* @__PURE__ */ a("div", { className: "text-[12px]", style: { color: "var(--text, var(--muted))" }, children: [
                         "Deleting removes this pipeline and its ",
-                        T ?? 0,
+                        g ?? 0,
                         " card",
-                        (T ?? 0) === 1 ? "" : "s",
+                        (g ?? 0) === 1 ? "" : "s",
                         " from DLC-YOLO's local state. It does ",
                         /* @__PURE__ */ e("strong", { children: "not" }),
                         " touch GitHub issues or labels. This cannot be undone."
                       ] }),
                       /* @__PURE__ */ a("label", { className: "text-[11px]", style: { color: "var(--muted)" }, children: [
                         "Type ",
-                        /* @__PURE__ */ e("code", { className: "px-1 py-0.5 rounded", style: { background: "var(--bg-hover, var(--border))", color: "var(--text-strong, var(--text))" }, children: s }),
+                        /* @__PURE__ */ e("code", { className: "px-1 py-0.5 rounded", style: { background: "var(--bg-hover, var(--border))", color: "var(--text-strong, var(--text))" }, children: h }),
                         " to confirm:"
                       ] }),
                       /* @__PURE__ */ e(
                         "input",
                         {
-                          value: Ae,
-                          onChange: (L) => Se(L.target.value),
-                          placeholder: s,
+                          value: Le,
+                          onChange: (ge) => rt(ge.target.value),
+                          placeholder: h,
                           className: "w-full px-3 py-2 rounded-md text-[13px] outline-none",
                           style: { background: "var(--bg-elevated, var(--bg))", border: "1px solid var(--border-strong, var(--border))", color: "var(--text-strong, var(--text))" }
                         }
@@ -3668,15 +4402,15 @@ function Xt({ candidates: t, existingRepos: r, defaults: i, agentProfiles: o, cr
                       /* @__PURE__ */ e(
                         "button",
                         {
-                          disabled: !b,
+                          disabled: !T,
                           onClick: () => {
-                            j(w), g();
+                            E(b), i();
                           },
                           className: "w-full px-3 py-2 rounded-md text-[13px] font-semibold transition-all",
                           style: {
-                            background: b ? "var(--danger, #ef4444)" : "color-mix(in srgb, var(--danger, #ef4444) 20%, transparent)",
-                            color: b ? "#fff" : "var(--muted)",
-                            cursor: b ? "pointer" : "not-allowed"
+                            background: T ? "var(--danger, #ef4444)" : "color-mix(in srgb, var(--danger, #ef4444) 20%, transparent)",
+                            color: T ? "#fff" : "var(--muted)",
+                            cursor: T ? "pointer" : "not-allowed"
                           },
                           children: "Delete pipeline"
                         }
@@ -3686,27 +4420,27 @@ function Xt({ candidates: t, existingRepos: r, defaults: i, agentProfiles: o, cr
                 ) });
               })(),
               /* @__PURE__ */ a("div", { className: "px-5 py-3 flex justify-end gap-2", style: { borderTop: "1px solid var(--border)", background: "var(--bg-elevated, var(--card))" }, children: [
-                /* @__PURE__ */ e("button", { onClick: g, className: "text-xs px-3 py-1.5 rounded-md font-medium", style: { color: "var(--muted)" }, children: we === "settings" ? "Cancel" : "Close" }),
-                we === "settings" && /* @__PURE__ */ e(
+                /* @__PURE__ */ e("button", { onClick: i, className: "text-xs px-3 py-1.5 rounded-md font-medium", style: { color: "var(--muted)" }, children: ae === "settings" ? "Cancel" : "Close" }),
+                ae === "settings" && /* @__PURE__ */ e(
                   "button",
                   {
-                    disabled: !mt || !f && Ve,
-                    onClick: () => m({
-                      repo: je(w),
-                      workspace: I,
-                      ...O.trim() ? { repo_path: O.trim() } : {},
-                      source: B,
-                      trust: M,
+                    disabled: !wt || !f && Nt,
+                    onClick: () => p({
+                      repo: Ye(b),
+                      workspace: k,
+                      ...q.trim() ? { repo_path: q.trim() } : {},
+                      source: I,
+                      trust: B,
                       depth: y,
-                      budget: se === "depth" ? void 0 : se === "unlimited" ? { max_child_cards: "unlimited", effort_ceiling: "unlimited", max_feature_size: "XL", addenda: "proactive" } : ne,
-                      backlog_intake: be,
-                      results_in_repo: D,
-                      conversation_log: pe,
-                      trusted_authors: ut,
-                      self_enabling: P,
-                      approach: le,
-                      sync_mode: W,
-                      steps: $.map((s) => ({ ...s, label: `dlc:${s.id}` }))
+                      budget: he === "depth" ? void 0 : he === "unlimited" ? { max_child_cards: "unlimited", effort_ceiling: "unlimited", max_feature_size: "XL", addenda: "proactive" } : ie,
+                      backlog_intake: Se,
+                      results_in_repo: z,
+                      conversation_log: $e,
+                      trusted_authors: it,
+                      self_enabling: U,
+                      approach: we,
+                      sync_mode: oe,
+                      steps: F.map((h) => ({ ...h, label: `dlc:${h.id}` }))
                     }),
                     className: "text-xs px-3 py-1.5 rounded-md font-semibold transition-opacity disabled:opacity-40",
                     style: { background: "var(--accent)", color: "var(--bg)" },
@@ -3721,13 +4455,13 @@ function Xt({ candidates: t, existingRepos: r, defaults: i, agentProfiles: o, cr
     }
   );
 }
-function Qe({ size: t = 12 }) {
+function ft({ size: t = 12 }) {
   return /* @__PURE__ */ a("svg", { className: "animate-spin flex-shrink-0", width: t, height: t, viewBox: "0 0 16 16", "aria-hidden": "true", style: { color: "var(--accent)" }, children: [
     /* @__PURE__ */ e("circle", { cx: "8", cy: "8", r: "6", fill: "none", stroke: "currentColor", strokeWidth: "2", opacity: "0.22" }),
     /* @__PURE__ */ e("path", { d: "M8 2a6 6 0 0 1 6 6", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round" })
   ] });
 }
-const na = {
+const Wa = {
   investigate: "🔎",
   requirements: "📝",
   design: "📐",
@@ -3737,46 +4471,46 @@ const na = {
   pr: "🚀",
   intent: "🎯"
 };
-function oa(t, r) {
-  const [i, o] = N(""), l = fe(""), m = fe(""), u = fe(null);
-  return m.current = t || "", _e(() => {
-    if (!r || !m.current.startsWith(l.current)) {
-      l.current = m.current, o(m.current);
+function Ua(t, r) {
+  const [o, s] = w(""), l = Ae(""), p = Ae(""), u = Ae(null);
+  return p.current = t || "", Ee(() => {
+    if (!r || !p.current.startsWith(l.current)) {
+      l.current = p.current, s(p.current);
       return;
     }
-    const g = () => {
-      const d = m.current, T = l.current;
-      if (T.length >= d.length) {
+    const i = () => {
+      const c = p.current, g = l.current;
+      if (g.length >= c.length) {
         u.current = null;
         return;
       }
-      const x = Math.max(1, Math.ceil((d.length - T.length) / 12));
-      l.current = d.slice(0, T.length + x), o(l.current), u.current = requestAnimationFrame(g);
+      const v = Math.max(1, Math.ceil((c.length - g.length) / 12));
+      l.current = c.slice(0, g.length + v), s(l.current), u.current = requestAnimationFrame(i);
     };
-    return u.current == null && (u.current = requestAnimationFrame(g)), () => {
+    return u.current == null && (u.current = requestAnimationFrame(i)), () => {
       u.current != null && (cancelAnimationFrame(u.current), u.current = null);
     };
-  }, [t, r]), i;
+  }, [t, r]), o;
 }
-function sa({ live: t }) {
-  const [r, i] = N(!0), o = fe(null), l = oa(t.tail, t.active);
-  _e(() => {
-    o.current && (o.current.scrollTop = o.current.scrollHeight);
+function Ga({ live: t }) {
+  const [r, o] = w(!0), s = Ae(null), l = Ua(t.tail, t.active);
+  Ee(() => {
+    s.current && (s.current.scrollTop = s.current.scrollHeight);
   }, [l]);
-  const m = na[t.stage] || "⚙";
+  const p = Wa[t.stage] || "⚙";
   return /* @__PURE__ */ a("div", { className: "mt-2", style: { borderTop: "1px dashed var(--border)", paddingTop: "6px" }, children: [
     /* @__PURE__ */ a("div", { className: "flex items-center gap-1.5 text-[10px]", children: [
       /* @__PURE__ */ a(
         "button",
         {
           className: "inline-flex items-center gap-1 hover:underline",
-          onClick: () => i((u) => !u),
+          onClick: () => o((u) => !u),
           title: "Toggle live output",
           style: { color: "var(--muted)" },
           children: [
             /* @__PURE__ */ e("span", { "aria-hidden": "true", children: r ? "▾" : "▸" }),
             /* @__PURE__ */ a("span", { className: "uppercase tracking-wider", children: [
-              m,
+              p,
               " ",
               t.stage
             ] })
@@ -3787,7 +4521,7 @@ function sa({ live: t }) {
         "· ",
         t.active ? t.phase : "idle"
       ] }),
-      t.active && /* @__PURE__ */ e(Qe, { size: 10 }),
+      t.active && /* @__PURE__ */ e(ft, { size: 10 }),
       /* @__PURE__ */ e(
         "button",
         {
@@ -3802,7 +4536,7 @@ function sa({ live: t }) {
     r && /* @__PURE__ */ e(
       "div",
       {
-        ref: o,
+        ref: s,
         className: "mt-1 text-[10px] font-mono leading-snug overflow-y-auto whitespace-pre-wrap break-words",
         style: {
           maxHeight: "3.6em",
@@ -3817,26 +4551,26 @@ function sa({ live: t }) {
     )
   ] });
 }
-const la = {
+const Fa = {
   loop: "⚙",
   "step-agent": "🤖",
   orchestrator: "🧠",
   human: "🧑"
-}, ia = {
+}, Ha = {
   loop: "var(--muted)",
   "step-agent": "var(--info)",
   orchestrator: "var(--accent)",
   human: "var(--ok)"
 };
-function ca({ card: t, events: r, children: i, parent: o, onOpenCard: l, onClose: m }) {
-  const u = i && i.length > 0 || !!o;
+function Ka({ card: t, events: r, children: o, parent: s, onOpenCard: l, onClose: p }) {
+  const u = o && o.length > 0 || !!s;
   return /* @__PURE__ */ e(
     "div",
     {
       className: "fixed inset-0 z-[70] flex items-center justify-center p-4",
       style: { background: "rgba(0,0,0,0.58)", backdropFilter: "blur(4px)" },
-      onMouseDown: (g) => {
-        g.currentTarget === g.target && m();
+      onMouseDown: (i) => {
+        i.currentTarget === i.target && p();
       },
       children: /* @__PURE__ */ a(
         "section",
@@ -3852,70 +4586,70 @@ function ca({ card: t, events: r, children: i, parent: o, onOpenCard: l, onClose
                 /* @__PURE__ */ e("h2", { className: "text-[15px] font-semibold", style: { color: "var(--text-strong, var(--text))" }, children: "📜 Timeline" }),
                 /* @__PURE__ */ e("div", { className: "text-[12px] mt-0.5 truncate", style: { color: "var(--text)" }, children: t.title })
               ] }),
-              /* @__PURE__ */ e("button", { onClick: m, className: "text-[13px] px-2 py-0.5 rounded hover:opacity-80", style: { color: "var(--muted)" }, "aria-label": "Close", children: "✕" })
+              /* @__PURE__ */ e("button", { onClick: p, className: "text-[13px] px-2 py-0.5 rounded hover:opacity-80", style: { color: "var(--muted)" }, "aria-label": "Close", children: "✕" })
             ] }),
             /* @__PURE__ */ a("div", { className: "px-4 py-3 overflow-y-auto", children: [
               u && /* @__PURE__ */ a("div", { className: "mb-3 pb-3", style: { borderBottom: "1px dashed var(--border)" }, children: [
                 /* @__PURE__ */ e("div", { className: "text-[10px] uppercase tracking-wider mb-1.5", style: { color: "var(--muted)" }, children: "🌿 fan-out" }),
-                o && /* @__PURE__ */ a(
+                s && /* @__PURE__ */ a(
                   "button",
                   {
                     className: "flex items-center gap-1.5 text-[12px] hover:underline mb-1",
-                    onClick: () => l == null ? void 0 : l(o.id),
+                    onClick: () => l == null ? void 0 : l(s.id),
                     style: { color: "var(--accent)" },
                     title: "Open the integration parent",
                     children: [
                       "↑ parent · ",
-                      /* @__PURE__ */ e("span", { className: "truncate max-w-[420px]", style: { color: "var(--text)" }, children: o.title })
+                      /* @__PURE__ */ e("span", { className: "truncate max-w-[420px]", style: { color: "var(--text)" }, children: s.title })
                     ]
                   }
                 ),
-                i.map((g) => /* @__PURE__ */ a(
+                o.map((i) => /* @__PURE__ */ a(
                   "button",
                   {
                     className: "flex items-center gap-1.5 text-[12px] hover:underline w-full text-left",
-                    onClick: () => l == null ? void 0 : l(g.id),
+                    onClick: () => l == null ? void 0 : l(i.id),
                     title: "Open this child card",
                     style: { color: "var(--text)" },
                     children: [
                       /* @__PURE__ */ e("span", { "aria-hidden": "true", style: { color: "var(--accent)" }, children: "↳" }),
-                      /* @__PURE__ */ e("span", { className: "truncate flex-1", children: g.title }),
-                      /* @__PURE__ */ a("span", { className: "text-[9px] flex-shrink-0", style: { color: g.lifecycle === "retired" ? "var(--ok)" : "var(--muted)" }, children: [
-                        g.stage || "",
-                        g.lifecycle ? ` · ${g.lifecycle}` : "",
-                        g.required === !1 ? " · optional" : ""
+                      /* @__PURE__ */ e("span", { className: "truncate flex-1", children: i.title }),
+                      /* @__PURE__ */ a("span", { className: "text-[9px] flex-shrink-0", style: { color: i.lifecycle === "retired" ? "var(--ok)" : "var(--muted)" }, children: [
+                        i.stage || "",
+                        i.lifecycle ? ` · ${i.lifecycle}` : "",
+                        i.required === !1 ? " · optional" : ""
                       ] })
                     ]
                   },
-                  g.id
+                  i.id
                 )),
-                i.length > 0 && r.length === 0 && /* @__PURE__ */ a("div", { className: "text-[10px] mt-1.5 italic", style: { color: "var(--muted)" }, children: [
+                o.length > 0 && r.length === 0 && /* @__PURE__ */ a("div", { className: "text-[10px] mt-1.5 italic", style: { color: "var(--muted)" }, children: [
                   "This card fanned its work out to the ",
-                  i.length,
+                  o.length,
                   " child card",
-                  i.length > 1 ? "s" : "",
+                  o.length > 1 ? "s" : "",
                   " above — the story lives there."
                 ] })
               ] }),
-              r.length === 0 ? /* @__PURE__ */ e("div", { className: "text-[12px]", style: { color: "var(--muted)" }, children: u ? "No events recorded on this card directly." : "No recorded events yet." }) : /* @__PURE__ */ e("ol", { className: "flex flex-col gap-2", children: r.map((g) => /* @__PURE__ */ a("li", { className: "flex gap-2 text-[12px]", children: [
-                /* @__PURE__ */ e("span", { title: g.actor, "aria-hidden": "true", className: "flex-shrink-0 mt-0.5", children: la[g.actor] || "•" }),
+              r.length === 0 ? /* @__PURE__ */ e("div", { className: "text-[12px]", style: { color: "var(--muted)" }, children: u ? "No events recorded on this card directly." : "No recorded events yet." }) : /* @__PURE__ */ e("ol", { className: "flex flex-col gap-2", children: r.map((i) => /* @__PURE__ */ a("li", { className: "flex gap-2 text-[12px]", children: [
+                /* @__PURE__ */ e("span", { title: i.actor, "aria-hidden": "true", className: "flex-shrink-0 mt-0.5", children: Fa[i.actor] || "•" }),
                 /* @__PURE__ */ a("div", { className: "min-w-0 flex-1", children: [
                   /* @__PURE__ */ a("div", { className: "flex items-baseline gap-1.5 flex-wrap", children: [
-                    /* @__PURE__ */ a("span", { className: "font-medium", style: { color: g.needs_human ? "var(--warn)" : "var(--text)" }, children: [
-                      g.needs_human && "🔴 ",
-                      g.headline
+                    /* @__PURE__ */ a("span", { className: "font-medium", style: { color: i.needs_human ? "var(--warn)" : "var(--text)" }, children: [
+                      i.needs_human && "🔴 ",
+                      i.headline
                     ] }),
-                    g.cls === "decision" && /* @__PURE__ */ e("span", { className: "text-[9px] px-1 rounded-full", style: { color: "var(--accent)", background: "color-mix(in srgb, var(--accent) 14%, transparent)" }, children: "decision" }),
-                    /* @__PURE__ */ e("span", { className: "ml-auto text-[9px]", style: { color: "var(--muted)" }, children: g.at ? g.at.replace("T", " ").replace("Z", "") : "" })
+                    i.cls === "decision" && /* @__PURE__ */ e("span", { className: "text-[9px] px-1 rounded-full", style: { color: "var(--accent)", background: "color-mix(in srgb, var(--accent) 14%, transparent)" }, children: "decision" }),
+                    /* @__PURE__ */ e("span", { className: "ml-auto text-[9px]", style: { color: "var(--muted)" }, children: i.at ? i.at.replace("T", " ").replace("Z", "") : "" })
                   ] }),
-                  g.detail && /* @__PURE__ */ e("div", { className: "text-[10px] mt-0.5 leading-snug", style: { color: "var(--muted)" }, children: g.detail }),
-                  /* @__PURE__ */ a("div", { className: "text-[9px] mt-0.5", style: { color: ia[g.actor] || "var(--muted)" }, children: [
-                    g.actor,
-                    g.step ? ` · ${g.step}` : "",
-                    g.executor ? ` · ${g.executor}` : ""
+                  i.detail && /* @__PURE__ */ e("div", { className: "text-[10px] mt-0.5 leading-snug", style: { color: "var(--muted)" }, children: i.detail }),
+                  /* @__PURE__ */ a("div", { className: "text-[9px] mt-0.5", style: { color: Ha[i.actor] || "var(--muted)" }, children: [
+                    i.actor,
+                    i.step ? ` · ${i.step}` : "",
+                    i.executor ? ` · ${i.executor}` : ""
                   ] })
                 ] })
-              ] }, g.id)) })
+              ] }, i.id)) })
             ] })
           ]
         }
@@ -3923,368 +4657,395 @@ function ca({ card: t, events: r, children: i, parent: o, onOpenCard: l, onClose
     }
   );
 }
-function ga() {
-  const t = Zt(), r = cr(), [i, o] = N([]), [l, m] = N([]), [u, g] = N(ct), [d, T] = N(!0), [x, j] = N("pipeline"), [f, w] = N(/* @__PURE__ */ new Set()), [V, I] = N(!1), [q, O] = N(null), [R, B] = N([]), [_, M] = N([]), [K, y] = N([]), [ee, S] = N(!1), [se, ie] = N(!1), [ne, oe] = N(!1), [be, Z] = N([]), D = fe(null), X = fe(!1), pe = fe(!1), ue = fe(/* @__PURE__ */ new Set()), ve = fe(/* @__PURE__ */ new Set()), [h, P] = N({}), U = ae(
+function Ja() {
+  const t = yr(), r = Er(), [o, s] = w([]), [l, p] = w([]), [u, i] = w({}), [c, g] = w(Lt), [v, E] = w(!0), [f, b] = w("pipeline"), [x, k] = w(/* @__PURE__ */ new Set()), [D, q] = w(!1), [A, I] = w(null), [C, B] = w([]), [X, y] = w([]), [J, S] = w([]), [he, ye] = w(!1), [ie, me] = w(!1), [Se, Q] = w(!1), [z, ee] = w(!1), [$e, Te] = w(!1), [_e, _] = w(!1), [U, te] = w([]), we = Ae(null), Oe = Ae(!1), oe = Ae(!1), Z = Ae(/* @__PURE__ */ new Set()), F = Ae(/* @__PURE__ */ new Set()), [ve, O] = w({}), ce = le(
     (n) => t.get("/api/file-read?path=" + encodeURIComponent(n)),
     [t]
-  ), le = ae(async (n = !1) => {
+  ), Le = le(async (n = !1) => {
     try {
-      const c = !pe.current || n ? await St(U) : await Wt(U, Pe);
-      Pe = c.path, pe.current = !0;
-      const p = c.data;
-      o(p.cards || []), m(p.pipelines || []), g({ ...ct, ...p.config || {} });
-    } catch (c) {
-      console.error("Failed to fetch cards:", c);
+      const d = !oe.current || n ? await Ht(ce) : await ir(ce, Qe);
+      Qe = d.path, oe.current = !0;
+      const m = d.data;
+      s(m.cards || []), p(m.pipelines || []), i({ github_webhook_history: m.github_webhook_history || [], scheduler_state: m.scheduler_state || null }), g({ ...Lt, ...m.config || {} });
+    } catch (d) {
+      console.error("Failed to fetch cards:", d);
     } finally {
-      T(!1);
+      E(!1);
     }
-  }, [U]), ke = xe(() => {
+  }, [ce]), rt = Ce(() => {
     const n = /* @__PURE__ */ new Map();
-    return l.forEach((c) => {
-      n.has(c.repo) || n.set(c.repo, 0);
-    }), i.forEach((c) => {
-      var k;
-      const p = ((k = c.source) == null ? void 0 : k.repo) || "unlinked";
-      n.set(p, (n.get(p) || 0) + 1);
-    }), [...n.entries()].map(([c, p]) => ({ name: c, count: p })).sort((c, p) => p.count - c.count);
-  }, [i, l]), W = xe(
-    () => f.size === 0 ? i : i.filter((n) => {
-      var c;
-      return f.has(((c = n.source) == null ? void 0 : c.repo) || "unlinked");
+    return l.forEach((d) => {
+      n.has(d.repo) || n.set(d.repo, 0);
+    }), o.forEach((d) => {
+      var N;
+      const m = ((N = d.source) == null ? void 0 : N.repo) || "unlinked";
+      n.set(m, (n.get(m) || 0) + 1);
+    }), [...n.entries()].map(([d, m]) => ({ name: d, count: m })).sort((d, m) => m.count - d.count);
+  }, [o, l]), ae = Ce(
+    () => x.size === 0 ? o : o.filter((n) => {
+      var d;
+      return x.has(((d = n.source) == null ? void 0 : d.repo) || "unlinked");
     }),
-    [i, f]
+    [o, x]
   );
-  _e(() => {
-    ve.current = new Set(i.map((n) => n.id)), ue.current = new Set(i.flatMap(
-      (n) => Object.values(n.step_sessions || {}).filter((c) => !!c.slot_key && !c.chat_disabled_at && !c.superseded).map((c) => c.slot_key)
+  Ee(() => {
+    F.current = new Set(o.map((n) => n.id)), Z.current = new Set(o.flatMap(
+      (n) => Object.values(n.step_sessions || {}).filter((d) => !!d.slot_key && !d.chat_disabled_at && !d.superseded).map((d) => d.slot_key)
     ));
-  }, [i]), _e(() => {
-    let n = !1, c = null, p, k = 0;
-    const E = () => {
+  }, [o]), Ee(() => {
+    let n = !1, d = null, m, N = 0;
+    const R = () => {
       if (n) return;
-      const s = window.location.protocol === "https:" ? "wss:" : "ws:";
-      c = new WebSocket(`${s}//${window.location.host}/api/ws`), c.onopen = () => {
-        k = 0;
-      }, c.onmessage = (b) => {
-        if (typeof b.data == "string")
+      const j = window.location.protocol === "https:" ? "wss:" : "ws:";
+      d = new WebSocket(`${j}//${window.location.host}/api/ws`), d.onopen = () => {
+        N = 0;
+      }, d.onmessage = (G) => {
+        if (typeof G.data == "string")
           try {
-            const L = JSON.parse(b.data), F = L == null ? void 0 : L.data;
-            if (L.type === "slots" && Array.isArray(F)) {
-              const Y = new Set(ue.current), J = [];
-              for (const A of F) {
-                const he = (A == null ? void 0 : A.key) || (A == null ? void 0 : A.slot) || (A == null ? void 0 : A.name), Q = String((A == null ? void 0 : A.title) || (A == null ? void 0 : A.name) || "");
-                typeof he == "string" && he.startsWith("cron-") && [...ve.current].some((te) => Q.includes(te)) && Y.add(he), typeof he == "string" && (A != null && A.running) && Y.has(he) && J.push(he);
+            const M = JSON.parse(G.data), V = M == null ? void 0 : M.data;
+            if (M.type === "slots" && Array.isArray(V)) {
+              const K = new Set(Z.current), Y = [];
+              for (const L of V) {
+                const Re = (L == null ? void 0 : L.key) || (L == null ? void 0 : L.slot) || (L == null ? void 0 : L.name), Pe = String((L == null ? void 0 : L.title) || (L == null ? void 0 : L.name) || "");
+                typeof Re == "string" && Re.startsWith("cron-") && [...F.current].some((We) => Pe.includes(We)) && K.add(Re), typeof Re == "string" && (L != null && L.running) && K.has(Re) && Y.push(Re);
               }
-              ue.current = Y, J.length && P((A) => {
-                let he = A;
-                for (const Q of J) {
-                  const te = Dt(A[Q]);
-                  te !== A[Q] && (he = { ...he, [Q]: te });
+              Z.current = K, Y.length && O((L) => {
+                let Re = L;
+                for (const Pe of Y) {
+                  const We = nr(L[Pe]);
+                  We !== L[Pe] && (Re = { ...Re, [Pe]: We });
                 }
-                return he;
+                return Re;
               });
               return;
             }
-            const G = F == null ? void 0 : F.slot;
-            if (!G || !ue.current.has(G)) return;
-            L.type === "chat_status" && String(F.status || "").toLowerCase().startsWith("thinking") || L.type === "chat_thinking" ? P((Y) => {
-              const J = Dt(Y[G], L.type === "chat_status");
-              return J === Y[G] ? Y : { ...Y, [G]: J };
-            }) : L.type === "chat_chunk" && typeof F.content == "string" ? P((Y) => {
-              const J = vr(Y[G], F.content, Number(F.seq));
-              return J === Y[G] ? Y : { ...Y, [G]: J };
-            }) : L.type === "chat_done" && P((Y) => {
-              const J = hr(Y[G]);
-              return J === Y[G] ? Y : { ...Y, [G]: J };
+            const se = V == null ? void 0 : V.slot;
+            if (!se || !Z.current.has(se)) return;
+            M.type === "chat_status" && String(V.status || "").toLowerCase().startsWith("thinking") || M.type === "chat_thinking" ? O((K) => {
+              const Y = nr(K[se], M.type === "chat_status");
+              return Y === K[se] ? K : { ...K, [se]: Y };
+            }) : M.type === "chat_chunk" && typeof V.content == "string" ? O((K) => {
+              const Y = Dr(K[se], V.content, Number(V.seq));
+              return Y === K[se] ? K : { ...K, [se]: Y };
+            }) : M.type === "chat_done" && O((K) => {
+              const Y = Br(K[se]);
+              return Y === K[se] ? K : { ...K, [se]: Y };
             });
           } catch {
           }
-      }, c.onclose = () => {
+      }, d.onclose = () => {
         if (n) return;
-        const b = Math.min(1e3 * 2 ** k++, 15e3);
-        p = setTimeout(E, b);
-      }, c.onerror = () => c == null ? void 0 : c.close();
+        const G = Math.min(1e3 * 2 ** N++, 15e3);
+        m = setTimeout(R, G);
+      }, d.onerror = () => d == null ? void 0 : d.close();
     };
-    return E(), () => {
-      n = !0, p && clearTimeout(p), c == null || c.close();
+    return R(), () => {
+      n = !0, m && clearTimeout(m), d == null || d.close();
     };
-  }, []), _e(() => {
-    if (!ne) return;
-    const n = (c) => {
-      c.key === "Escape" && oe(!1);
+  }, []), Ee(() => {
+    if (!Se) return;
+    const n = (d) => {
+      d.key === "Escape" && Q(!1);
     };
     return window.addEventListener("keydown", n), () => window.removeEventListener("keydown", n);
-  }, [ne]);
-  const de = 6e5, $ = xe(() => {
-    var c, p, k, E;
+  }, [Se]);
+  const lt = 6e5, pe = Ce(() => {
+    var d, m, N, R;
     const n = [];
-    for (const s of W) {
-      const b = s.step_status || {}, L = s.step_sessions || {}, F = l.find((Y) => Y.id === s.pipeline_id) || l.find((Y) => {
-        var J;
-        return Y.repo === ((J = s.source) == null ? void 0 : J.repo);
-      }), G = /* @__PURE__ */ new Set([...Object.keys(b), ...Object.keys(L)]);
-      for (const Y of G) {
-        const J = b[Y] || "idle", A = L[Y], he = J === "pending" || J === "error", Q = !!(A != null && A.slot_key) && !A.chat_disabled_at && !A.superseded;
-        if (!he && !Q) continue;
-        const te = (c = s.pending_at) == null ? void 0 : c[Y], Ye = he && !!te && Date.now() - new Date(te).getTime() > de, $e = (p = F == null ? void 0 : F.steps) == null ? void 0 : p.find((Xe) => Xe.id === Y), yt = (A == null ? void 0 : A.agent) || ((k = $e == null ? void 0 : $e.agent) == null ? void 0 : k.crew) || ((E = $e == null ? void 0 : $e.agent) == null ? void 0 : E.name) || "orchestrator", Ge = A == null ? void 0 : A.agent_id, nr = A == null ? void 0 : A.slot_key, or = A == null ? void 0 : A.session_key, sr = Ge ? be.some((Xe) => Xe.id === Ge) : he && be.some((Xe) => (Xe.task || "").includes(s.id) || (Xe.task || "").includes(s.title)), lr = !!(A != null && A.last_response_at) && (!A.last_response_handled_at || A.last_response_handled_at < A.last_response_at);
-        n.push({ cardId: s.id, card: s.title || s.id, step: Y, agent: yt, stale: Ye, status: J, live: sr, responsePending: lr, agentId: Ge, slotKey: nr, sessionKey: or, sessionName: A == null ? void 0 : A.name });
+    for (const j of ae) {
+      const G = j.step_status || {}, M = j.step_sessions || {}, V = l.find((K) => K.id === j.pipeline_id) || l.find((K) => {
+        var Y;
+        return K.repo === ((Y = j.source) == null ? void 0 : Y.repo);
+      }), se = /* @__PURE__ */ new Set([...Object.keys(G), ...Object.keys(M)]);
+      for (const K of se) {
+        const Y = G[K] || "idle", L = M[K], Re = Y === "pending" || Y === "error", Pe = !!(L != null && L.slot_key) && !L.chat_disabled_at && !L.superseded;
+        if (!Re && !Pe) continue;
+        const We = (d = j.pending_at) == null ? void 0 : d[K], ne = Re && !!We && Date.now() - new Date(We).getTime() > lt, re = (m = V == null ? void 0 : V.steps) == null ? void 0 : m.find((ht) => ht.id === K), Ue = (L == null ? void 0 : L.agent) || ((N = re == null ? void 0 : re.agent) == null ? void 0 : N.crew) || ((R = re == null ? void 0 : re.agent) == null ? void 0 : R.name) || "orchestrator", Ie = L == null ? void 0 : L.agent_id, nt = L == null ? void 0 : L.slot_key, At = L == null ? void 0 : L.session_key, Ar = Ie ? U.some((ht) => ht.id === Ie) : Re && U.some((ht) => (ht.task || "").includes(j.id) || (ht.task || "").includes(j.title)), jr = !!(L != null && L.last_response_at) && (!L.last_response_handled_at || L.last_response_handled_at < L.last_response_at);
+        n.push({ cardId: j.id, card: j.title || j.id, step: K, agent: Ue, stale: ne, status: Y, live: Ar, responsePending: jr, agentId: Ie, slotKey: nt, sessionKey: At, sessionName: L == null ? void 0 : L.name });
       }
     }
     return n;
-  }, [W, l, be]), C = xe(() => {
-    var E;
+  }, [ae, l, U]), $ = Ce(() => {
+    var R;
     let n;
-    if (f.size === 1) {
-      const s = [...f][0];
-      n = (E = l.find((b) => b.repo === s)) == null ? void 0 : E.steps;
+    if (x.size === 1) {
+      const j = [...x][0];
+      n = (R = l.find((G) => G.repo === j)) == null ? void 0 : R.steps;
     } else l.length === 1 && (n = l[0].steps);
-    const c = (n && n.length ? n : At).map((s) => ({ ...s })), p = new Set(c.map((s) => s.id)), k = [];
-    return p.has("intake") || k.push({ id: "intake", name: "Intake", type: "agent", agent: { name: "orchestrator" } }), k.push(...c), p.has("done") || k.push({ id: "done", name: "Done", type: "agent" }), k;
-  }, [f, l]), v = xe(() => C.map((n) => n.id), [C]), re = ae((n) => {
-    var c;
-    return ((c = C.find((p) => p.id === n)) == null ? void 0 : c.type) === "gate" || n.startsWith("gate-");
-  }, [C]), Ae = ae((n) => {
-    var c, p;
-    return ((p = (c = C.find((k) => k.id === n)) == null ? void 0 : c.agent) == null ? void 0 : p.name) || Yr[n] || "unknown";
-  }, [C]), Se = ae((n) => {
-    var E, s;
-    const c = n.step_sessions || {}, p = Object.entries(c).find(
-      ([, b]) => b.retained_for_gate === n.stage && b.retention !== "released"
+    const d = (n && n.length ? n : Vt).map((j) => ({ ...j })), m = new Set(d.map((j) => j.id)), N = [];
+    return m.has("intake") || N.push({ id: "intake", name: "Intake", type: "agent", agent: { name: "orchestrator" } }), N.push(...d), m.has("done") || N.push({ id: "done", name: "Done", type: "agent" }), N;
+  }, [x, l]), W = Ce(() => $.map((n) => n.id), [$]), ke = le((n) => {
+    var d;
+    return ((d = $.find((m) => m.id === n)) == null ? void 0 : d.type) === "gate" || n.startsWith("gate-");
+  }, [$]), Xe = le((n) => {
+    var d, m;
+    return ((m = (d = $.find((N) => N.id === n)) == null ? void 0 : d.agent) == null ? void 0 : m.name) || $a[n] || "unknown";
+  }, [$]), De = le((n) => {
+    var R, j;
+    const d = n.step_sessions || {}, m = Object.entries(d).find(
+      ([, G]) => G.retained_for_gate === n.stage && G.retention !== "released"
     );
-    let k = ((E = n.gate_review) == null ? void 0 : E.producer_step) || (p == null ? void 0 : p[0]);
-    if (!k) {
-      const b = l.find((J) => J.id === n.pipeline_id) || l.find((J) => {
-        var A;
-        return J.repo === ((A = n.source) == null ? void 0 : A.repo);
-      }), L = (s = b == null ? void 0 : b.steps) != null && s.length ? b.steps : At, F = [
+    let N = ((R = n.gate_review) == null ? void 0 : R.producer_step) || (m == null ? void 0 : m[0]);
+    if (!N) {
+      const G = l.find((Y) => Y.id === n.pipeline_id) || l.find((Y) => {
+        var L;
+        return Y.repo === ((L = n.source) == null ? void 0 : L.repo);
+      }), M = (j = G == null ? void 0 : G.steps) != null && j.length ? G.steps : Vt, V = [
         { id: "intake", name: "Intake", type: "agent" },
-        ...L.filter((J) => J.id !== "intake" && J.id !== "done"),
+        ...M.filter((Y) => Y.id !== "intake" && Y.id !== "done"),
         { id: "done", name: "Done", type: "agent" }
-      ], G = F.findIndex((J) => J.id === n.stage), Y = G >= 0 ? F[G] : void 0;
-      if (k = Y == null ? void 0 : Y.reviews_step, !k && G >= 0)
-        for (let J = G - 1; J >= 0; J--) {
-          const A = F[J];
-          if (!(A.id === "intake" || A.id === "done") && A.type !== "gate" && !A.id.startsWith("gate-")) {
-            k = A.id;
+      ], se = V.findIndex((Y) => Y.id === n.stage), K = se >= 0 ? V[se] : void 0;
+      if (N = K == null ? void 0 : K.reviews_step, !N && se >= 0)
+        for (let Y = se - 1; Y >= 0; Y--) {
+          const L = V[Y];
+          if (!(L.id === "intake" || L.id === "done") && L.type !== "gate" && !L.id.startsWith("gate-")) {
+            N = L.id;
             break;
           }
         }
     }
-    return k;
-  }, [l]), we = ae((n) => {
-    const c = Se(n);
-    if (!c) return;
-    const p = (n.step_sessions || {})[c];
-    if (!(!(p != null && p.slot_key) || p.chat_disabled_at || p.superseded))
+    return N;
+  }, [l]), Fe = le((n) => {
+    const d = De(n);
+    if (!d) return;
+    const m = (n.step_sessions || {})[d];
+    if (!(!(m != null && m.slot_key) || m.chat_disabled_at || m.superseded))
       return {
-        step: c,
-        slotKey: p.slot_key,
-        retained: p.retention === "held-for-gate"
+        step: d,
+        slotKey: m.slot_key,
+        retained: m.retention === "held-for-gate"
       };
-  }, [Se]);
-  _e(() => {
+  }, [De]);
+  Ee(() => {
     const n = async () => {
       try {
-        const k = Pe.slice(0, Pe.lastIndexOf("/")), E = (k ? k + "/" : "") + "live_spawns.json", s = await t.get("/api/file-read?path=" + encodeURIComponent(E));
-        X.current = !1;
-        const b = s != null && s.at ? Date.now() - new Date(s.at).getTime() < 18e4 : !0;
-        Z(b && Array.isArray(s == null ? void 0 : s.runs) ? s.runs : []);
+        const N = Qe.slice(0, Qe.lastIndexOf("/")), R = (N ? N + "/" : "") + "live_spawns.json", j = await t.get("/api/file-read?path=" + encodeURIComponent(R));
+        Oe.current = !1;
+        const G = j != null && j.at ? Date.now() - new Date(j.at).getTime() < 18e4 : !0;
+        te(G && Array.isArray(j == null ? void 0 : j.runs) ? j.runs : []);
       } catch {
-        X.current = !0, Z([]);
+        Oe.current = !0, te([]);
       }
     };
-    let c = 0;
-    le(!0).then(n);
-    const p = setInterval(() => {
-      c += 1;
-      const k = c % 12 === 0;
-      le(k).then(() => {
-        X.current || n();
+    let d = 0;
+    Le(!0).then(n);
+    const m = setInterval(() => {
+      d += 1;
+      const N = d % 12 === 0;
+      Le(N).then(() => {
+        Oe.current || n();
       });
     }, 1e4);
-    return () => clearInterval(p);
-  }, [le, t]);
-  const ye = ae(async () => {
-    ie(!0);
+    return () => clearInterval(m);
+  }, [Le, t]);
+  const qe = le(async () => {
+    me(!0);
     let n = [];
     try {
-      const p = await U("~/.kiro/crew/config.json");
-      n = Fr(p == null ? void 0 : p.agents), M(n);
-    } catch (p) {
-      console.warn("crew roster (config.json) unreadable:", p), M([]);
+      const m = await ce("~/.kiro/crew/config.json");
+      n = wa(m == null ? void 0 : m.agents), y(n);
+    } catch (m) {
+      console.warn("crew roster (config.json) unreadable:", m), y([]);
     }
-    const c = await Promise.all(Hr(n).map(async (p) => {
-      const k = Ur(p, n);
-      if (!k) return It(null, p);
+    const d = await Promise.all(Na(n).map(async (m) => {
+      const N = _a(m, n);
+      if (!N) return Qt(null, m);
       try {
-        const E = await U(k);
-        return It(E, p, k);
+        const R = await ce(N);
+        return Qt(R, m, N);
       } catch {
-        return It(null, p, k);
+        return Qt(null, m, N);
       }
     }));
-    y(c), ie(!1);
-  }, [U]), Et = ae(() => {
-    S(!0), ye();
-  }, [ye]), et = ae((n) => {
-    ye().then(() => O(n));
-  }, [ye]), tt = ae(async (n) => {
+    S(d), me(!1);
+  }, [ce]), Ye = le(() => {
+    ye(!0), qe();
+  }, [qe]), yt = le((n) => {
+    qe().then(() => I(n));
+  }, [qe]), it = le(async (n) => {
     await t.post("/apps/dlc-yolo/api/agents/crew", {
       mode: n.mode,
       name: n.name,
       kiro_agent: n.kiroAgent,
       workspace: n.workspace || null,
       memory_store: n.memoryStore || null
-    }), await ye();
-  }, [t, ye]), me = ae(async (n) => {
+    }), await qe();
+  }, [t, qe]), fe = le(async (n) => {
     try {
-      const c = await St(U);
-      Pe = c.path, c.data.cards = c.data.cards || [], n(c.data);
-      let p = c;
+      const d = await Ht(ce);
+      Qe = d.path, d.data.cards = d.data.cards || [], n(d.data);
+      let m = d;
       try {
-        p = await St(U), Pe = p.path, p.data.cards = p.data.cards || [], n(p.data);
+        m = await Ht(ce), Qe = m.path, m.data.cards = m.data.cards || [], n(m.data);
       } catch {
-        p = c;
+        m = d;
       }
       await t.post("/api/file-write", {
-        path: p.path,
-        content: JSON.stringify(p.data, null, 2)
-      }), le();
-    } catch (c) {
-      console.error("Failed to mutate state:", c);
+        path: m.path,
+        content: JSON.stringify(m.data, null, 2)
+      }), Le();
+    } catch (d) {
+      console.error("Failed to mutate state:", d);
     }
-  }, [t, le, U]), Lt = ae((n) => {
-    g((c) => ({ ...c, ...n })), me((c) => {
-      c.config = { ...ct, ...c.config || {}, ...n };
+  }, [t, Le, ce]), kt = le((n) => {
+    g((d) => ({ ...d, ...n })), fe((d) => {
+      d.config = { ...Lt, ...d.config || {}, ...n };
     });
-  }, [me]), Ue = ae((n, c, p, k) => {
-    const E = (/* @__PURE__ */ new Date()).toISOString(), s = `ui-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-    me((b) => {
-      var J;
-      const L = b.cards.find((A) => A.id === n);
-      if (!L || L.stage !== c) return;
-      if (k === void 0 && p.type === "interject") {
-        const A = p.text.trim();
-        if (!A) return;
-        L.interjection = L.interjection || [], L.interjection.some((he) => he.id === s) || L.interjection.push({
-          id: s,
-          at: E,
-          step: c,
-          kind: p.kind,
-          text: A,
+  }, [fe]), wt = le((n, d, m, N) => {
+    const R = (/* @__PURE__ */ new Date()).toISOString(), j = `ui-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    fe((G) => {
+      var Y;
+      const M = G.cards.find((L) => L.id === n);
+      if (!M || M.stage !== d) return;
+      if (N === void 0 && m.type === "interject") {
+        const L = m.text.trim();
+        if (!L) return;
+        M.interjection = M.interjection || [], M.interjection.some((Re) => Re.id === j) || M.interjection.push({
+          id: j,
+          at: R,
+          step: d,
+          kind: m.kind,
+          text: L,
           by: "user",
           status: "pending"
-        }), L.updated_at = E;
+        }), M.updated_at = R;
         return;
       }
-      if ((((J = L.gate_review) == null ? void 0 : J.result_revision) ?? null) !== k) return;
-      const G = p.type === "reject" ? p.reason.trim() : void 0, Y = p.type === "interject" ? p.text.trim() : void 0;
-      p.type === "reject" && !G || p.type === "interject" && !Y || (L.gate_commands = L.gate_commands || [], L.gate_commands.some((A) => A.id === s) || L.gate_commands.push({
-        id: s,
-        gate: c,
-        action: p.type,
-        expected_revision: k ?? null,
+      if ((((Y = M.gate_review) == null ? void 0 : Y.result_revision) ?? null) !== N) return;
+      const se = m.type === "reject" ? m.reason.trim() : void 0, K = m.type === "interject" ? m.text.trim() : void 0;
+      m.type === "reject" && !se || m.type === "interject" && !K || (M.gate_commands = M.gate_commands || [], M.gate_commands.some((L) => L.id === j) || M.gate_commands.push({
+        id: j,
+        gate: d,
+        action: m.type,
+        expected_revision: N ?? null,
         actor: "user",
-        at: E,
+        at: R,
         status: "pending",
-        ...G ? { reason: G } : {},
-        ...p.type === "interject" ? { kind: p.kind, text: Y } : {}
-      }), L.updated_at = E);
+        ...se ? { reason: se } : {},
+        ...m.type === "interject" ? { kind: m.kind, text: K } : {}
+      }), M.updated_at = R);
     });
-  }, [me]), dt = ae((n, c) => {
-    me((p) => {
-      const k = p.cards.find((s) => s.id === n);
-      if (!k) return;
-      const E = (k.decisions || []).find((s) => s.id === c);
-      E && (E.chosen = "acknowledged", E.status = "acknowledged", E.resolved_at = (/* @__PURE__ */ new Date()).toISOString()), k.updated_at = (/* @__PURE__ */ new Date()).toISOString();
+  }, [fe]), Nt = le((n, d, m) => {
+    const N = (/* @__PURE__ */ new Date()).toISOString(), R = va();
+    fe((j) => {
+      const G = j.cards.find((V) => V.id === n);
+      if (!G) return;
+      let M;
+      try {
+        M = ba({ id: R, kind: d, text: m, card: G, now: N });
+      } catch {
+        return;
+      }
+      G.interjection = xa(G.interjection, M), G.updated_at = N;
     });
-  }, [me]), jt = ae(async (n) => {
-    var p, k, E;
-    const c = (p = n.orchestrator_session) == null ? void 0 : p.slot_key;
-    if (c) {
-      r(`/chat?sid=${encodeURIComponent(c)}`);
+  }, [fe]), _t = le((n) => {
+    if (!window.confirm("Cancel this card? Writes are revoked cooperatively — a live turn may not stop immediately, and its worktree is retained until terminal observation.")) return;
+    const d = (/* @__PURE__ */ new Date()).toISOString();
+    fe((m) => {
+      const N = m.cards.find((R) => R.id === n);
+      N && (N.lifecycle = "cancelled", N.writes_allowed = !1, N.cancel_requested_at = d, N.updated_at = d);
+    });
+  }, [fe]), at = le((n, d) => {
+    fe((m) => {
+      const N = m.cards.find((j) => j.id === n);
+      if (!N) return;
+      const R = (N.decisions || []).find((j) => j.id === d);
+      R && (R.chosen = "acknowledged", R.status = "acknowledged", R.resolved_at = (/* @__PURE__ */ new Date()).toISOString()), N.updated_at = (/* @__PURE__ */ new Date()).toISOString();
+    });
+  }, [fe]), Zt = le(async (n) => {
+    var N, R, j;
+    const m = ((G) => {
+      var se;
+      const M = G == null ? void 0 : G.orchestrator_session;
+      if (M != null && M.slot_key) return M.slot_key;
+      if (M != null && M.session_key) return M.session_key.replace(/^cron:/, "cron-");
+      const V = (se = l.find((K) => K.id === (G == null ? void 0 : G.pipeline_id))) == null ? void 0 : se.orchestrator_session;
+      return (V == null ? void 0 : V.slot_key) || (V != null && V.session_key ? V.session_key.replace(/^cron:/, "cron-") : void 0);
+    })(n);
+    if (m) {
+      r(`/chat?sid=${encodeURIComponent(m)}`);
       return;
     }
     try {
-      const s = await t.post("/apps/dlc-yolo/api/orchestrator/trigger", { card_id: n.id });
-      if (s != null && s.slot_key) {
-        r(`/chat?sid=${encodeURIComponent(s.slot_key)}`);
+      const G = await t.post("/apps/dlc-yolo/api/orchestrator/trigger", { card_id: n.id });
+      if (G != null && G.slot_key) {
+        r(`/chat?sid=${encodeURIComponent(G.slot_key)}`);
         return;
       }
     } catch {
     }
-    for (let s = 0; s < 8; s++) {
-      await new Promise((b) => setTimeout(b, 2e3));
+    for (let G = 0; G < 8; G++) {
+      await new Promise((M) => setTimeout(M, 2e3));
       try {
-        const L = (E = (k = ((await Wt(U, Pe)).data.cards || []).find((F) => F.id === n.id)) == null ? void 0 : k.orchestrator_session) == null ? void 0 : E.slot_key;
-        if (L) {
-          le(), r(`/chat?sid=${encodeURIComponent(L)}`);
+        const M = await ir(ce, Qe), V = (M.data.cards || []).find((Y) => Y.id === n.id), se = (N = (M.data.pipelines || []).find((Y) => Y.id === (V == null ? void 0 : V.pipeline_id))) == null ? void 0 : N.orchestrator_session, K = ((R = V == null ? void 0 : V.orchestrator_session) == null ? void 0 : R.slot_key) || (((j = V == null ? void 0 : V.orchestrator_session) == null ? void 0 : j.session_key) || (se == null ? void 0 : se.session_key) || "").replace(/^cron:/, "cron-") || (se == null ? void 0 : se.slot_key);
+        if (K) {
+          Le(), r(`/chat?sid=${encodeURIComponent(K)}`);
           return;
         }
       } catch {
       }
     }
-    le();
-  }, [t, r, U, le]), je = ae((n) => {
-    me((c) => {
-      var E;
-      const p = c.cards.find((s) => s.id === n);
-      if (!p) return;
-      const k = p.trust || ((E = c.config) == null ? void 0 : E.trust) || ct.trust;
-      p.trust = Fe[(Fe.indexOf(k) + 1) % Fe.length], p.updated_at = (/* @__PURE__ */ new Date()).toISOString();
+    Le();
+  }, [t, r, ce, Le]), Jt = le((n) => {
+    fe((d) => {
+      var R;
+      const m = d.cards.find((j) => j.id === n);
+      if (!m) return;
+      const N = m.trust || ((R = d.config) == null ? void 0 : R.trust) || Lt.trust;
+      m.trust = st[(st.indexOf(N) + 1) % st.length], m.updated_at = (/* @__PURE__ */ new Date()).toISOString();
     });
-  }, [me]), pt = ae((n) => {
-    me((c) => {
-      var E;
-      const p = c.cards.find((s) => s.id === n);
-      if (!p) return;
-      const k = p.depth || ((E = c.config) == null ? void 0 : E.depth) || ct.depth;
-      p.depth = Je[(Je.indexOf(k) + 1) % Je.length], p.updated_at = (/* @__PURE__ */ new Date()).toISOString();
+  }, [fe]), qt = le((n) => {
+    fe((d) => {
+      var R;
+      const m = d.cards.find((j) => j.id === n);
+      if (!m) return;
+      const N = m.depth || ((R = d.config) == null ? void 0 : R.depth) || Lt.depth;
+      m.depth = xt[(xt.indexOf(N) + 1) % xt.length], m.updated_at = (/* @__PURE__ */ new Date()).toISOString();
     });
-  }, [me]), ut = ae((n, c) => {
-    me((p) => {
-      const k = p.cards.find((E) => E.id === n);
-      k && (c ? k.budget = { ...c } : delete k.budget, k.updated_at = (/* @__PURE__ */ new Date()).toISOString());
+  }, [fe]), It = le((n, d) => {
+    fe((m) => {
+      const N = m.cards.find((R) => R.id === n);
+      N && (d ? N.budget = { ...d } : delete N.budget, N.updated_at = (/* @__PURE__ */ new Date()).toISOString());
     });
-  }, [me]), rt = ae((n) => {
-    w((c) => {
-      const p = new Set(c);
-      return p.has(n) ? p.delete(n) : p.add(n), p;
+  }, [fe]), Mt = le((n) => {
+    k((d) => {
+      const m = new Set(d);
+      return m.has(n) ? m.delete(n) : m.add(n), m;
     });
-  }, []), Ke = ae(() => w(/* @__PURE__ */ new Set()), []), mt = ae(async () => {
-    const n = ye(), c = [];
+  }, []), Ct = le(() => k(/* @__PURE__ */ new Set()), []), St = le(async () => {
+    const n = qe(), d = [];
     try {
-      const p = await t.get("/api/file-read?path=~/.kiro/crew/config.json"), k = (p == null ? void 0 : p.workspaces) || {};
-      Object.entries(k).forEach(([E, s]) => {
-        const b = typeof (s == null ? void 0 : s.repo) == "string" && /^[^/\s]+\/[^/\s]+$/.test(s.repo) ? s.repo : "";
-        c.push({
-          repo: b,
-          workspace: E,
-          label: E,
+      const m = await t.get("/api/file-read?path=~/.kiro/crew/config.json"), N = (m == null ? void 0 : m.workspaces) || {};
+      Object.entries(N).forEach(([R, j]) => {
+        const G = typeof (j == null ? void 0 : j.repo) == "string" && /^[^/\s]+\/[^/\s]+$/.test(j.repo) ? j.repo : "";
+        d.push({
+          repo: G,
+          workspace: R,
+          label: R,
           source: "workspace",
-          detail: (s == null ? void 0 : s.dir) || E,
-          path: typeof (s == null ? void 0 : s.dir) == "string" ? s.dir : void 0
+          detail: (j == null ? void 0 : j.dir) || R,
+          path: typeof (j == null ? void 0 : j.dir) == "string" ? j.dir : void 0
         });
       });
-    } catch (p) {
-      console.warn("workspaces registry unreadable:", p);
+    } catch (m) {
+      console.warn("workspaces registry unreadable:", m);
     }
     try {
-      const p = await t.get("/api/file-read?path=~/.kiro/crew/apps/issue-radar/data/config.json");
-      ((p == null ? void 0 : p.repos) || []).forEach((k) => {
-        k != null && k.owner && (k != null && k.repo) && c.push({ repo: `${k.owner}/${k.repo}`, source: "issue-radar", detail: `${k.provider || "github"} · ${k.host || "github.com"}` });
+      const m = await t.get("/api/file-read?path=~/.kiro/crew/apps/issue-radar/data/config.json");
+      ((m == null ? void 0 : m.repos) || []).forEach((N) => {
+        N != null && N.owner && (N != null && N.repo) && d.push({ repo: `${N.owner}/${N.repo}`, source: "issue-radar", detail: `${N.provider || "github"} · ${N.host || "github.com"}` });
       });
-    } catch (p) {
-      console.warn("issue-radar config unreadable (app may not be installed):", p);
+    } catch (m) {
+      console.warn("issue-radar config unreadable (app may not be installed):", m);
     }
-    B(c), await n, I(!0);
-  }, [t, ye]), Ve = ae(async (n) => {
-    const c = (/* @__PURE__ */ new Date()).toISOString(), p = "pl-" + Math.random().toString(36).slice(2, 10);
-    await me((k) => {
-      k.pipelines = k.pipelines || [];
-      const E = k.pipelines.find((s) => s.repo === n.repo);
-      E ? (E.source = n.source, E.workspace = n.workspace, n.repo_path ? E.repo_path = n.repo_path : delete E.repo_path, E.trust = n.trust, E.depth = n.depth, n.budget ? E.budget = n.budget : delete E.budget, E.backlog_intake = n.backlog_intake, E.results_in_repo = n.results_in_repo, E.conversation_log = n.conversation_log, n.trusted_authors.length ? E.trusted_authors = n.trusted_authors : delete E.trusted_authors, E.self_enabling = n.self_enabling, E.approach = n.approach, n.sync_mode ? E.sync_mode = n.sync_mode : delete E.sync_mode, E.steps = n.steps) : k.pipelines.push({
-        id: p,
+    B(d), await n, q(!0);
+  }, [t, qe]), $t = le(async (n) => {
+    const d = (/* @__PURE__ */ new Date()).toISOString(), m = "pl-" + Math.random().toString(36).slice(2, 10);
+    await fe((N) => {
+      N.pipelines = N.pipelines || [];
+      const R = N.pipelines.find((j) => j.repo === n.repo);
+      R ? (R.source = n.source, R.workspace = n.workspace, n.repo_path ? R.repo_path = n.repo_path : delete R.repo_path, R.trust = n.trust, R.depth = n.depth, n.budget ? R.budget = n.budget : delete R.budget, R.backlog_intake = n.backlog_intake, R.results_in_repo = n.results_in_repo, R.conversation_log = n.conversation_log, n.trusted_authors.length ? R.trusted_authors = n.trusted_authors : delete R.trusted_authors, R.self_enabling = n.self_enabling, R.approach = n.approach, n.sync_mode ? R.sync_mode = n.sync_mode : delete R.sync_mode, R.steps = n.steps) : N.pipelines.push({
+        id: m,
         repo: n.repo,
         workspace: n.workspace,
         ...n.repo_path ? { repo_path: n.repo_path } : {},
@@ -4301,138 +5062,244 @@ function ga() {
         ...n.sync_mode && n.sync_mode !== "poll" ? { sync_mode: n.sync_mode } : {},
         sot: "github",
         steps: n.steps,
-        created_at: c
+        created_at: d
       });
-    }), I(!1), O(null), w(/* @__PURE__ */ new Set([n.repo]));
-  }, [me]), at = ae(async (n) => {
-    await me((c) => {
-      c.pipelines = (c.pipelines || []).filter((p) => p.repo !== n), c.cards = (c.cards || []).filter((p) => {
-        var k;
-        return (((k = p.source) == null ? void 0 : k.repo) || "unlinked") !== n;
+    }), q(!1), I(null), k(/* @__PURE__ */ new Set([n.repo]));
+  }, [fe]), Dt = le(async (n) => {
+    await fe((d) => {
+      d.pipelines = (d.pipelines || []).filter((m) => m.repo !== n), d.cards = (d.cards || []).filter((m) => {
+        var N;
+        return (((N = m.source) == null ? void 0 : N.repo) || "unlinked") !== n;
       });
-    }), w((c) => {
-      const p = new Set(c);
-      return p.delete(n), p;
+    }), k((d) => {
+      const m = new Set(d);
+      return m.delete(n), m;
     });
-  }, [me]), Re = xe(() => v.reduce((n, c) => (n[c] = W.filter((p) => p.stage === c), n), {}), [W, v]), Ot = ae((n) => {
-    var c;
-    (c = document.getElementById(`stage-col-${n}`)) == null || c.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
-  }, []), gt = xe(() => {
+  }, [fe]), ct = Ce(() => {
+    const n = /* @__PURE__ */ new Set(["retired", "cancelled", "canceled", "merged", "superseded"]);
+    return W.reduce((d, m) => (d[m] = ae.filter((N) => N.stage === m && !n.has(String(N.lifecycle || ""))), d), {});
+  }, [ae, W]), dt = Ce(
+    () => ae.filter((n) => ["retired", "merged"].includes(String(n.lifecycle || ""))),
+    [ae]
+  ), pt = Ce(
+    () => ae.filter((n) => ["cancelled", "canceled", "superseded"].includes(String(n.lifecycle || ""))),
+    [ae]
+  ), Bt = le((n) => {
+    var d;
+    (d = document.getElementById(`stage-col-${n}`)) == null || d.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+  }, []), Tt = Ce(() => {
     const n = {};
-    return W.forEach((c) => {
-      var k;
-      const p = ((k = c.source) == null ? void 0 : k.repo) || "unlinked";
-      (n[p] || (n[p] = [])).push(c);
+    return ae.forEach((d) => {
+      var N;
+      const m = ((N = d.source) == null ? void 0 : N.repo) || "unlinked";
+      (n[m] || (n[m] = [])).push(d);
     }), n;
-  }, [W]), nt = xe(() => {
+  }, [ae]), Rt = Ce(() => {
     const n = {};
-    return W.forEach((c) => {
-      const p = Ae(c.stage);
-      (n[p] || (n[p] = [])).push(c);
+    return ae.forEach((d) => {
+      const m = Xe(d.stage);
+      (n[m] || (n[m] = [])).push(d);
     }), n;
-  }, [W, Ae]), vt = xe(() => {
-    const n = Object.fromEntries(Ft.map((c) => [c, []]));
-    return W.forEach((c) => {
-      var s, b;
-      const p = l.find((L) => L.id === c.pipeline_id) || l.find((L) => {
-        var F;
-        return L.repo === ((F = c.source) == null ? void 0 : F.repo);
-      }), k = ((b = (s = p == null ? void 0 : p.steps) == null ? void 0 : s.find((L) => L.id === c.stage)) == null ? void 0 : b.type) === "gate" || re(c.stage), E = $.some((L) => L.cardId === c.id && L.step === c.stage && L.live);
-      n[Kt(c, { isGate: k, liveObserved: E }).kind].push(c);
-    }), Object.fromEntries(Ft.filter((c) => n[c].length > 0).map((c) => [er[c].label, n[c]]));
-  }, [W, l, re, $]), ht = W.filter((n) => n.stage !== "done").length, bt = W.filter((n) => re(n.stage)).length, xt = W.filter((n) => n.stage === "done").length, ot = W.reduce((n, c) => {
-    var p;
-    return n + (((p = c.parked) == null ? void 0 : p.length) || 0);
-  }, 0), ft = {
-    pipeline: W.length,
-    workspace: Object.keys(gt).length,
-    crew: Object.keys(nt).length,
-    status: W.length,
-    backlog: ot
-  }, Oe = $.some((n) => {
-    var c, p;
-    return !!n.slotKey && ((c = h[n.slotKey]) == null ? void 0 : c.active) && ((p = h[n.slotKey]) == null ? void 0 : p.phase) === "generating";
-  }), ze = $.some((n) => {
-    var c, p;
-    return !!n.slotKey && ((c = h[n.slotKey]) == null ? void 0 : c.active) && ((p = h[n.slotKey]) == null ? void 0 : p.phase) === "thinking";
-  }), Be = (n) => {
-    var Y, J, A, he;
-    const c = l.find((Q) => Q.id === n.pipeline_id) || l.find((Q) => {
-      var te;
-      return Q.repo === ((te = n.source) == null ? void 0 : te.repo);
-    }), p = ((J = (Y = c == null ? void 0 : c.steps) == null ? void 0 : Y.find((Q) => Q.id === n.stage)) == null ? void 0 : J.type) === "gate" || re(n.stage), k = p ? ((A = n.gate_review) == null ? void 0 : A.result_revision) ?? null : void 0, E = p ? Se(n) : void 0, s = p ? we(n) : void 0, b = $.some((Q) => Q.cardId === n.id && Q.step === n.stage && Q.live), L = Kt(n, { isGate: p, liveObserved: b }), F = (he = c == null ? void 0 : c.steps) == null ? void 0 : he.find((Q) => Q.id === n.stage), G = n.capability || (F == null ? void 0 : F.capability) || "auto-derived";
+  }, [ae, Xe]), zt = Ce(() => {
+    const n = Object.fromEntries(dr.map((d) => [d, []]));
+    return ae.forEach((d) => {
+      var j, G;
+      const m = l.find((M) => M.id === d.pipeline_id) || l.find((M) => {
+        var V;
+        return M.repo === ((V = d.source) == null ? void 0 : V.repo);
+      }), N = ((G = (j = m == null ? void 0 : m.steps) == null ? void 0 : j.find((M) => M.id === d.stage)) == null ? void 0 : G.type) === "gate" || ke(d.stage), R = pe.some((M) => M.cardId === d.id && M.step === d.stage && M.live);
+      n[mr(d, { isGate: N, liveObserved: R }).kind].push(d);
+    }), Object.fromEntries(dr.filter((d) => n[d].length > 0).map((d) => [_r[d].label, n[d]]));
+  }, [ae, l, ke, pe]), ut = /* @__PURE__ */ new Set(["retired", "merged", "cancelled", "canceled", "superseded"]), h = ae.filter((n) => !ut.has(String(n.lifecycle || ""))).length, T = ae.filter((n) => ke(n.stage) && !ut.has(String(n.lifecycle || ""))).length, ge = ae.filter((n) => ut.has(String(n.lifecycle || ""))).length, be = ae.reduce((n, d) => {
+    var m;
+    return n + (((m = d.parked) == null ? void 0 : m.length) || 0);
+  }, 0), de = {
+    pipeline: ae.length,
+    workspace: Object.keys(Tt).length,
+    crew: Object.keys(Rt).length,
+    status: ae.length,
+    backlog: be
+  }, He = pe.some((n) => {
+    var d, m;
+    return !!n.slotKey && ((d = ve[n.slotKey]) == null ? void 0 : d.active) && ((m = ve[n.slotKey]) == null ? void 0 : m.phase) === "generating";
+  }), Pt = pe.some((n) => {
+    var d, m;
+    return !!n.slotKey && ((d = ve[n.slotKey]) == null ? void 0 : d.active) && ((m = ve[n.slotKey]) == null ? void 0 : m.phase) === "thinking";
+  }), mt = (n) => {
+    var L, Re, Pe, We;
+    const d = l.find((ne) => ne.id === n.pipeline_id) || l.find((ne) => {
+      var re;
+      return ne.repo === ((re = n.source) == null ? void 0 : re.repo);
+    }), m = ((Re = (L = d == null ? void 0 : d.steps) == null ? void 0 : L.find((ne) => ne.id === n.stage)) == null ? void 0 : Re.type) === "gate" || ke(n.stage), N = ["cancelled", "canceled", "retired", "merged", "superseded"].includes(String(n.lifecycle || "")), R = m && !N, j = R ? ((Pe = n.gate_review) == null ? void 0 : Pe.result_revision) ?? null : void 0, G = R ? De(n) : void 0, M = R ? Fe(n) : void 0, V = pe.some((ne) => ne.cardId === n.id && ne.step === n.stage && ne.live), se = mr(n, { isGate: R, liveObserved: V }), K = (We = d == null ? void 0 : d.steps) == null ? void 0 : We.find((ne) => ne.id === n.stage), Y = n.capability || (K == null ? void 0 : K.capability) || "auto-derived";
     return {
       card: n,
-      config: u,
-      isGate: p,
-      cardStatus: L,
-      effectiveCapability: G,
-      producerStep: E,
-      producerSession: s,
-      onOpenProducer: s ? () => r(`/chat?sid=${encodeURIComponent(s.slotKey)}`) : void 0,
-      onApprove: p ? () => Ue(n.id, n.stage, { type: "approve" }, k) : void 0,
-      onReject: p ? (Q) => Ue(n.id, n.stage, { type: "reject", reason: Q }, k) : void 0,
-      onCycleTrust: () => je(n.id),
-      onCycleDepth: () => pt(n.id),
-      onSetBudget: (Q) => ut(n.id, Q),
-      onInterject: (Q, te) => Ue(
+      config: c,
+      isGate: R,
+      cardStatus: se,
+      effectiveCapability: Y,
+      producerStep: G,
+      producerSession: M,
+      onOpenProducer: M ? () => r(`/chat?sid=${encodeURIComponent(M.slotKey)}`) : void 0,
+      onApprove: R ? () => wt(n.id, n.stage, { type: "approve" }, j) : void 0,
+      onReject: R ? (ne) => wt(n.id, n.stage, { type: "reject", reason: ne }, j) : void 0,
+      onCycleTrust: () => Jt(n.id),
+      onCycleDepth: () => qt(n.id),
+      onSetBudget: (ne) => It(n.id, ne),
+      onInterject: (ne, re) => wt(
         n.id,
         n.stage,
-        { type: "interject", kind: Q, text: te },
-        k
+        { type: "interject", kind: ne, text: re },
+        j
       ),
-      onResolveDecision: (Q) => dt(n.id, Q),
-      onOpenOrchestrator: () => jt(n),
+      onResolveDecision: (ne) => at(n.id, ne),
+      onOpenOrchestrator: () => Zt(n),
       liveView: (() => {
-        var $e, yt;
-        const Q = (yt = ($e = n.step_sessions) == null ? void 0 : $e[n.stage]) == null ? void 0 : yt.slot_key, te = Q ? h[Q] : void 0, Ye = $.some((Ge) => Ge.cardId === n.id && Ge.step === n.stage && Ge.live);
-        if (!(!Q || !(te != null && te.active) && !Ye))
+        var Ie, nt;
+        const ne = (nt = (Ie = n.step_sessions) == null ? void 0 : Ie[n.stage]) == null ? void 0 : nt.slot_key, re = ne ? ve[ne] : void 0, Ue = pe.some((At) => At.cardId === n.id && At.step === n.stage && At.live);
+        if (!(!ne || !(re != null && re.active) && !Ue))
           return {
             stage: n.stage,
-            phase: (te == null ? void 0 : te.phase) || "running",
-            tail: (te == null ? void 0 : te.tail) || "",
-            active: !!(te != null && te.active) && Ye,
-            seq: (te == null ? void 0 : te.seq) || 0,
-            slotKey: Q,
-            onOpen: () => r(`/chat?sid=${encodeURIComponent(Q)}`)
+            phase: (re == null ? void 0 : re.phase) || "running",
+            tail: (re == null ? void 0 : re.tail) || "",
+            active: !!(re != null && re.active) && Ue,
+            seq: (re == null ? void 0 : re.seq) || 0,
+            slotKey: ne,
+            onOpen: () => r(`/chat?sid=${encodeURIComponent(ne)}`)
           };
       })(),
-      allCards: W,
-      onOpenCard: (Q) => {
-        const te = document.getElementById(`card-${Q}`);
-        if (te) {
-          te.scrollIntoView({ behavior: "smooth", block: "center" });
-          const Ye = te.style.outline;
-          te.style.outline = "2px solid var(--accent)", setTimeout(() => {
-            te.style.outline = Ye;
+      allCards: ae,
+      onRequest: (ne, re) => Nt(n.id, ne, re),
+      onOpenStepSession: (() => {
+        const ne = n.step_sessions;
+        if (!ne || typeof ne != "object") return;
+        const re = Object.entries(ne).map(([Ue, Ie]) => {
+          const nt = (Ie == null ? void 0 : Ie.slot_key) || (Ie != null && Ie.session_key ? Ie.session_key.replace(/^cron:/, "cron-") : void 0);
+          return nt ? { step: Ue, open: () => r(`/chat?sid=${encodeURIComponent(nt)}`) } : null;
+        }).filter((Ue) => Ue !== null);
+        return re.length ? re : void 0;
+      })(),
+      onCancelCard: () => _t(n.id),
+      onOpenCard: (ne) => {
+        const re = document.getElementById(`card-${ne}`);
+        if (re) {
+          re.scrollIntoView({ behavior: "smooth", block: "center" });
+          const Ue = re.style.outline;
+          re.style.outline = "2px solid var(--accent)", setTimeout(() => {
+            re.style.outline = Ue;
           }, 1400);
         }
       }
     };
   };
-  return /* @__PURE__ */ a(He, { children: [
-    /* @__PURE__ */ e(dr, { title: "DLC-YOLO", subtitle: "Autonomous SDLC pipeline with human gates" }),
-    ee && /* @__PURE__ */ e(
-      qt,
+  return /* @__PURE__ */ a(ze, { children: [
+    /* @__PURE__ */ e(Or, { title: "DLC-YOLO", subtitle: "Autonomous SDLC pipeline with human gates" }),
+    he && /* @__PURE__ */ e(
+      ar,
       {
-        profiles: K,
-        crews: _,
-        loading: se,
-        context: f.size === 1 ? [...f][0] : void 0,
+        profiles: J,
+        crews: X,
+        loading: ie,
+        context: x.size === 1 ? [...x][0] : void 0,
         onRefresh: () => {
-          ye();
+          qe();
         },
-        onSaveCrew: tt,
-        onClose: () => S(!1)
+        onSaveCrew: it,
+        onClose: () => ye(!1)
       }
     ),
-    ne && /* @__PURE__ */ e(
+    z && /* @__PURE__ */ e(
       "div",
       {
         className: "fixed inset-0 z-50 flex items-center justify-center p-4",
         style: { background: "rgba(0,0,0,0.48)", backdropFilter: "blur(3px)" },
         onMouseDown: (n) => {
-          n.currentTarget === n.target && oe(!1);
+          n.currentTarget === n.target && ee(!1);
+        },
+        children: /* @__PURE__ */ a(
+          "section",
+          {
+            role: "dialog",
+            "aria-modal": "true",
+            "aria-label": "Pipeline event tree",
+            className: "flex flex-col rounded-xl overflow-hidden",
+            style: { width: "min(920px, calc(100vw - 32px))", maxHeight: "min(88vh, 900px)", background: "var(--bg-elevated, var(--bg))", border: "1px solid var(--border-strong, var(--border))", boxShadow: "0 28px 90px rgba(0,0,0,0.5)" },
+            children: [
+              /* @__PURE__ */ a("header", { className: "px-5 py-3.5 flex items-center gap-3", style: { borderBottom: "1px solid var(--border)" }, children: [
+                /* @__PURE__ */ e("h2", { className: "text-[15px] font-semibold flex-1", style: { color: "var(--text-strong, var(--text))" }, children: "🌲 Pipeline event tree" }),
+                /* @__PURE__ */ e("button", { onClick: () => ee(!1), className: "text-[13px] px-2 py-0.5 rounded hover:opacity-80", style: { color: "var(--muted)" }, "aria-label": "Close", children: "✕" })
+              ] }),
+              /* @__PURE__ */ e("div", { className: "px-4 py-3 overflow-y-auto", children: /* @__PURE__ */ e(
+                Ma,
+                {
+                  pipeline: l.find((n) => ae.some((d) => d.pipeline_id === n.id)) || l[0],
+                  cards: ae,
+                  extras: u,
+                  onOpenCard: (n) => {
+                    ee(!1), b("pipeline"), setTimeout(() => {
+                      const d = document.getElementById(`card-${n}`);
+                      if (d) {
+                        d.scrollIntoView({ behavior: "smooth", block: "center" });
+                        const m = d.style.outline;
+                        d.style.outline = "2px solid var(--accent)", setTimeout(() => {
+                          d.style.outline = m;
+                        }, 1400);
+                      }
+                    }, 80);
+                  }
+                }
+              ) })
+            ]
+          }
+        )
+      }
+    ),
+    $e && /* @__PURE__ */ e(
+      "div",
+      {
+        className: "fixed inset-0 z-50 flex items-center justify-center p-4",
+        style: { background: "rgba(0,0,0,0.48)", backdropFilter: "blur(3px)" },
+        onMouseDown: (n) => {
+          n.currentTarget === n.target && Te(!1);
+        },
+        children: /* @__PURE__ */ a(
+          "section",
+          {
+            role: "dialog",
+            "aria-modal": "true",
+            "aria-label": "Backlog",
+            className: "flex flex-col rounded-xl overflow-hidden",
+            style: { width: "min(820px, calc(100vw - 32px))", maxHeight: "min(88vh, 900px)", background: "var(--bg-elevated, var(--bg))", border: "1px solid var(--border-strong, var(--border))", boxShadow: "0 28px 90px rgba(0,0,0,0.5)" },
+            children: [
+              /* @__PURE__ */ a("header", { className: "px-5 py-3.5 flex items-center gap-3", style: { borderBottom: "1px solid var(--border)" }, children: [
+                /* @__PURE__ */ a("h2", { className: "text-[15px] font-semibold flex-1", style: { color: "var(--text-strong, var(--text))" }, children: [
+                  "📋 Backlog",
+                  be ? ` · ${be}` : ""
+                ] }),
+                /* @__PURE__ */ e("button", { onClick: () => Te(!1), className: "text-[13px] px-2 py-0.5 rounded hover:opacity-80", style: { color: "var(--muted)" }, "aria-label": "Close", children: "✕" })
+              ] }),
+              /* @__PURE__ */ e("div", { className: "px-4 py-3 overflow-y-auto", children: /* @__PURE__ */ e(Da, { cards: ae }) })
+            ]
+          }
+        )
+      }
+    ),
+    _e && /* @__PURE__ */ e(
+      Ea,
+      {
+        cards: ae,
+        schedulerState: u.scheduler_state,
+        statePath: Qe,
+        readAppFile: ce,
+        onClose: () => _(!1)
+      }
+    ),
+    Se && /* @__PURE__ */ e(
+      "div",
+      {
+        className: "fixed inset-0 z-50 flex items-center justify-center p-4",
+        style: { background: "rgba(0,0,0,0.48)", backdropFilter: "blur(3px)" },
+        onMouseDown: (n) => {
+          n.currentTarget === n.target && Q(!1);
         },
         children: /* @__PURE__ */ a(
           "section",
@@ -4447,14 +5314,14 @@ function ga() {
                 /* @__PURE__ */ a("div", { className: "min-w-0 flex-1", children: [
                   /* @__PURE__ */ a("div", { className: "flex items-center gap-2", children: [
                     /* @__PURE__ */ e("h2", { id: "agent-sessions-title", className: "text-[15px] font-semibold", style: { color: "var(--text-strong, var(--text))" }, children: "Agent sessions" }),
-                    /* @__PURE__ */ e("span", { className: "text-[10px] font-semibold px-1.5 py-0.5 rounded-full", style: { background: "color-mix(in srgb, var(--accent) 14%, transparent)", color: "var(--accent)" }, children: $.length })
+                    /* @__PURE__ */ e("span", { className: "text-[10px] font-semibold px-1.5 py-0.5 rounded-full", style: { background: "color-mix(in srgb, var(--accent) 14%, transparent)", color: "var(--accent)" }, children: pe.length })
                   ] }),
                   /* @__PURE__ */ e("p", { className: "text-[11px] mt-0.5", style: { color: "var(--muted)" }, children: "Live activity from enabled chats linked to pipeline cards." })
                 ] }),
                 /* @__PURE__ */ e(
                   "button",
                   {
-                    onClick: () => oe(!1),
+                    onClick: () => Q(!1),
                     "aria-label": "Close agent sessions",
                     className: "w-8 h-8 rounded-lg flex items-center justify-center text-lg leading-none",
                     style: { color: "var(--muted)", background: "var(--bg-hover, transparent)", border: "1px solid var(--border)" },
@@ -4462,8 +5329,8 @@ function ga() {
                   }
                 )
               ] }),
-              /* @__PURE__ */ e("div", { className: "overflow-y-auto p-3 flex flex-col gap-2", children: $.length === 0 ? /* @__PURE__ */ e("div", { className: "px-3 py-8 text-center text-[12px]", style: { color: "var(--muted)" }, children: "No linked agent chats yet." }) : $.map((n) => {
-                const c = n.slotKey ? h[n.slotKey] : void 0;
+              /* @__PURE__ */ e("div", { className: "overflow-y-auto p-3 flex flex-col gap-2", children: pe.length === 0 ? /* @__PURE__ */ e("div", { className: "px-3 py-8 text-center text-[12px]", style: { color: "var(--muted)" }, children: "No linked agent chats yet." }) : pe.map((n) => {
+                const d = n.slotKey ? ve[n.slotKey] : void 0;
                 return /* @__PURE__ */ a(
                   "div",
                   {
@@ -4487,15 +5354,15 @@ function ga() {
                         /* @__PURE__ */ e("span", { className: "flex-shrink-0", style: { color: n.responsePending ? "var(--warn)" : n.status === "pending" ? "var(--ok)" : "var(--muted)" }, children: n.responsePending ? "response" : n.status }),
                         n.stale && /* @__PURE__ */ e("span", { style: { color: "var(--warn)" }, title: "stale — will be reclaimed", children: "↻" })
                       ] }),
-                      (c == null ? void 0 : c.active) && c.phase === "thinking" && /* @__PURE__ */ a("div", { className: "mt-2 ml-4 flex items-center gap-2 text-[11px] font-medium", style: { color: "var(--accent)" }, title: "Real thinking state from this linked dashboard slot", children: [
-                        /* @__PURE__ */ e(Qe, { size: 13 }),
+                      (d == null ? void 0 : d.active) && d.phase === "thinking" && /* @__PURE__ */ a("div", { className: "mt-2 ml-4 flex items-center gap-2 text-[11px] font-medium", style: { color: "var(--accent)" }, title: "Real thinking state from this linked dashboard slot", children: [
+                        /* @__PURE__ */ e(ft, { size: 13 }),
                         /* @__PURE__ */ e("span", { children: "Thinking" })
                       ] }),
-                      (c == null ? void 0 : c.active) && c.phase === "generating" && c.tail && /* @__PURE__ */ a("div", { className: "mt-2 ml-4 flex items-center gap-2 min-w-0", style: { color: "var(--ok)" }, title: "Real text projected from this linked slot's live chat_chunk stream", children: [
+                      (d == null ? void 0 : d.active) && d.phase === "generating" && d.tail && /* @__PURE__ */ a("div", { className: "mt-2 ml-4 flex items-center gap-2 min-w-0", style: { color: "var(--ok)" }, title: "Real text projected from this linked slot's live chat_chunk stream", children: [
                         /* @__PURE__ */ e("span", { className: "w-1.5 h-1.5 rounded-full animate-pulse flex-shrink-0", style: { background: "var(--ok)" } }),
                         /* @__PURE__ */ a("span", { className: "font-mono text-[11px] truncate", children: [
                           "Generating · …",
-                          c.tail
+                          d.tail
                         ] })
                       ] }),
                       n.slotKey && /* @__PURE__ */ a(
@@ -4505,9 +5372,9 @@ function ga() {
                           style: { color: "var(--muted)", fontSize: 10, background: "transparent", border: "none", cursor: "pointer", textDecoration: "underline" },
                           title: `Copy openable slot ${n.slotKey} (${n.sessionName || n.sessionKey}); open it from Chats`,
                           onClick: () => {
-                            var p;
+                            var m;
                             try {
-                              (p = navigator.clipboard) == null || p.writeText(n.slotKey || "");
+                              (m = navigator.clipboard) == null || m.writeText(n.slotKey || "");
                             } catch {
                             }
                           },
@@ -4528,128 +5395,176 @@ function ga() {
         )
       }
     ),
-    V && /* @__PURE__ */ e(
-      Xt,
+    D && /* @__PURE__ */ e(
+      xr,
       {
-        candidates: R,
+        candidates: C,
         existingRepos: new Set(l.map((n) => n.repo)),
-        defaults: u,
-        agentProfiles: K,
-        crews: _,
-        onCreate: Ve,
-        onSaveCrew: tt,
-        onClose: () => I(!1)
+        defaults: c,
+        agentProfiles: J,
+        crews: X,
+        onCreate: $t,
+        onSaveCrew: it,
+        onClose: () => q(!1)
       }
     ),
-    q && /* @__PURE__ */ e(
-      Xt,
+    A && /* @__PURE__ */ e(
+      xr,
       {
-        candidates: R,
+        candidates: C,
         existingRepos: new Set(l.map((n) => n.repo)),
-        defaults: u,
-        agentProfiles: K,
-        crews: _,
-        editPipeline: l.find((n) => n.repo === q) || // demo repos have cards but no pipelines[] entry — synthesize a default to edit
-        { id: "pl-" + q, repo: q, source: "manual", trust: u.trust, depth: u.depth, backlog_intake: !0, sot: "github", steps: At.map((n) => ({ ...n })), created_at: (/* @__PURE__ */ new Date()).toISOString() },
-        cardCount: i.filter((n) => {
-          var c;
-          return (((c = n.source) == null ? void 0 : c.repo) || "unlinked") === q;
+        defaults: c,
+        agentProfiles: J,
+        crews: X,
+        editPipeline: l.find((n) => n.repo === A) || // demo repos have cards but no pipelines[] entry — synthesize a default to edit
+        { id: "pl-" + A, repo: A, source: "manual", trust: c.trust, depth: c.depth, backlog_intake: !0, sot: "github", steps: Vt.map((n) => ({ ...n })), created_at: (/* @__PURE__ */ new Date()).toISOString() },
+        cardCount: o.filter((n) => {
+          var d;
+          return (((d = n.source) == null ? void 0 : d.repo) || "unlinked") === A;
         }).length,
-        isExample: ar.has(q),
-        onCreate: Ve,
-        onSaveCrew: tt,
-        onDelete: at,
-        onClose: () => O(null)
+        isExample: Rr.has(A),
+        onCreate: $t,
+        onSaveCrew: it,
+        onDelete: Dt,
+        onClose: () => I(null)
       }
     ),
     /* @__PURE__ */ a("div", { className: "px-6 pb-8 overflow-y-auto flex-1 min-h-0", children: [
-      /* @__PURE__ */ e(Xr, { steps: C, cardsByStage: Re, onNodeClick: Ot }),
+      /* @__PURE__ */ e(Ta, { steps: $, cardsByStage: ct, onNodeClick: Bt }),
       /* @__PURE__ */ a("div", { className: "grid gap-3 grid-cols-[repeat(auto-fit,minmax(120px,1fr))] mb-3", children: [
-        /* @__PURE__ */ e(kt, { label: "Active", value: String(ht), accent: !0 }),
-        /* @__PURE__ */ e(kt, { label: "Gated", value: String(bt) }),
-        /* @__PURE__ */ e(kt, { label: "Done", value: String(xt) }),
-        /* @__PURE__ */ e(kt, { label: "Parked", value: String(ot) })
+        /* @__PURE__ */ e(Wt, { label: "Active", value: String(h), accent: !0 }),
+        /* @__PURE__ */ e(Wt, { label: "Gated", value: String(T) }),
+        /* @__PURE__ */ e(Wt, { label: "Done", value: String(ge) }),
+        /* @__PURE__ */ e(Wt, { label: "Parked", value: String(be) })
       ] }),
       /* @__PURE__ */ e(
-        Or,
+        ra,
         {
-          repos: ke.map((n) => n.name),
-          selectedRepos: [...f],
+          repos: rt.map((n) => n.name),
+          selectedRepos: [...x],
           onNewPipeline: () => {
-            mt();
+            St();
           },
-          onConfigure: et,
-          onOpenAgents: Et
+          onConfigure: yt,
+          onOpenAgents: Ye
         }
       ),
       /* @__PURE__ */ a("div", { className: "flex gap-4 items-start", children: [
         /* @__PURE__ */ e(
-          ta,
+          Ba,
           {
-            repos: ke,
-            selected: f,
-            onToggle: rt,
-            onClear: Ke,
-            onAddWorkspace: mt,
-            onEdit: et
+            repos: rt,
+            selected: x,
+            onToggle: Mt,
+            onClear: Ct,
+            onAddWorkspace: St,
+            onEdit: yt
           }
         ),
         /* @__PURE__ */ a("div", { className: "flex-1 min-w-0", children: [
           /* @__PURE__ */ a("div", { className: "flex items-center gap-3 mb-4 flex-wrap", children: [
-            /* @__PURE__ */ e(Zr, { active: x, onChange: j, counts: ft }),
+            /* @__PURE__ */ e(Ra, { active: f, onChange: b, counts: de }),
             /* @__PURE__ */ a(
               "button",
               {
-                onClick: () => oe(!0),
+                onClick: () => ee(!0),
                 "aria-haspopup": "dialog",
-                "aria-expanded": ne,
+                className: "flex items-center gap-1 text-[11px] px-2 py-1 rounded-md cursor-pointer",
+                title: "Pipeline event tree — everything happening across the pipeline",
+                style: { background: "var(--bg-elevated, var(--bg))", border: "1px solid var(--border)", color: "var(--muted)" },
+                children: [
+                  "🌲 ",
+                  /* @__PURE__ */ e("span", { className: "font-semibold", children: "Tree" })
+                ]
+              }
+            ),
+            /* @__PURE__ */ a(
+              "button",
+              {
+                onClick: () => Te(!0),
+                "aria-haspopup": "dialog",
+                className: "flex items-center gap-1 text-[11px] px-2 py-1 rounded-md cursor-pointer",
+                title: "Parked backlog ideas",
+                style: { background: "var(--bg-elevated, var(--bg))", border: "1px solid var(--border)", color: "var(--muted)" },
+                children: [
+                  "📋 ",
+                  /* @__PURE__ */ e("span", { className: "font-semibold", children: "Backlog" }),
+                  be ? /* @__PURE__ */ a("span", { style: { color: "var(--accent)" }, children: [
+                    "· ",
+                    be
+                  ] }) : null
+                ]
+              }
+            ),
+            /* @__PURE__ */ a(
+              "button",
+              {
+                onClick: () => _(!0),
+                "aria-haspopup": "dialog",
+                className: "flex items-center gap-1 text-[11px] px-2 py-1 rounded-md cursor-pointer",
+                title: "Operations — runtime, projection parity, webhook, sessions",
+                style: { background: "var(--bg-elevated, var(--bg))", border: "1px solid var(--border)", color: "var(--muted)" },
+                children: [
+                  "🛠 ",
+                  /* @__PURE__ */ e("span", { className: "font-semibold", children: "Ops" })
+                ]
+              }
+            ),
+            /* @__PURE__ */ a(
+              "button",
+              {
+                onClick: () => Q(!0),
+                "aria-haspopup": "dialog",
+                "aria-expanded": Se,
                 className: "flex items-center gap-1.5 text-[11px] px-2 py-1 rounded-md cursor-pointer",
                 title: "Open enabled agent sessions and see live activity",
-                style: { background: "var(--bg-elevated, var(--bg))", border: "1px solid var(--border)", color: Oe || ze || $.some((n) => n.status === "pending" || n.responsePending) ? "var(--accent)" : "var(--muted)" },
+                style: { background: "var(--bg-elevated, var(--bg))", border: "1px solid var(--border)", color: He || Pt || pe.some((n) => n.status === "pending" || n.responsePending) ? "var(--accent)" : "var(--muted)" },
                 children: [
-                  ze ? /* @__PURE__ */ e(Qe, { size: 11 }) : /* @__PURE__ */ e(
+                  Pt ? /* @__PURE__ */ e(ft, { size: 11 }) : /* @__PURE__ */ e(
                     "span",
                     {
-                      className: Oe || $.some((n) => n.status === "pending" || n.responsePending) ? "inline-block animate-pulse" : "inline-block",
-                      style: { width: 7, height: 7, borderRadius: 999, background: Oe ? "var(--ok)" : $.some((n) => n.responsePending) ? "var(--warn)" : $.some((n) => n.status === "pending") ? "var(--accent)" : "var(--muted)", opacity: $.length ? 1 : 0.5 }
+                      className: He || pe.some((n) => n.status === "pending" || n.responsePending) ? "inline-block animate-pulse" : "inline-block",
+                      style: { width: 7, height: 7, borderRadius: 999, background: He ? "var(--ok)" : pe.some((n) => n.responsePending) ? "var(--warn)" : pe.some((n) => n.status === "pending") ? "var(--accent)" : "var(--muted)", opacity: pe.length ? 1 : 0.5 }
                     }
                   ),
-                  /* @__PURE__ */ e("span", { className: "font-semibold", children: $.length ? `${$.length} session${$.length === 1 ? "" : "s"}` : "no sessions" }),
-                  ze && /* @__PURE__ */ e("span", { children: "· thinking" }),
-                  Oe && /* @__PURE__ */ e("span", { style: { color: "var(--ok)" }, children: "· generating" }),
-                  !ze && !Oe && $.filter((n) => n.status === "pending").length > 0 && /* @__PURE__ */ a("span", { children: [
+                  /* @__PURE__ */ e("span", { className: "font-semibold", children: pe.length ? `${pe.length} session${pe.length === 1 ? "" : "s"}` : "no sessions" }),
+                  Pt && /* @__PURE__ */ e("span", { children: "· thinking" }),
+                  He && /* @__PURE__ */ e("span", { style: { color: "var(--ok)" }, children: "· generating" }),
+                  !Pt && !He && pe.filter((n) => n.status === "pending").length > 0 && /* @__PURE__ */ a("span", { children: [
                     "· ",
-                    $.filter((n) => n.status === "pending").length,
+                    pe.filter((n) => n.status === "pending").length,
                     " running"
                   ] }),
-                  $.some((n) => n.responsePending) && /* @__PURE__ */ e("span", { style: { color: "var(--warn)" }, children: "· response" }),
-                  $.some((n) => n.stale) && /* @__PURE__ */ a("span", { style: { color: "var(--warn)" }, children: [
+                  pe.some((n) => n.responsePending) && /* @__PURE__ */ e("span", { style: { color: "var(--warn)" }, children: "· response" }),
+                  pe.some((n) => n.stale) && /* @__PURE__ */ a("span", { style: { color: "var(--warn)" }, children: [
                     "· ",
-                    $.filter((n) => n.stale).length,
+                    pe.filter((n) => n.stale).length,
                     " stale ↻"
                   ] })
                 ]
               }
             ),
-            f.size > 0 && /* @__PURE__ */ a(
+            x.size > 0 && /* @__PURE__ */ a(
               "span",
               {
                 className: "text-[11px] px-2 py-1 rounded-md font-medium",
                 style: { background: "color-mix(in srgb, var(--accent) 14%, transparent)", color: "var(--accent)" },
                 children: [
-                  f.size === 1 ? [...f][0] : `${f.size} workspaces`,
+                  x.size === 1 ? [...x][0] : `${x.size} workspaces`,
                   " · ",
-                  /* @__PURE__ */ e("button", { onClick: Ke, className: "underline hover:opacity-80", children: "clear" })
+                  /* @__PURE__ */ e("button", { onClick: Ct, className: "underline hover:opacity-80", children: "clear" })
                 ]
               }
             )
           ] }),
-          /* @__PURE__ */ e(Qr, { config: u, onSet: Lt }),
-          d ? /* @__PURE__ */ e("div", { className: "text-sm p-3", style: { color: "var(--muted)" }, children: "Loading pipeline…" }) : x === "backlog" ? /* @__PURE__ */ e(ea, { cards: W }) : /* @__PURE__ */ a("div", { ref: D, className: "flex gap-3 overflow-x-auto pb-4", children: [
-            x === "pipeline" && C.map((n) => /* @__PURE__ */ e(Ct, { id: `stage-col-${n.id}`, title: n.name, count: (Re[n.id] || []).length, children: (Re[n.id] || []).map((c) => /* @__PURE__ */ e(_t, { ...Be(c) }, c.id)) }, n.id)),
-            x === "workspace" && Object.entries(gt).map(([n, c]) => /* @__PURE__ */ e(Ct, { title: n, count: c.length, children: c.map((p) => /* @__PURE__ */ e(_t, { ...Be(p) }, p.id)) }, n)),
-            x === "crew" && Object.entries(nt).map(([n, c]) => /* @__PURE__ */ e(Ct, { title: n, count: c.length, children: c.map((p) => /* @__PURE__ */ e(_t, { ...Be(p) }, p.id)) }, n)),
-            x === "status" && Object.entries(vt).map(([n, c]) => /* @__PURE__ */ e(Ct, { title: n, count: c.length, children: c.map((p) => /* @__PURE__ */ e(_t, { ...Be(p) }, p.id)) }, n))
+          /* @__PURE__ */ e(qa, { config: c, onSet: kt }),
+          v ? /* @__PURE__ */ e("div", { className: "text-sm p-3", style: { color: "var(--muted)" }, children: "Loading pipeline…" }) : /* @__PURE__ */ a("div", { ref: we, className: "flex gap-3 overflow-x-auto pb-4", children: [
+            f === "pipeline" && $.map((n) => /* @__PURE__ */ e(bt, { id: `stage-col-${n.id}`, title: n.name, count: (ct[n.id] || []).length, children: (ct[n.id] || []).map((d) => /* @__PURE__ */ e(gt, { ...mt(d) }, d.id)) }, n.id)),
+            f === "pipeline" && dt.length > 0 && /* @__PURE__ */ e("div", { className: "flex-shrink-0 pl-3", style: { borderLeft: "2px dashed var(--border-strong, var(--border))" }, children: /* @__PURE__ */ e(bt, { id: "stage-col-done", title: "✅ Done", count: dt.length, children: dt.map((n) => /* @__PURE__ */ e(gt, { ...mt(n) }, n.id)) }) }),
+            f === "pipeline" && pt.length > 0 && /* @__PURE__ */ e(bt, { id: "stage-col-cancelled", title: "⏹ Cancelled", count: pt.length, children: pt.map((n) => /* @__PURE__ */ e(gt, { ...mt(n) }, n.id)) }),
+            f === "workspace" && Object.entries(Tt).map(([n, d]) => /* @__PURE__ */ e(bt, { title: n, count: d.length, children: d.map((m) => /* @__PURE__ */ e(gt, { ...mt(m) }, m.id)) }, n)),
+            f === "crew" && Object.entries(Rt).map(([n, d]) => /* @__PURE__ */ e(bt, { title: n, count: d.length, children: d.map((m) => /* @__PURE__ */ e(gt, { ...mt(m) }, m.id)) }, n)),
+            f === "status" && Object.entries(zt).map(([n, d]) => /* @__PURE__ */ e(bt, { title: n, count: d.length, children: d.map((m) => /* @__PURE__ */ e(gt, { ...mt(m) }, m.id)) }, n))
           ] })
         ] })
       ] })
@@ -4657,5 +5572,5 @@ function ga() {
   ] });
 }
 export {
-  ga as default
+  Ja as default
 };

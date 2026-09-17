@@ -137,6 +137,14 @@ DEFAULT_STEP_IDS = [
 
 _EVENT_MAX_DISPATCHES = 512
 _EVENT_MAX_CASCADE_DEPTH = 16
+# Wake-source telemetry (event-driven-liveness-spec Part I / IV.1): pure observation of which
+# priority band actually DROVE each wake, so the trigger-vs-poll ratio is measurable before and
+# after any control-flow change. Never gates or alters dispatch — it only records what happened.
+_WAKE_TELEMETRY_SCHEMA_VERSION = 1
+_WAKE_TELEMETRY_WINDOW = 200  # rolling count of recent wakes retained in state
+# Priority band → human wake-source label. Lower band fires first; the driving band is the
+# lowest-priority band whose handler returned changed=True this wake (else "poll" / "idle").
+_WAKE_SOURCE_BY_BAND = {20: "webhook", 30: "terminal-trigger", 50: "poll"}
 _OUTBOX_SCHEMA_VERSION = 1
 _OUTBOX_RETAIN_CONSUMED = 64
 _ADVANCE_CRON_NAME = "dlc-yolo-advance"
@@ -172,6 +180,23 @@ def _terminal_bridge_instruction(step_id: str) -> str:
     )
 
 
+def _progress_trail_instruction(step_id: str) -> str:
+    """Seed the live-ish progress trail (step-progress-trail-spec). A cron slot emits NO live
+    token stream, so the ONLY in-app liveness is the agent writing its own checkpoints that the
+    card's LiveMiniPane tails. Presentation-only; never affects control flow."""
+    return (
+        f" LIVE PROGRESS TRAIL: as you work this step, at each MEANINGFUL sub-step (grounding,"
+        f" a crew/research dispatch, result assembly)—NOT per token or per trivial read—append"
+        f" one short line to card.step_progress['{step_id}'].lines[]:"
+        f" {{'seq':<monotonic int>,'at':'<current RFC3339>','phase':'<short tag>',"
+        f"'note':'<one human sentence, <= {_STEP_PROGRESS_NOTE_MAX} chars, NO ids/paths/internals/secrets>'}}."
+        f" This is what the human watches while the run is in flight; the runtime keeps only the"
+        f" last {_STEP_PROGRESS_MAX_LINES} lines and drops the trail once the step is terminal, so"
+        f" append freely and never prune it yourself. It is presentation-only—it NEVER replaces"
+        f" the terminal step_status/step_results you still must write."
+    )
+
+
 class _LocalEventBus:
     """Bounded deterministic command/fact dispatcher for one advance cycle.
 
@@ -192,6 +217,12 @@ class _LocalEventBus:
         self._seen_ids: set[str] = set()
         self.unhandled: list[dict] = []
         self.dispatched = 0
+        # Wake-source telemetry (observation only): the driving band is the lowest-priority
+        # (earliest-firing) band whose handler returned changed=True this wake; per_band counts
+        # every band that produced a change. Neither ever alters dispatch order or outcome.
+        self.driving_band: int | None = None
+        self.changes_by_band: dict[int, int] = {}
+        self.max_depth_reached = 0
 
     def register(self, event_type: str, priority: int, handler) -> None:
         handlers = self._handlers.setdefault(str(event_type), [])
@@ -234,6 +265,8 @@ class _LocalEventBus:
                 raise RuntimeError(
                     f"local event dispatch cap exceeded ({self.max_dispatches})")
             priority, _, depth, event = heapq.heappop(self._queue)
+            if depth > self.max_depth_reached:
+                self.max_depth_reached = depth
             if depth > self.max_depth:
                 raise RuntimeError(
                     f"local event cascade depth exceeded ({self.max_depth})")
@@ -251,6 +284,13 @@ class _LocalEventBus:
                 if result is None:
                     continue
                 handler_changed, follow_ons = result
+                if handler_changed:
+                    # Observation only: attribute this change to the handler's priority band.
+                    # Pops are priority-ordered, so the first change marks the driving band.
+                    band = int(handler_priority)
+                    self.changes_by_band[band] = self.changes_by_band.get(band, 0) + 1
+                    if self.driving_band is None:
+                        self.driving_band = band
                 changed = bool(handler_changed) or changed
                 for follow_on in follow_ons or []:
                     if not isinstance(follow_on, dict) or not follow_on.get("type"):
@@ -262,6 +302,52 @@ class _LocalEventBus:
                         depth=depth + 1,
                     )
         return changed
+
+
+def _record_wake_telemetry(state: dict, bus: "_LocalEventBus", cycle: dict, now: str) -> None:
+    """Record which priority band DROVE this wake, into a bounded rolling window in state.
+
+    Pure observation for the event-driven-liveness audit (Part I / IV.1): it computes the
+    trigger-vs-poll ratio and never influences dispatch. The driving band is the lowest-priority
+    (earliest-firing) band whose handler reported a change; with no change the wake is idle unless
+    the poll band ran passes, in which case it is a plain poll. Bounded to the last
+    ``_WAKE_TELEMETRY_WINDOW`` wakes; carries only integers/labels — no prose, ids, or paths.
+    """
+    band = bus.driving_band
+    if band is not None:
+        source = _WAKE_SOURCE_BY_BAND.get(int(band), f"band-{int(band)}")
+    elif cycle.get("passes_run"):
+        # No change was produced but the poll band did run the pass set — a plain poll wake.
+        source = "poll"
+    else:
+        source = "idle"
+
+    tele = state.get("wake_telemetry")
+    if not isinstance(tele, dict) or tele.get("schema_version") != _WAKE_TELEMETRY_SCHEMA_VERSION:
+        tele = {"schema_version": _WAKE_TELEMETRY_SCHEMA_VERSION, "counts": {}, "recent": []}
+    counts = tele.get("counts")
+    if not isinstance(counts, dict):
+        counts = {}
+    counts[source] = int(counts.get(source, 0)) + 1
+
+    entry = {
+        "at": now,
+        "source": source,
+        "moves": len(cycle.get("moved") or []),
+        "dispatched": int(getattr(bus, "dispatched", 0)),
+        "depth": int(getattr(bus, "max_depth_reached", 0)),
+        "by_band": {str(k): int(v) for k, v in (bus.changes_by_band or {}).items()},
+    }
+    recent = tele.get("recent")
+    if not isinstance(recent, list):
+        recent = []
+    recent.append(entry)
+    if len(recent) > _WAKE_TELEMETRY_WINDOW:
+        recent = recent[-_WAKE_TELEMETRY_WINDOW:]
+
+    tele["counts"] = counts
+    tele["recent"] = recent
+    state["wake_telemetry"] = tele
 
 
 def _local_event(event_type: str, data: dict | None = None, *, event_id: str | None = None,
@@ -3701,6 +3787,7 @@ def _replacement_seed(card: dict, producer: str, gate_id: str, base_revision: in
         f"handled; the deterministic driver does that only after observing the new terminal "
         f"revision."
         f"{_terminal_bridge_instruction(producer)}"
+        f"{_progress_trail_instruction(producer)}"
         f" Write state through the native file path, never inline shell."
     )
 
@@ -7933,6 +8020,17 @@ _STEP_SUMMARY_SCHEMA = 1
 _STEP_HEADLINE_MAX = 80
 _STEP_DESCRIPTION_MAX = 280
 
+# --- Live-ish per-step progress trail (step-progress-trail-spec) --------------------------
+# The MISSING MIDDLE between "nothing" (cron slots emit no live chat_chunk — proven wall) and
+# the terminal card.step_summaries[step]. The step agent appends bounded checkpoint lines to
+# card.step_progress[step] DURING its run; LiveMiniPane tails them. Presentation-only: NEVER
+# control-authoritative, dropped at terminal (the summary supersedes), excluded from the
+# parity-minimized projection (free-form prose belongs only in state.json).
+_STEP_PROGRESS_SCHEMA = 1
+_STEP_PROGRESS_NOTE_MAX = 120     # one short human sentence, no ids/paths/internals
+_STEP_PROGRESS_PHASE_MAX = 32     # advisory grouping tag
+_STEP_PROGRESS_MAX_LINES = 12     # rolling tail cap — a trail, not a log
+
 _STEP_VERB = {
     "investigate": "Investigated the issue",
     "requirements": "Produced requirements",
@@ -8046,6 +8144,67 @@ def _synthesize_step_summaries(state: dict, now: str) -> bool:
             changed = True
         if changed and card.get("step_summaries") is not summaries:
             card["step_summaries"] = summaries
+    return changed
+
+
+def _bound_step_progress(state: dict, now: str) -> bool:
+    """Enforce the bounds on the agent-authored card.step_progress[step] trail, and drop it
+    once the step is terminal (the durable card.step_summaries[step] supersedes it).
+
+    Presentation-only and zero-token: this normalizes what the step agent wrote (rolling cap,
+    per-note length, monotonic seq) and prunes at terminal so the trail never bloats state.json
+    or the parity-minimized projection. It is NEVER read to decide card movement.
+    """
+    terminal = _SCHEDULER_COMPLETE | {"blocked", "error"}
+    changed = False
+    for card in state.get("cards") or []:
+        if not isinstance(card, dict):
+            continue
+        progress = card.get("step_progress")
+        if not isinstance(progress, dict) or not progress:
+            continue
+        statuses = card.get("step_status")
+        statuses = statuses if isinstance(statuses, dict) else {}
+        for step_id in list(progress.keys()):
+            entry = progress.get(step_id)
+            if not isinstance(entry, dict):
+                progress.pop(step_id, None)
+                changed = True
+                continue
+            # Drop at terminal — the step_summaries[step] floor takes over as the durable record.
+            if str(statuses.get(step_id) or "") in terminal:
+                progress.pop(step_id, None)
+                changed = True
+                continue
+            lines = entry.get("lines")
+            if not isinstance(lines, list):
+                entry["lines"] = []
+                changed = True
+                continue
+            # Defensive bounding: the agent appends freely; the runtime keeps the trail sane.
+            normalized: list[dict] = []
+            for line in lines:
+                if not isinstance(line, dict):
+                    changed = True
+                    continue
+                note = _bounded_text(line.get("note"), _STEP_PROGRESS_NOTE_MAX)
+                phase = _bounded_text(line.get("phase"), _STEP_PROGRESS_PHASE_MAX)
+                if note != line.get("note") or phase != line.get("phase"):
+                    changed = True
+                normalized.append({
+                    "seq": line.get("seq"),
+                    "at": line.get("at") or now,
+                    "phase": phase,
+                    "note": note,
+                })
+            if len(normalized) > _STEP_PROGRESS_MAX_LINES:
+                normalized = normalized[-_STEP_PROGRESS_MAX_LINES:]
+                changed = True
+            if normalized != lines:
+                entry["lines"] = normalized
+                changed = True
+            entry.setdefault("schema_version", _STEP_PROGRESS_SCHEMA)
+            entry.setdefault("step", step_id)
     return changed
 
 
@@ -8269,6 +8428,8 @@ def _run_advance_passes(ctx, state: dict, now: str, cycle: dict) -> bool:
     if _handle_chat_response_markers(state, now):
         changed = True
     if _synthesize_step_summaries(state, now):
+        changed = True
+    if _bound_step_progress(state, now):
         changed = True
     if _process_maintenance_requests(ctx, state, now, cycle):
         changed = True
@@ -9328,7 +9489,7 @@ def _run_advance_passes(ctx, state: dict, now: str, cycle: dict) -> bool:
                                  f"state file at {STATE}: 'done' if the artifact was genuinely "
                                  f"produced, 'blocked' (+ block_reason) if it needs a human/decision, "
                                  f"or 'error' (+ error_reason) on a retriable failure — NEVER leave "
-                                 f"it 'pending'.{_terminal_bridge_instruction(stage)} RESPONSE "
+                                 f"it 'pending'.{_terminal_bridge_instruction(stage)}{_progress_trail_instruction(stage)} RESPONSE "
                                  f"LINKAGE: this chat remains enabled after "
                                  f"a terminal turn. On EVERY later human prompt, before answering, "
                                  f"read card.step_sessions['{stage}']; unless chat_disabled_at is set, "
@@ -9653,6 +9814,15 @@ def advance(ctx):
     waiting_gates = cycle["waiting_gates"]
     if changed or cycle.get("scheduler_dirty"):
         _save(state)
+
+    # Observation only (event-driven-liveness Part I / IV.1): record which band DROVE this wake
+    # into a bounded rolling window, on EVERY wake including idle polls, so the trigger-vs-poll
+    # ratio is unbiased. It never gates or alters control flow — it only records what happened.
+    # It is persisted AFTER the control-state save above (which stays before transport-ack and
+    # ledger append/replay), so the save-ordering invariant is untouched; this is a distinct,
+    # deliberately-unconditional telemetry write that also carries any control-state change.
+    _record_wake_telemetry(state, bus, cycle, now)
+    _save(state)
 
     # Transport acknowledgement follows state persistence. A crash or inbox-write failure after
     # the save replays the delivery, whose card/stage handlers are idempotent; acknowledging first

@@ -37,3 +37,26 @@ export function appendLiveTail(previous, content, seq) {
 export function finishLiveTail(previous) {
   return previous ? { ...previous, active: false, phase: 'idle' } : previous
 }
+
+// Project the agent-authored progress trail (card.step_progress[step], step-progress-trail-spec)
+// into the same shape LiveMiniPane renders. Cron slots emit NO live chat_chunk, so this is the
+// ONLY liveness source for a step session: checkpoints between tool calls, not token streaming.
+// Presentation-only. Returns null when there is no usable trail (caller shows a fallback line).
+export function projectProgressTrail(entry) {
+  if (!entry || typeof entry !== 'object') return null
+  const lines = Array.isArray(entry.lines) ? entry.lines : []
+  if (!lines.length) return null
+  const ordered = [...lines].sort((a, b) => (Number(a?.seq) || 0) - (Number(b?.seq) || 0))
+  const buffer = ordered.map(l => String(l?.note || '')).filter(Boolean).join(' · ').slice(-LIVE_TAIL_BUFFER_CHARS)
+  if (!buffer) return null
+  const last = ordered[ordered.length - 1] || {}
+  return {
+    buffer,
+    tail: buffer,                    // whole trail suffix — it is already short, human sentences
+    active: true,
+    phase: String(last.phase || 'running'),
+    seq: Number(last.seq) || ordered.length,
+    source: 'progress-trail',
+  }
+}
+

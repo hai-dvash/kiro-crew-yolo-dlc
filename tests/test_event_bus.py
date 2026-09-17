@@ -69,3 +69,105 @@ class TestLocalEventBus:
 
         with pytest.raises(RuntimeError, match="dispatch cap exceeded"):
             bus.run({})
+
+
+class TestWakeTelemetry:
+    """Part I / IV.1 — observation-only trigger-vs-poll attribution. Never alters dispatch."""
+
+    def test_driving_band_is_lowest_changed_band(self, advance_mod):
+        # A terminal (band 30) event and a poll (band 50) event both change; the earliest-firing
+        # changed band (30) is the driver, per the "trigger beat the poll" case we want to see.
+        bus = advance_mod._LocalEventBus()
+        bus.register("io.dlcyolo.step.completed", 30, lambda _s, _e: (True, []))
+        bus.register("io.dlcyolo.state.observed", 50, lambda _s, _e: (True, []))
+        bus.emit("io.dlcyolo.state.observed", event_id="poll", priority=50)
+        bus.emit("io.dlcyolo.step.completed", event_id="term", priority=30)
+
+        assert bus.run({}) is True
+        assert bus.driving_band == 30
+        assert bus.changes_by_band == {30: 1, 50: 1}
+
+    def test_no_change_leaves_driving_band_none(self, advance_mod):
+        bus = advance_mod._LocalEventBus()
+        bus.register("io.dlcyolo.state.observed", 50, lambda _s, _e: (False, []))
+        bus.emit("io.dlcyolo.state.observed", event_id="poll", priority=50)
+
+        assert bus.run({}) is False
+        assert bus.driving_band is None
+        assert bus.changes_by_band == {}
+
+    def test_max_depth_reached_tracks_cascade(self, advance_mod):
+        bus = advance_mod._LocalEventBus()
+
+        def once(_state, event):
+            if event["data"].get("n", 0) < 2:
+                return True, [advance_mod._local_event(
+                    "step", {"n": event["data"].get("n", 0) + 1},
+                    event_id=f"s{event['data'].get('n', 0) + 1}", priority=30)]
+            return True, []
+
+        bus.register("step", 30, once)
+        bus.emit("step", {"n": 0}, event_id="s0", priority=30)
+        assert bus.run({}) is True
+        assert bus.max_depth_reached == 2
+
+    def test_recorder_labels_terminal_trigger(self, advance_mod):
+        bus = advance_mod._LocalEventBus()
+        bus.driving_band = 30
+        bus.changes_by_band = {30: 2}
+        bus.dispatched = 4
+        bus.max_depth_reached = 1
+        state: dict = {}
+        cycle = {"moved": ["card-1"], "passes_run": True}
+        advance_mod._record_wake_telemetry(state, bus, cycle, "2026-09-18T00:00:00Z")
+
+        tele = state["wake_telemetry"]
+        assert tele["schema_version"] == advance_mod._WAKE_TELEMETRY_SCHEMA_VERSION
+        assert tele["counts"] == {"terminal-trigger": 1}
+        entry = tele["recent"][-1]
+        assert entry["source"] == "terminal-trigger"
+        assert entry["moves"] == 1
+        assert entry["dispatched"] == 4
+        assert entry["depth"] == 1
+        assert entry["by_band"] == {"30": 2}
+
+    def test_recorder_labels_poll_when_passes_ran_without_change(self, advance_mod):
+        bus = advance_mod._LocalEventBus()  # driving_band stays None
+        state: dict = {}
+        advance_mod._record_wake_telemetry(
+            state, bus, {"moved": [], "passes_run": True}, "2026-09-18T00:00:01Z")
+        assert state["wake_telemetry"]["recent"][-1]["source"] == "poll"
+
+    def test_recorder_labels_idle_when_nothing_ran(self, advance_mod):
+        bus = advance_mod._LocalEventBus()
+        state: dict = {}
+        advance_mod._record_wake_telemetry(
+            state, bus, {"moved": [], "passes_run": False}, "2026-09-18T00:00:02Z")
+        assert state["wake_telemetry"]["recent"][-1]["source"] == "idle"
+
+    def test_recent_window_is_bounded(self, advance_mod):
+        state: dict = {}
+        for i in range(advance_mod._WAKE_TELEMETRY_WINDOW + 25):
+            bus = advance_mod._LocalEventBus()
+            bus.driving_band = 50
+            advance_mod._record_wake_telemetry(
+                state, bus, {"moved": [], "passes_run": True}, f"2026-09-18T00:{i:02d}:00Z")
+        tele = state["wake_telemetry"]
+        assert len(tele["recent"]) == advance_mod._WAKE_TELEMETRY_WINDOW
+        # counts is cumulative and NOT truncated by the window
+        assert tele["counts"]["poll"] == advance_mod._WAKE_TELEMETRY_WINDOW + 25
+
+    def test_telemetry_never_enters_projection(self, advance_mod):
+        # wake_telemetry is a top-level state key; the projection top-level builder is a strict
+        # allowlist, so it is excluded by construction. Assert the serialized projection is clean.
+        state = {
+            "wake_telemetry": {
+                "schema_version": 1, "counts": {"poll": 3},
+                "recent": [{"at": "2026-09-18T00:00:00Z", "source": "poll"}],
+            },
+            "pipelines": [], "cards": [],
+        }
+        projections = advance_mod._runtime_projections(state, "2026-09-18T00:00:00Z")
+        serialized = __import__("json").dumps(projections)
+        assert "wake_telemetry" not in serialized
+        assert "terminal-trigger" not in serialized

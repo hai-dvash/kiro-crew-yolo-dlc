@@ -1,7 +1,7 @@
 import { useAppApi, useNavigate, useChatLauncher } from '@kirocrew/app-sdk'
 import { Card, CardTitle, PageHeader, StatCard } from '@kirocrew/app-sdk/ui'
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { appendLiveTail, beginLiveThinking, finishLiveTail } from './liveTail.js'
+import { appendLiveTail, beginLiveThinking, finishLiveTail, projectProgressTrail } from './liveTail.js'
 import { buildGateInspection, gateValue } from './gateInspection.js'
 import { DURABLE_STATE, readCurrentState, resolveStateFile } from './statePath.js'
 import { DlcYoloControls, WebhookSettingsSection } from './WebhookSettings.js'
@@ -1172,7 +1172,7 @@ function PipelineCardItem({ card, config, isGate, cardStatus, effectiveCapabilit
   onInterject?: (kind: string, text: string) => void
   onResolveDecision?: (decisionId: string) => void
   onOpenOrchestrator?: () => void
-  liveView?: { stage: string; phase: string; tail: string; active: boolean; seq: number; slotKey: string; onOpen: () => void }
+  liveView?: { stage: string; phase: string; tail: string; active: boolean; seq: number; slotKey: string; source?: string; onOpen: () => void }
   allCards?: PipelineCard[]
   onOpenCard?: (cardId: string) => void
   onRequest?: (kind: string, text: string) => void
@@ -2847,7 +2847,7 @@ function useTypewriter(target: string, active: boolean): string {
   return shown
 }
 
-function LiveMiniPane({ live }: { live: { stage: string; phase: string; tail: string; active: boolean; seq: number; onOpen: () => void } }) {
+function LiveMiniPane({ live }: { live: { stage: string; phase: string; tail: string; active: boolean; seq: number; source?: string; onOpen: () => void } }) {
   const [open, setOpen] = useState(true)
   const bodyRef = useRef<HTMLDivElement>(null)
   const shown = useTypewriter(live.tail, live.active)
@@ -2865,6 +2865,10 @@ function LiveMiniPane({ live }: { live: { stage: string; phase: string; tail: st
         </button>
         <span style={{ color: live.active ? 'var(--accent)' : 'var(--muted)' }}>· {live.active ? live.phase : 'idle'}</span>
         {live.active && <ActivitySpinner size={10} />}
+        {live.source === 'progress-trail' && (
+          <span className="text-[9px]" title="A cron-launched step session cannot stream tokens live; these are progress checkpoints the agent writes between tool calls."
+            style={{ color: 'var(--muted)' }}>· checkpoints</span>
+        )}
         <button className="ml-auto hover:underline" onClick={live.onOpen} title="Open the full step session"
           style={{ color: 'var(--accent)' }}>open ↗</button>
       </div>
@@ -2873,7 +2877,9 @@ function LiveMiniPane({ live }: { live: { stage: string; phase: string; tail: st
           className="mt-1 text-[10px] font-mono leading-snug overflow-y-auto whitespace-pre-wrap break-words"
           style={{ maxHeight: '3.6em', color: 'var(--muted)', background: 'var(--bg-elevated, var(--bg))',
             border: '1px solid var(--border)', borderRadius: '4px', padding: '4px 6px' }}>
-          {shown || (live.active ? 'thinking…' : 'no live output')}
+          {shown || (live.source === 'progress-trail'
+            ? (live.active ? 'waiting for the next checkpoint…' : 'no progress reported')
+            : (live.active ? 'thinking…' : 'no live output'))}
         </div>
       )}
     </div>
@@ -3748,16 +3754,26 @@ export default function SdlcPipeline() {
         const slot = card.step_sessions?.[card.stage]?.slot_key
         const tail = slot ? liveTails[slot] : undefined
         const live = runStatus.some(row => row.cardId === card.id && row.step === card.stage && row.live)
-        if (!slot || (!tail?.active && !live)) return undefined
-        return {
-          stage: card.stage,
-          phase: tail?.phase || 'running',
-          tail: tail?.tail || '',
-          active: !!tail?.active && live,
-          seq: tail?.seq || 0,
-          slotKey: slot,
-          onOpen: () => navigate(`/chat?sid=${encodeURIComponent(slot)}`),
+        // Source selection: an INTERACTIVE slot streams a real chat_chunk tail (tail?.active).
+        // A cron-launched step slot never does (proven platform wall), so fall back to the
+        // agent-authored progress trail — the only in-app liveness for a cron step session.
+        const trail = projectProgressTrail(card.step_progress?.[card.stage])
+        if (tail?.active) {
+          return {
+            stage: card.stage, phase: tail.phase || 'running', tail: tail.tail || '',
+            active: !!tail.active && live, seq: tail.seq || 0, slotKey: slot!,
+            onOpen: () => navigate(`/chat?sid=${encodeURIComponent(slot!)}`),
+          }
         }
+        if (trail && (live || card.step_status?.[card.stage] === 'pending')) {
+          return {
+            stage: card.stage, phase: trail.phase, tail: trail.tail,
+            active: !!live, seq: trail.seq, slotKey: slot || '',
+            source: 'progress-trail',
+            onOpen: () => slot && navigate(`/chat?sid=${encodeURIComponent(slot)}`),
+          }
+        }
+        return undefined
       })(),
       allCards: cards,
       onRequest: (kind: string, text: string) => submitMaintenanceRequest(card.id, kind, text),

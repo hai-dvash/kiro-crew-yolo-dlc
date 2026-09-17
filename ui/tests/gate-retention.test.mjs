@@ -5,7 +5,7 @@ import test from 'node:test'
 const source = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
 const commandPath = source.slice(
   source.indexOf('const submitCardCommand = useCallback'),
-  source.indexOf('// Approve/decline a raised decision'),
+  source.indexOf('// Native maintenance requests'),
 )
 
 test('gate controls enqueue commands but never mutate gate state or move stages directly', () => {

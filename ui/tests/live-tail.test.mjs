@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { LIVE_TAIL_BUFFER_CHARS, appendLiveTail, beginLiveThinking, finishLiveTail, lastDisplayTokens } from '../src/liveTail.js'
+import { LIVE_TAIL_BUFFER_CHARS, appendLiveTail, beginLiveThinking, finishLiveTail, lastDisplayTokens, projectProgressTrail } from '../src/liveTail.js'
 
 test('shows truthful thinking before text, then generating, then idle', () => {
   const thinking = beginLiveThinking(undefined)
@@ -57,4 +57,31 @@ test('retains only a bounded presentation suffix', () => {
   const state = appendLiveTail(undefined, `${'x'.repeat(LIVE_TAIL_BUFFER_CHARS)} final words here`, 1)
   assert.equal(state.buffer.length, LIVE_TAIL_BUFFER_CHARS)
   assert.equal(state.tail, 'final words here')
+})
+
+test('projectProgressTrail orders by seq and joins notes into a tail', () => {
+  const entry = { lines: [
+    { seq: 2, phase: 'dispatch', note: 'spawned crew pass' },
+    { seq: 1, phase: 'grounding', note: 'read repo + verified stack' },
+    { seq: 3, phase: 'synthesis', note: 'GO verdict scope M' },
+  ] }
+  const v = projectProgressTrail(entry)
+  assert.equal(v.active, true)
+  assert.equal(v.source, 'progress-trail')
+  assert.equal(v.phase, 'synthesis')      // last line's phase
+  assert.equal(v.seq, 3)
+  assert.equal(v.tail, 'read repo + verified stack · spawned crew pass · GO verdict scope M')
+})
+
+test('projectProgressTrail returns null for empty/malformed trails', () => {
+  assert.equal(projectProgressTrail(null), null)
+  assert.equal(projectProgressTrail({}), null)
+  assert.equal(projectProgressTrail({ lines: [] }), null)
+  assert.equal(projectProgressTrail({ lines: [{ seq: 1, note: '' }] }), null)
+})
+
+test('projectProgressTrail bounds the tail to the buffer cap', () => {
+  const lines = Array.from({ length: 40 }, (_, i) => ({ seq: i + 1, note: 'x'.repeat(30) }))
+  const v = projectProgressTrail({ lines })
+  assert.ok(v.tail.length <= LIVE_TAIL_BUFFER_CHARS)
 })

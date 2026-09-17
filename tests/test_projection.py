@@ -375,7 +375,11 @@ def test_projection_failure_never_changes_authoritative_control_state(
     with pytest.raises(advance_mod.Skip):
         advance_mod.advance(mock_ctx)
 
-    assert read_state() == before
+    # wake_telemetry is observation-only (written before the reconcile that throws here); strip it
+    # to assert the CONTROL state is untouched by a projection failure.
+    persisted = read_state()
+    persisted.pop("wake_telemetry", None)
+    assert persisted == before
 
 
 def test_ledger_append_is_0600_no_follow_and_projection_idempotent(
@@ -526,4 +530,7 @@ def test_durable_append_failure_skips_replay_without_control_mutation(
         advance_mod.advance(mock_ctx)
 
     assert calls == [("append", True)]
-    assert read_state() == state
+    # wake_telemetry is observation-only; strip it to assert control state is unmutated.
+    persisted = read_state()
+    persisted.pop("wake_telemetry", None)
+    assert persisted == state

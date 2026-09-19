@@ -133,11 +133,14 @@ class TestLedgerProjection:
                       if event["type"] == "io.dlcyolo.routing.observed")
         data = routed["data"]
         assert data["schema_version"] == 1
+        # Part II resolver: a standard producing step (not a leaf) is difficulty tier D2 → balanced,
+        # floored at balanced, mapped to sonnet-4.6-1m. The observed model differs, so the routing
+        # observation now honestly reports a mismatch (runtime requested sonnet; session ran another).
         assert data["routing"]["model"] == {
-            "requested": None, "requested_class": "decision-grade",
+            "requested": "sonnet-4.6-1m", "requested_class": "balanced",
             "applied": "model-observed",
             "provider": "provider-observed", "version": "v1",
-            "resolution_status": "observed",
+            "resolution_status": "mismatch",
         }
         assert data["routing"]["reasoning_effort"]["applied"] == "high"
         assert data["capabilities"]["tools"]["actual"] == ["read", "write", "shell"]

@@ -396,6 +396,39 @@ class TestTopologyAndCancellation:
         assert node["permit_released_at"] == "2026-09-06T00:02:00Z"
         assert node not in advance_mod._scheduler_active_nodes(state)
 
+    def test_cancelling_node_ages_out_to_terminal_when_host_never_observes(
+            self, advance_mod, mock_ctx, state_factory, card_factory):
+        # ROOT-1 regression: a cancel requested while the step was `pending` parks the node at
+        # `cancelling` waiting for a terminal host observation the host cannot emit. Without a bound
+        # this is IMMORTAL (the card-rps3d-pimp wedge) — the node never releases its permit/lease.
+        # After PENDING_STALE_SECS past cancel_requested_at with no terminal, the in-flight turn is
+        # provably gone and the node must finalize to `cancelled` + released, freeing the slot.
+        card = card_factory(
+            lifecycle="cancelled", step_status={"requirements": "pending"},
+            pending_at={"requirements": "2026-09-06T00:00:00Z"},
+            step_sessions={"requirements": {
+                "cron_id": "job-live", "writes_allowed": True,
+                "cancel_requested_at": "2026-09-06T00:01:00Z",
+            }},
+        )
+        state = state_factory(cards=[card], pipelines=[_pipeline()])
+        node, _ = advance_mod._scheduler_node(card, "requirements", "2026-09-06T00:00:00Z")
+        node.update({"status": "cancelling", "permit_id": "permit-live",
+                     "permit_acquired_at": "2026-09-06T00:00:00Z"})
+
+        # 5 minutes after cancel: still within the window → stays cancelling (immortal-by-design)
+        advance_mod._scheduler_plan(state, "2026-09-06T00:06:00Z", _cycle())
+        assert node["status"] == "cancelling"
+        assert node in advance_mod._scheduler_active_nodes(state)
+
+        # 11 minutes after cancel (> PENDING_STALE_SECS=600): ages out to terminal, permit released
+        advance_mod._scheduler_plan(state, "2026-09-06T00:12:00Z", _cycle())
+        assert node["status"] == "cancelled"
+        assert node["permit_release_status"] == "released-terminal-cancelled"
+        assert node["permit_release_reason"] == "terminal-cancelled-stale"
+        assert "permit_released_at" in node
+        assert node not in advance_mod._scheduler_active_nodes(state)
+
 
 class TestSchedulerMetrics:
     def test_derives_only_observed_durations(self, advance_mod, state_factory, card_factory):

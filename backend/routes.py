@@ -591,6 +591,169 @@ async def _stop_state_watch(app: web.Application) -> None:
             await watcher.stop()
 
 
+# ── Live crew-stream (docs/live-crew-stream-spec.md) ─────────────────────────────────────────
+# A crew subagent's output is written live to ~/.kiro/crew/subagents/{agent_id}/result.txt. The
+# CrewStreamWatcher tails those files and hands each delta here; this fold resolves which card+step
+# spawned that agent_id (from pass_schedule / child_runs provenance the step-agent records), redacts
+# + bounds the delta to ONE line, and appends it to card.step_progress[step] tagged phase="crew".
+# Presentation-only: step_progress is never control-authoritative, is dropped at step-terminal, and
+# is excluded from the parity-minimized projection. Atomic + mtime-guarded so it never clobbers a
+# concurrent advance-cron write. Fail-open throughout.
+_CREW_WATCH_KEY: web.AppKey[object] = web.AppKey("dlc_yolo_crew_watch", object)
+_CREW_STREAM_ROOT = "~/.kiro/crew/subagents"
+_CREW_NOTE_MAX = 120           # mirrors _STEP_PROGRESS_NOTE_MAX in the impl
+_CREW_TRAIL_MAX_LINES = 12     # mirrors _STEP_PROGRESS_MAX_LINES
+
+# Minimal redaction floor (defence-in-depth; the trail is presentation-only and projection-excluded).
+_CREW_REDACT = re.compile(
+    r"(?i)(sk-[A-Za-z0-9]{8,}|ghp_[A-Za-z0-9]{20,}|eyJ[A-Za-z0-9_\-]{10,}\."
+    r"[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}|AKIA[0-9A-Z]{12,}|"
+    r"(?:token|secret|password|api[_-]?key)\s*[=:]\s*\S+)")
+
+
+def _crew_bounded_note(text: str) -> str:
+    """Collapse a raw crew-output delta to one short, redacted trail note."""
+    one = " ".join(str(text or "").split())
+    one = _CREW_REDACT.sub("[redacted]", one)
+    if len(one) > _CREW_NOTE_MAX:
+        one = one[: _CREW_NOTE_MAX - 1].rstrip() + "…"
+    return one
+
+
+def _crew_owner(state: dict, agent_id: str) -> tuple[dict, str] | None:
+    """Find the (card, step_id) whose recorded provenance names this crew agent_id as a LIVE
+    (non-terminal) pass. Reads pass_schedule[step] runs and child_runs[step]; returns None when the
+    id is unknown or its step is already terminal (so a finished crew never re-folds)."""
+    terminal = {"done", "advanced", "blocked", "error", "complete", "completed", "terminal"}
+    for card in state.get("cards") or []:
+        if not isinstance(card, dict):
+            continue
+        statuses = card.get("step_status") if isinstance(card.get("step_status"), dict) else {}
+        # pass_schedule[step].nodes[].runs[] and child_runs[step] both carry observed ids.
+        ps = card.get("pass_schedule") if isinstance(card.get("pass_schedule"), dict) else {}
+        cr = card.get("child_runs") if isinstance(card.get("child_runs"), dict) else {}
+        for step_id in set(ps) | set(cr):
+            if str(statuses.get(step_id) or "") in terminal:
+                continue
+            blob = json.dumps([ps.get(step_id), cr.get(step_id)], default=str)
+            if agent_id in blob:
+                return card, step_id
+    return None
+
+
+async def _fold_crew_tail(agent_id: str, text: str) -> None:
+    """Fold a bounded, redacted crew-output delta into the owning card's step_progress trail."""
+    note = _crew_bounded_note(text)
+    if not note:
+        return
+    path = _resolve_state_path()
+    from pathlib import Path  # noqa: PLC0415
+    import os as _os, tempfile, fcntl  # noqa: PLC0415
+    # ROOT-2: take the SAME cross-process lock the advance cron holds over its RMW cycle, so this
+    # fold's read→write cannot interleave-and-lose against a cron _save (or vice versa). The lock is
+    # an advisory flock on the sidecar `<state>.json.lock`; fail-open (a failed acquire still folds,
+    # the mtime guard below remains as a second line). Presentation-only write, so a dropped fold
+    # is harmless — but taking the lock stops the fold from CLOBBERING a cron control-state write.
+    lock_path = (str(path)[:-5] + ".json.lock") if str(path).endswith(".json") else (str(path) + ".lock")
+    lock_fd = None
+    try:
+        lock_fd = _os.open(lock_path, _os.O_CREAT | _os.O_RDWR | getattr(_os, "O_CLOEXEC", 0), 0o600)
+        deadline = __import__("time").monotonic() + 5.0
+        while True:
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if __import__("time").monotonic() >= deadline:
+                    break  # fail-open
+                await __import__("asyncio").sleep(0.05)
+    except OSError:
+        lock_fd = None
+    try:
+        _fold_crew_tail_locked(agent_id, note, path, _os, tempfile)
+    finally:
+        if lock_fd is not None:
+            with contextlib.suppress(OSError):
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            with contextlib.suppress(OSError):
+                _os.close(lock_fd)
+
+
+def _fold_crew_tail_locked(agent_id, note, path, _os, tempfile):
+    from pathlib import Path  # noqa: PLC0415
+    try:
+        m0 = _os.path.getmtime(path)
+        state = json.loads(Path(path).read_text("utf-8"))
+    except (OSError, ValueError):
+        return
+    if not isinstance(state, dict) or not state.get("cards"):
+        return
+    owner = _crew_owner(state, agent_id)
+    if owner is None:
+        return
+    card, step_id = owner
+    progress = card.setdefault("step_progress", {})
+    if not isinstance(progress, dict):
+        return
+    entry = progress.setdefault(step_id, {"schema_version": 1, "step": step_id, "lines": []})
+    lines = entry.setdefault("lines", [])
+    if not isinstance(lines, list):
+        return
+    # Dedup an identical consecutive crew note (a re-read of the same tail).
+    if lines and isinstance(lines[-1], dict) and lines[-1].get("note") == note \
+            and lines[-1].get("phase") == "crew":
+        return
+    seq = (max((ln.get("seq") or 0 for ln in lines if isinstance(ln, dict)), default=0)) + 1
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    lines.append({"seq": seq, "at": now, "phase": "crew", "note": note})
+    if len(lines) > _CREW_TRAIL_MAX_LINES:
+        entry["lines"] = lines[-_CREW_TRAIL_MAX_LINES:]
+    card["updated_at"] = now
+    # mtime guard: bail (drop this fold) if a concurrent writer touched state while we worked. The
+    # trail is presentation-only, so a dropped fold is harmless — the next append re-syncs.
+    try:
+        if _os.path.getmtime(path) != m0:
+            return
+        fd, tmp = tempfile.mkstemp(dir=_os.path.dirname(path), suffix=".tmp")
+        with _os.fdopen(fd, "w") as fh:
+            json.dump(state, fh, indent=2)
+            fh.flush()
+            _os.fsync(fh.fileno())
+        _os.replace(tmp, path)
+    except OSError:
+        with contextlib.suppress(Exception):
+            _os.unlink(tmp)  # type: ignore[name-defined]
+
+
+async def _start_crew_watch(app: web.Application) -> None:
+    """Arm the live crew-stream watcher. Fail-open: any error leaves no live crew tail."""
+    try:
+        import os as _os  # noqa: PLC0415
+        from pathlib import Path  # noqa: PLC0415
+        target = Path(__file__).resolve().parent / "crew_stream.py"
+        import importlib.util  # noqa: PLC0415
+        spec = importlib.util.spec_from_file_location(
+            "_kirocrew_app_dlc_yolo_crewstream", target)
+        if spec is None or spec.loader is None:
+            return
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        root = Path(_os.path.expanduser(_CREW_STREAM_ROOT))
+        watcher = mod.CrewStreamWatcher(root, on_fold=_fold_crew_tail)
+        await watcher.start()
+        app[_CREW_WATCH_KEY] = watcher
+    except Exception:  # noqa: BLE001 - never let watch setup crash the backend
+        logger.warning("DLC-YOLO crew-stream watch could not start; no live crew tail",
+                       exc_info=True)
+
+
+async def _stop_crew_watch(app: web.Application) -> None:
+    watcher = app.get(_CREW_WATCH_KEY)
+    if watcher is not None:
+        with contextlib.suppress(Exception):
+            await watcher.stop()
+
+
 def register_routes(app: web.Application) -> None:
     """LEGACY in-process registration — NOT the production path.
 
@@ -616,4 +779,6 @@ def register_routes(app: web.Application) -> None:
     app.on_cleanup.append(_stop_listener)
     app.on_startup.append(_start_state_watch)
     app.on_cleanup.append(_stop_state_watch)
+    app.on_startup.append(_start_crew_watch)
+    app.on_cleanup.append(_stop_crew_watch)
     logger.info("DLC-YOLO webhook backend registered")

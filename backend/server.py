@@ -503,6 +503,10 @@ def build_app() -> web.Application:
     # Independent of the webhook receiver; fail-open to the 120s poll (event-driven-liveness Part I).
     app.on_startup.append(routes._start_state_watch)
     app.on_cleanup.append(routes._stop_state_watch)
+    # Live crew-stream: tail each crew subagent's result.txt into card.step_progress[step] so the
+    # LiveMiniPane shows crew output while a pass runs (docs/live-crew-stream-spec.md). Fail-open.
+    app.on_startup.append(routes._start_crew_watch)
+    app.on_cleanup.append(routes._stop_crew_watch)
     app.on_cleanup.append(_stop_tunnel_on_cleanup)
     logger.info("DLC-YOLO app backend routes mounted at /api/webhook/*, /api/agents/crew, /api/tunnel/*")
     return app

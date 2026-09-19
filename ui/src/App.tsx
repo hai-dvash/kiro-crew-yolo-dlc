@@ -74,6 +74,7 @@ interface StepSessionPointer {
   retention_released_at?: string
   writes_allowed?: boolean
   cancel_requested_at?: string
+  cron_pause_observed_at?: string
 }
 
 interface GateResultBundle {
@@ -3022,8 +3023,12 @@ function LiveMiniPane({ live }: { live: { stage: string; phase: string; tail: st
         </button>
         <span style={{ color: live.active ? 'var(--accent)' : 'var(--muted)' }}>· {live.active ? live.phase : 'idle'}</span>
         {live.active && <ActivitySpinner size={10} />}
+        {live.phase === 'crew' && (
+          <span className="text-[9px] px-1 rounded" title="Live output streamed from a crew subagent this step spawned (docs/live-crew-stream)."
+            style={{ color: 'var(--accent)', background: 'color-mix(in srgb, var(--accent) 14%, transparent)' }}>👥 crew</span>
+        )}
         {live.source === 'progress-trail' && (
-          <span className="text-[9px]" title="A cron-launched step session cannot stream tokens live; these are progress checkpoints the agent writes between tool calls."
+          <span className="text-[9px]" title="A cron-launched step session cannot stream tokens live; these are progress checkpoints the agent writes between tool calls (crew lines are the crew subagent's own streamed output)."
             style={{ color: 'var(--muted)' }}>· checkpoints</span>
         )}
         <button className="ml-auto hover:underline" onClick={live.onOpen} title="Open the full step session"
@@ -3320,7 +3325,12 @@ export default function SdlcPipeline() {
   const PENDING_STALE_MS = 600_000
   const runStatus = useMemo(() => {
     const rows: { cardId: string; card: string; step: string; agent: string; stale: boolean; status: string; live: boolean; responsePending: boolean; agentId?: string; slotKey?: string; sessionKey?: string; sessionName?: string }[] = []
+    const TERMINAL_LIFECYCLES = new Set(['cancelled', 'canceled', 'superseded', 'parked', 'retired'])
     for (const c of cards) {
+      // A card in a terminal lifecycle (cancelled/retired/…) is not "live activity" — its step
+      // sessions are dead pointers the runtime never pruned. Do not list ANY of its sessions
+      // (this is why cancelled #29/#30 filled the panel as "open sessions" with no card open).
+      if (TERMINAL_LIFECYCLES.has(String(c.lifecycle || '').toLowerCase())) continue
       const ss = c.step_status || {}
       const sessions = c.step_sessions || {}
       const pl = pipelines.find(p => p.id === c.pipeline_id) || pipelines.find(p => p.repo === c.source?.repo)
@@ -3329,8 +3339,15 @@ export default function SdlcPipeline() {
         const st = ss[step] || 'idle'
         const sess = sessions[step]
         const inFlight = st === 'pending' || st === 'error'
-        const enabledSession = !!sess?.slot_key && !sess.chat_disabled_at && !sess.superseded
+        // An enabled session is one with a live slot that has NOT been released/retired/paused/
+        // disabled/superseded. A released or cron-paused pointer is a spent one-shot, not live.
+        const pointerDead = !!(sess && (sess.chat_disabled_at || sess.superseded
+          || sess.retired_at || sess.cron_pause_observed_at
+          || sess.retention === 'released'))
+        const enabledSession = !!sess?.slot_key && !pointerDead
         if (!inFlight && !enabledSession) continue
+        // Advanced/terminal step with a dead pointer: nothing live here either.
+        if (!inFlight && pointerDead) continue
         const at = c.pending_at?.[step]
         const stale = inFlight && !!at && (Date.now() - new Date(at).getTime()) > PENDING_STALE_MS
         const sdef = pl?.steps?.find(s => s.id === step)

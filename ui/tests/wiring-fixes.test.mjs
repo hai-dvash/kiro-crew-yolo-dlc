@@ -55,6 +55,16 @@ test('the decision mini-modal defaults to the recommended option and returns the
   assert.match(app, /⭐ recommended/)
 })
 
+test('the Agent-sessions panel excludes terminal-lifecycle cards and dead session pointers', () => {
+  // Regression: cancelled #29/#30 and a released #32 investigate were filling the panel as "open
+  // sessions" with no card open. The runStatus builder must skip terminal-lifecycle cards entirely
+  // and treat released/retired/paused/disabled/superseded pointers as NOT enabled.
+  assert.match(app, /TERMINAL_LIFECYCLES = new Set\(\['cancelled'/)
+  assert.match(app, /TERMINAL_LIFECYCLES\.has\(String\(c\.lifecycle/)
+  assert.match(app, /sess\.retired_at \|\| sess\.cron_pause_observed_at/)
+  assert.match(app, /sess\.retention === 'released'/)
+})
+
 test('invalid webhook storage exposes the backend validation reason', () => {
   assert.match(webhook, /view\.configuration_source === 'invalid'/)
   assert.match(webhook, /view\.configuration_error/)

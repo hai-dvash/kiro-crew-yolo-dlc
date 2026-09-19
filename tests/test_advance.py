@@ -383,10 +383,11 @@ class TestExecutionEnvelopeObservation:
                         if call.args[:2] == ("kirocrew-cron", "cron_add"))
         payload = cron_add.args[2]
         assert payload["agent"] == "dlcyolo-builder"
-        assert "model" not in payload
+        # Part II resolver: standard producing step → balanced → sonnet-4.6-1m bound via cron_add.
+        assert payload["model"] == "sonnet-4.6-1m"
         assert "reasoning_effort" not in payload
         pointer = out["step_sessions"]["requirements"]
-        assert pointer["requested_model"] is None
+        assert pointer["requested_model"] == "sonnet-4.6-1m"
         assert pointer["execution_envelope_id"] == envelope["id"]
         assert "model" not in pointer
         assert "reasoning_effort" not in pointer
@@ -397,7 +398,7 @@ class TestExecutionEnvelopeObservation:
         assert "resolved capability profile remains the actual session/tool authority" in payload["message"]
         assert envelope["id"] in payload["message"]
         assert "ATOMIC STEP RESULT" in payload["message"]
-        assert "requested_model=None" in payload["message"]
+        assert "requested_model='sonnet-4.6-1m'" in payload["message"]
         assert "host API has no per-run reasoning-effort argument" in payload["message"]
         assert "PASS CEILINGS ARE HARD" in payload["message"]
         assert "LOCAL TERMINAL EVENT BRIDGE" in payload["message"]
@@ -899,10 +900,10 @@ class TestRuntimeHandshake:
         assert tools["actual"] is None
         assert tools["status"] == "unobservable"
         assert handshake["capabilities"]["skills"]["actual"] is None
-        assert handshake["routing"]["model"]["requested"] is None
+        assert handshake["routing"]["model"]["requested"] == "sonnet-4.6-1m"
         assert handshake["routing"]["model"]["applied"] is None
         assert handshake["routing"]["model"]["status"] == "unobservable"
-        assert handshake["routing"]["reasoning_effort"]["requested"] == "high"
+        assert handshake["routing"]["reasoning_effort"]["requested"] == "medium"
         assert handshake["routing"]["reasoning_effort"]["applied"] is None
         assert handshake["routing"]["reasoning_effort"]["status"] == "unobservable"
         assert handshake["scope"]["write"]["declared"]["owned_repository"] == "owner/repo"
@@ -1028,15 +1029,17 @@ class TestRuntimeHandshake:
         assert handshake["assignment"]["assigned_profile"] == "dlcyolo-coordinator"
         assert handshake["assignment"]["effective_profile"] == "dlcyolo-authoring"
         assert handshake["assignment"]["profile_matches"] is False
-        assert handshake["routing"]["model"]["requested"] is None
+        # Part II resolver: standard producing step (crew + addenda → not a leaf) → D2 → balanced →
+        # sonnet-4.6-1m requested, effort dialed to medium. Applied medium now MATCHES requested
+        # medium, so the effort observation is no longer a below-requested mismatch.
+        assert handshake["routing"]["model"]["requested"] == "sonnet-4.6-1m"
         assert handshake["routing"]["model"]["applied"] == "model-applied"
-        assert handshake["routing"]["model"]["status"] == "observed"
-        assert handshake["routing"]["reasoning_effort"]["requested"] == "high"
+        assert handshake["routing"]["model"]["status"] == "mismatch"
+        assert handshake["routing"]["reasoning_effort"]["requested"] == "medium"
         assert handshake["routing"]["reasoning_effort"]["applied"] == "medium"
-        assert handshake["routing"]["reasoning_effort"]["status"] == "mismatch"
+        assert handshake["routing"]["reasoning_effort"]["status"] == "verified"
         assert {item["kind"] for item in handshake["preflight"]["mismatches"]} >= {
             "effective-profile-missing-tools", "live-session-missing-tools",
-            "reasoning-effort-below-requested",
         }
 
     @pytest.mark.parametrize(
@@ -1378,6 +1381,23 @@ class TestAdvanceCaps:
 
 
 class TestAdvanceGate:
+    def test_cancelled_card_is_not_listed_as_a_waiting_gate(
+            self, advance_mod, mock_ctx, state_factory, card_factory, write_state, read_state):
+        # Regression: a cancelled card (lifecycle:cancelled) whose scheduler node carries a
+        # "lifecycle:cancelled" wait_reason was leaking into waiting_gates and being rendered as
+        # "DLC-YOLO gates awaiting approval: … (scheduler withheld: lifecycle:cancelled)" — a false
+        # claim (a cancelled card awaits nothing). A cancelled card at a mid-ladder stage must NOT
+        # notify and must NOT appear in the waiting set.
+        cancelled = card_factory(
+            stage="requirements", step_status={},
+            lifecycle="cancelled", writes_allowed=False)
+        _run(advance_mod, mock_ctx, write_state, state_factory(cards=[cancelled]))
+        # The load-bearing invariant: a cancelled card triggers no "awaiting approval" notice and
+        # never enters the persisted waiting-set signature.
+        mock_ctx.notify.assert_not_called()
+        assert read_state()["cards"][0].get("_notified_waiting") is None
+        assert read_state().get("_notified_waiting") in (None, [])
+
     def test_assisted_gate_waits_and_notifies(self, advance_mod, mock_ctx, state_factory,
                                               card_factory, write_state, read_state):
         card = card_factory(stage="gate-spec", step_status={})
@@ -1856,6 +1876,37 @@ class TestBootstrap:
         payload = {"config": {"trust": "autonomous"}, "pipelines": [], "cards": [{"id": "x"}]}
         advance_mod._save(payload)
         assert advance_mod._load() == payload
+
+    def test_state_lock_is_exclusive_across_holders(self, advance_mod, state_path):
+        # ROOT-2: the cross-process state lock must be EXCLUSIVE — while one holder has it, a
+        # non-blocking second acquire on the same path must fail (so a backend writer waits for the
+        # cron's RMW instead of interleaving-and-losing).
+        import fcntl, os as _os
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        with advance_mod._state_lock() as got:
+            assert got is True  # uncontended acquire succeeds
+            lock_path = str(advance_mod.STATE)[:-5] + ".json.lock"
+            fd = _os.open(lock_path, _os.O_CREAT | _os.O_RDWR, 0o600)
+            try:
+                raised = False
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except OSError:
+                    raised = True
+                assert raised, "a second non-blocking acquire must fail while the lock is held"
+            finally:
+                _os.close(fd)
+        # released after the context — a fresh acquire now succeeds
+        with advance_mod._state_lock() as got2:
+            assert got2 is True
+
+    def test_save_is_durable_and_atomic(self, advance_mod, state_path):
+        # ROOT-2: _save writes via a temp file + fsync + os.replace (no partial/torn file) and
+        # leaves no .tmp behind.
+        payload = {"config": {}, "pipelines": [{"id": "p"}], "cards": [{"id": "c"}]}
+        advance_mod._save(payload)
+        assert json.loads(state_path.read_text()) == payload
+        assert not state_path.with_suffix(".json.tmp").exists()  # temp cleaned by os.replace
 
 
 # =========================================================================== #

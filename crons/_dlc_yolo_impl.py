@@ -563,8 +563,69 @@ def _save(state: dict) -> None:
             pass  # unreadable disk: fall through and let the write proceed (best-effort)
     STATE.parent.mkdir(parents=True, exist_ok=True)
     tmp = STATE.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    with open(tmp, "w", encoding="utf-8") as _fh:
+        _fh.write(json.dumps(state, indent=2))
+        _fh.flush()
+        os.fsync(_fh.fileno())          # durability: the authoritative writer must fsync (was not)
     os.replace(tmp, STATE)
+    # fsync the parent dir so the rename itself is durable across a crash (ROOT-2 durability).
+    try:
+        dfd = os.open(str(STATE.parent), os.O_RDONLY)
+        try:
+            os.fsync(dfd)
+        finally:
+            os.close(dfd)
+    except OSError:
+        pass  # best-effort; some filesystems disallow dir fsync
+
+
+import contextlib as _contextlib
+
+
+@_contextlib.contextmanager
+def _state_lock(timeout: float = 10.0):
+    """Cross-process EXCLUSIVE lock over state.json, held across a whole read-modify-write.
+
+    ROOT-2 fix (concurrency/atomicity audit): four processes write state.json — the advance cron,
+    the backend crew-stream fold, the backend orchestrator-trigger, and _save itself — with no
+    lock, so a write landing between another writer's read and its os.replace was silently lost
+    (lost update). `os.replace` gave torn-write safety but nothing for the RMW interleave. This
+    advisory `flock` on a stable sidecar `<state>.lock` serializes the critical section across
+    processes (both the cron and the spawned backend open the same path). Advisory, so it only
+    protects writers that COOPERATE by taking it — every state writer must wrap its RMW in this.
+    Fail-open: if the lock cannot be acquired (missing fcntl, unwritable dir, timeout) the body
+    still runs — a degraded no-lock write is better than a wedged pipeline, and the clobber-guard
+    + _StateUnreadable skip remain as the last line of defence.
+    """
+    lock_path = STATE.with_suffix(".json.lock")
+    fd = None
+    acquired = False
+    try:
+        try:
+            STATE.parent.mkdir(parents=True, exist_ok=True)
+            fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR
+                         | getattr(os, "O_CLOEXEC", 0), 0o600)
+        except OSError:
+            yield False
+            return
+        deadline = __import__("time").monotonic() + max(0.0, timeout)
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                acquired = True
+                break
+            except OSError:
+                if __import__("time").monotonic() >= deadline:
+                    break  # fail-open: proceed without the lock rather than wedge
+                __import__("time").sleep(0.05)
+        yield acquired
+    finally:
+        if fd is not None:
+            if acquired:
+                with _contextlib.suppress(OSError):
+                    fcntl.flock(fd, fcntl.LOCK_UN)
+            with _contextlib.suppress(OSError):
+                os.close(fd)
 
 
 def _pipeline_for(state: dict, card: dict) -> dict | None:
@@ -840,6 +901,209 @@ _BUDGET_RANKS = {
                             "decision-grade": 2, "frontier": 3},
     "reasoning_effort_ceiling": {"low": 0, "medium": 1, "high": 2, "xhigh": 3},
 }
+
+# ── Part II decision resolver (event-driven-liveness-spec §II) ───────────────────────────────
+# The ONE model_class → concrete model table (shared by _planned_routing and the pre-fire config
+# pass). model_class stays the abstract dial that ceiling-clamps by rank; this maps it to what
+# cron_add binds. Adjustable here in one place. A class with no entry falls back to host default
+# (requested_model dropped → 'auto') rather than guessing a name.
+_CLASS_TO_MODEL = {
+    "economy": "haiku-4.5",
+    "balanced": "sonnet-4.6-1m",
+    "decision-grade": "opus-4.8-1m",
+    "frontier": "fable-5-1m",
+}
+
+
+def _class_to_model(model_class: str) -> str | None:
+    """Concrete model name for a model_class, or None to leave host default (auto)."""
+    return _CLASS_TO_MODEL.get(str(model_class or "").lower())
+
+
+# Difficulty tier (D0–D6, §II.1). Zero-token — a formula over facts already in state, never an
+# LLM turn (the liveness join clause: sizing rides free on the event layer). Returns a bounded
+# dict; callers map tier → (model_class dial, effort dial) and CLAMP to the depth/budget ceiling.
+_DIFFICULTY_CLASS_DIAL = {
+    # tier → the model_class the dial WANTS (clamped down to ceiling by the caller, never up)
+    "D0": "economy", "D1": "economy", "D2": "balanced",
+    "D3": "decision-grade", "D4": "economy", "D5": "decision-grade", "D6": "balanced",
+}
+_DIFFICULTY_EFFORT_DIAL = {
+    "D0": "low", "D1": "low", "D2": "medium",
+    "D3": "xhigh", "D4": "low", "D5": "high", "D6": "medium",
+}
+
+
+def _classify_dispatch_difficulty(card: dict, step: dict, pl: dict | None,
+                                  depth: str, contract: dict) -> dict:
+    """Zero-token difficulty classifier (§II.4/§II.5). Reads only facts already in state:
+    single-crew-leaf, scope ratio, topology.action, open low-confidence decisions, retry_count,
+    backstep_history, decomposability (effort.features[] count + coupling hint). Returns
+    {tier, breadth, decomposable, signals[]} — NO model call.
+
+    The spine is D1↔D4: the SAME 'this is hard' signal routes to a deeper single pass (D3) or to
+    many cheap pieces (D4/D5) via the decomposability discriminator. D6 is the honest 'not mine'
+    (a human gate) — never auto-resolved here."""
+    signals: list[str] = []
+    card = card if isinstance(card, dict) else {}
+    step = step if isinstance(step, dict) else {}
+    contract = contract if isinstance(contract, dict) else {}
+
+    # A leaf single-crew step with no fork is the lively default: D0/D1.
+    is_leaf, _crew, _prof = _single_crew_inline(card, step)
+
+    # Scope growth vs predecessor (the same ratio the back-step guard uses).
+    effort = card.get("effort") if isinstance(card.get("effort"), dict) else {}
+    scope = effort.get("scope") if isinstance(effort.get("scope"), dict) else {}
+    step_id = str(step.get("id") or "")
+    factor = GROWTH_FACTOR.get(depth, 2.0)
+    ladder = _ladder(pl) if pl else []
+    grew = False
+    try:
+        idx = ladder.index(step_id)
+        for j in range(idx - 1, -1, -1):
+            prev_v = scope.get(ladder[j])
+            cur_v = scope.get(step_id)
+            if isinstance(prev_v, (int, float)) and isinstance(cur_v, (int, float)) and prev_v > 0:
+                if cur_v > prev_v * factor:
+                    grew = True
+                break
+    except (ValueError, TypeError):
+        pass
+    if grew:
+        signals.append("scope-growth")
+
+    # Decomposability: countable weakly-coupled units → shatter; one entangled call → deliberate.
+    features = effort.get("features") if isinstance(effort.get("features"), list) else []
+    feature_count = len([f for f in features if isinstance(f, dict)])
+    coupling = str(_simple_observed_property(card, step, pl, "coupling") or "").lower()
+    decomposable = feature_count >= 2 and coupling in {"", "low", "loose", "weak"}
+    if feature_count >= 2:
+        signals.append(f"features={feature_count}")
+    if coupling:
+        signals.append(f"coupling={coupling}")
+
+    # Topology already declared by the orchestrator plan.
+    topo = card.get("topology") if isinstance(card.get("topology"), dict) else {}
+    action = str(topo.get("action") or "").lower()
+    if action in {"fan-out", "fan-in", "unify"}:
+        signals.append(f"topology={action}")
+
+    # Open low-confidence decision, retries, prior back-steps → harder.
+    open_low_conf = any(
+        isinstance(d, dict) and d.get("chosen") is None
+        and str(d.get("confidence") or "").lower() == "low"
+        for d in (card.get("decisions") or []))
+    retries = card.get("retry_count") if isinstance(card.get("retry_count"), dict) else {}
+    retried = bool(retries.get(step_id))
+    backstepped = bool(card.get("backstep_history"))
+    if open_low_conf:
+        signals.append("low-confidence-decision")
+    if retried:
+        signals.append("retried")
+    if backstepped:
+        signals.append("prior-backstep")
+
+    # Tier selection — lane owner is decided elsewhere (by decision TYPE); this is ONLY the dial.
+    # An explicit fan-out topology IS a decomposability declaration by the orchestrator (that is what
+    # fan-out means), so treat it as decomposable regardless of the coupling probe.
+    fanned_out = action == "fan-out"
+    is_decomposable = decomposable or (fanned_out and feature_count >= 1)
+    hard = grew or open_low_conf or backstepped or action in {"fan-out", "fan-in", "unify"}
+    if fanned_out or (hard and is_decomposable):
+        tier = "D5" if (feature_count >= 4 or fanned_out) and coupling not in {"high", "tight"} else "D4"
+        breadth = max(2, feature_count) if is_decomposable else 1
+    elif hard:
+        tier = "D3"                      # heavy but irreducible → one deep pass
+        breadth = 1
+    elif is_leaf and not features:
+        tier = "D1"                      # easy, one obvious answer
+        breadth = 1
+    else:
+        tier = "D2"                      # normal producing step
+        breadth = 1
+
+    return {"tier": tier, "breadth": breadth, "decomposable": is_decomposable,
+            "signals": signals}
+
+
+def _resolve_difficulty_model_class(tier: str, base_class: str, ceiling: str,
+                                    quality_floor: str | None = None) -> tuple[str, list[str]]:
+    """Map a difficulty tier → model_class, CLAMPED DOWN to the ceiling (never above — the ceiling
+    is the dashboard-set clamp, difficulty is the dial inside it). Returns (model_class, clamped[]).
+    Unlike _planned_routing's guards this LOWERS rather than flagging infeasible: the dial can go
+    below depth freely, and a want-above-ceiling is clamped to the ceiling."""
+    ranks = _BUDGET_RANKS["model_class_ceiling"]
+    want = _DIFFICULTY_CLASS_DIAL.get(tier, base_class)
+    clamped: list[str] = []
+    # A quality_floor raises the minimum (still ceiling-bounded).
+    if quality_floor in ranks and ranks[quality_floor] > ranks.get(want, -1):
+        want = quality_floor
+    if want in ranks and ceiling in ranks and ranks[want] > ranks[ceiling]:
+        clamped.append(f"model_class: {want}→{ceiling} (ceiling)")
+        want = ceiling
+    return want, clamped
+
+
+# Role sizing for a fan-out child (§ pre-fire-orchestrator-config-spec §3). integration-owner
+# reconciles the others → parent's class + depth effort; a substantive facet → one rank below,
+# medium; an independent leaf → economy, low. All CLAMPED DOWN to the ceiling, never above.
+_PREFIRE_ROLE_EFFORT = {"integration-owner": None, "facet": "medium", "leaf": "low"}
+
+
+def _prefire_child_routing(parent: dict, entry: dict, role: str, budget: dict,
+                           depth: str, parent_class: str = "balanced") -> dict:
+    """Stamp a planned fan-out child with its resolved routing BEFORE it is materialized, so the
+    child is born with its profile instead of re-deriving from depth on its first wake. Pure,
+    zero-token, ceiling-clamped. Returns a `resolved_routing` dict for the child card."""
+    role = role if role in _PREFIRE_ROLE_EFFORT else "leaf"
+    compute = budget.get("compute") if isinstance(budget.get("compute"), dict) else {}
+    class_ranks = _BUDGET_RANKS["model_class_ceiling"]
+    effort_ranks = _BUDGET_RANKS["reasoning_effort_ceiling"]
+    ceiling = compute.get("model_class_ceiling")
+    eff_ceiling = compute.get("reasoning_effort_ceiling")
+    clamped: list[str] = []
+
+    # model_class by role.
+    if role == "integration-owner":
+        want = parent_class if parent_class in class_ranks else "balanced"
+    elif role == "facet":
+        base = parent_class if parent_class in class_ranks else "balanced"
+        want = {0: "economy", 1: "economy", 2: "balanced", 3: "decision-grade"}[class_ranks[base]]
+    else:  # leaf
+        want = "economy"
+    if want in class_ranks and ceiling in class_ranks and class_ranks[want] > class_ranks[ceiling]:
+        clamped.append(f"model_class: {want}→{ceiling} (ceiling)")
+        want = ceiling
+    model_class = want
+
+    # effort by role (integration-owner uses depth effort).
+    depth_effort = {"quick": "medium", "standard": "high", "deep": "xhigh"}.get(depth, "high")
+    effort = _PREFIRE_ROLE_EFFORT[role] or depth_effort
+    if effort in effort_ranks and eff_ceiling in effort_ranks \
+            and effort_ranks[effort] > effort_ranks[eff_ceiling]:
+        clamped.append(f"reasoning_effort: {effort}→{eff_ceiling} (ceiling)")
+        effort = eff_ceiling
+
+    # depth: a leaf may run one notch below the parent, never above.
+    depth_order = ["quick", "standard", "deep"]
+    child_depth = depth
+    if role == "leaf" and depth in depth_order and depth_order.index(depth) > 0:
+        child_depth = depth_order[depth_order.index(depth) - 1]
+
+    return {
+        "schema_version": 1,
+        "source": "prefire-config-pass",
+        "topology_role": role,
+        "model_class": model_class,
+        "requested_model": _class_to_model(model_class),
+        "reasoning_effort": effort,
+        "effort_binding_status": "requested-unbound-host-contract",
+        "depth": child_depth,
+        "parent_card": parent.get("id"),
+        "clamped": clamped,
+    }
+
 
 
 def _clone(value):
@@ -1816,7 +2080,24 @@ def _scheduler_plan(state: dict, now: str, cycle: dict) -> tuple[set[str], bool]
                 terminal_observed_at=node.get("terminal_observed_at") or now)
             continue
         if lifecycle in _SCHEDULER_CANCEL_LIFECYCLES:
-            if status == "pending" or node.get("status") == "cancelling":
+            # A cancel requested while the step was `pending` (spawn in flight) parks the node at
+            # `cancelling` and waits for a terminal host observation. But the host exposes no
+            # confirmed in-flight turn kill, so without a bound this state is IMMORTAL: the
+            # `node.status == "cancelling"` clause re-selects itself every cycle and the node never
+            # releases its lease/permit (the card-rps3d-pimp wedge). Bound it with the same
+            # staleness the retry path uses: once the cooperative-cancel window has elapsed with no
+            # terminal observation, the in-flight turn is provably gone (cron paused, writes
+            # revoked) — finalize to terminal `cancelled` and release, exactly like the non-pending
+            # branch. `cancel_requested_at` (pointer) is the clock; fall back to the node's own
+            # last-update so a node lacking a pointer stamp still ages out.
+            sessions = card.get("step_sessions") if isinstance(card.get("step_sessions"), dict) else {}
+            _ptr = sessions.get(stage) if isinstance(sessions.get(stage), dict) else {}
+            _cancel_since = (_ptr.get("cancel_requested_at")
+                             or node.get("cancel_requested_at")
+                             or node.get("updated_at") or node.get("queued_at"))
+            _elapsed = _scheduler_duration_ms(_cancel_since, now)
+            _cancel_stale = _elapsed is not None and _elapsed >= PENDING_STALE_SECS * 1000
+            if (status == "pending" or node.get("status") == "cancelling") and not _cancel_stale:
                 changed |= _scheduler_set(
                     node, status="cancelling", wait_reasons=[f"lifecycle:{lifecycle}"],
                     writes_allowed=False,
@@ -1826,7 +2107,8 @@ def _scheduler_plan(state: dict, now: str, cycle: dict) -> tuple[set[str], bool]
                     node, status="cancelled", wait_reasons=[f"lifecycle:{lifecycle}"],
                     writes_allowed=False, terminal_observed_at=now,
                     permit_released_at=node.get("permit_released_at") or now,
-                    permit_release_reason="terminal-cancelled",
+                    permit_release_reason=("terminal-cancelled-stale" if _cancel_stale
+                                           else "terminal-cancelled"),
                     permit_release_status="released-terminal-cancelled")
             continue
         if node_id in cyclic:
@@ -2652,26 +2934,94 @@ def _planned_routing(state: dict, card: dict, pl: dict | None, depth: str, trust
         or {"quick": "medium", "standard": "high", "deep": "xhigh"}[depth]
     effort_source = (policy.get("effort_request_source")
                      if policy.get("requested_effort") else "depth-derived")
+
+    # Part II resolver: size THIS dispatch to its difficulty tier (zero-token). SUPPRESSION: when
+    # the step pins an explicit model (policy.requested_model) or explicit effort, the operator has
+    # spoken — the dial stays entirely out (both model_class and effort keep their explicit/depth
+    # values). A pre-fire child stamp wins next (a fan-out child is BORN with its profile). Only an
+    # unpinned ordinary step is dialed by difficulty, and producing steps are floored at 'balanced'.
+    explicit_model = bool(policy.get("requested_model"))
+    explicit_effort = bool(policy.get("requested_effort"))
+    prefire = card.get("resolved_routing") if isinstance(card.get("resolved_routing"), dict) else {}
+    has_prefire = str(prefire.get("source") or "") == "prefire-config-pass" and prefire.get("schema_version") == 1
+    difficulty = None
+    if explicit_model:
+        difficulty = {"tier": "explicit", "signals": ["explicit-model-pinned"]}
+    elif has_prefire:
+        difficulty = {"tier": "prefire", "signals": ["prefire-child-stamp"]}
+        if not explicit_effort and prefire.get("reasoning_effort"):
+            requested_effort = prefire["reasoning_effort"]
+            effort_source = "prefire-config-pass"
+    else:
+        try:
+            difficulty = _classify_dispatch_difficulty(card, step, pl, depth, contract)
+            if not explicit_effort:
+                dial = _DIFFICULTY_EFFORT_DIAL.get(difficulty["tier"])
+                if dial:
+                    requested_effort = dial
+                    effort_source = f"difficulty:{difficulty['tier']}"
+        except Exception:
+            difficulty = None  # fail-open to the flat depth rule; never wedge dispatch on the dial
+
     effort_ranks = _BUDGET_RANKS["reasoning_effort_ceiling"]
     ceiling = compute.get("reasoning_effort_ceiling")
+    # Clamp effort DOWN to the ceiling (the dial never exceeds the dashboard-set depth).
     if requested_effort in effort_ranks and ceiling in effort_ranks \
             and effort_ranks[requested_effort] > effort_ranks[ceiling]:
-        infeasible.append(
-            f"minimum reasoning effort {requested_effort} exceeds ceiling {ceiling}")
+        if effort_source.startswith("difficulty:") or effort_source == "prefire-config-pass":
+            requested_effort = ceiling  # dial clamps down silently
+        else:
+            infeasible.append(
+                f"minimum reasoning effort {requested_effort} exceeds ceiling {ceiling}")
     allowed_efforts = policy.get("allowed_efforts") or []
     if allowed_efforts and requested_effort not in allowed_efforts:
         infeasible.append(
             f"requested reasoning effort {requested_effort} is outside allowed_efforts")
 
-    model_class = "balanced" if depth == "quick" else "decision-grade"
-    floor = policy.get("quality_floor")
     class_ranks = _BUDGET_RANKS["model_class_ceiling"]
-    if floor in class_ranks and class_ranks[floor] > class_ranks.get(model_class, -1):
-        model_class = floor
     model_ceiling = compute.get("model_class_ceiling")
-    if model_class in class_ranks and model_ceiling in class_ranks \
-            and class_ranks[model_class] > class_ranks[model_ceiling]:
-        infeasible.append(f"minimum model class {model_class} exceeds ceiling {model_ceiling}")
+    floor = policy.get("quality_floor")
+    class_clamped: list[str] = []
+    tier = (difficulty or {}).get("tier")
+    # A "producing" step (one that authors an artifact) is floored at 'balanced' so ordinary work
+    # never feels underpowered; only a true D0/D1 leaf (single-crew, featureless) drops to economy.
+    is_leaf, _ci_crew, _ci_prof = _single_crew_inline(card, step)
+    producing = not is_leaf
+    if has_prefire and prefire.get("model_class"):
+        # Pre-fire child stamp: born with its class, re-clamp defensively.
+        model_class = prefire["model_class"]
+        if model_class in class_ranks and model_ceiling in class_ranks \
+                and class_ranks[model_class] > class_ranks[model_ceiling]:
+            class_clamped.append(f"model_class: {model_class}→{model_ceiling} (ceiling)")
+            model_class = model_ceiling
+    elif tier and tier not in {"prefire", "explicit"}:
+        base = "balanced" if depth == "quick" else "decision-grade"
+        model_class, class_clamped = _resolve_difficulty_model_class(
+            tier, base, model_ceiling if model_ceiling in class_ranks else "frontier",
+            floor if floor in class_ranks else None)
+        # Producing-step floor: never dial a real producing step below 'balanced'.
+        if producing and model_class in class_ranks and class_ranks[model_class] < class_ranks["balanced"]:
+            # honor ceiling even for the floor (a quick-depth ceiling could be below balanced)
+            target = "balanced"
+            if model_ceiling in class_ranks and class_ranks["balanced"] > class_ranks[model_ceiling]:
+                target = model_ceiling
+            if class_ranks[target] > class_ranks[model_class]:
+                class_clamped.append(f"model_class: {model_class}→{target} (producing-floor)")
+                model_class = target
+    else:
+        # Flat depth fallback (explicit-model / no-tier) + quality-floor raise + infeasible-on-over-ceiling.
+        model_class = "balanced" if depth == "quick" else "decision-grade"
+        if floor in class_ranks and class_ranks[floor] > class_ranks.get(model_class, -1):
+            model_class = floor
+        if model_class in class_ranks and model_ceiling in class_ranks \
+                and class_ranks[model_class] > class_ranks[model_ceiling]:
+            infeasible.append(f"minimum model class {model_class} exceeds ceiling {model_ceiling}")
+
+    # If policy did not pin a concrete model, derive one from the resolved class (the ONE table).
+    if not explicit_model:
+        mapped = _class_to_model(model_class)
+        if mapped:
+            policy = {**policy, "requested_model": mapped}
 
     routing = {
         **policy,
@@ -2692,6 +3042,9 @@ def _planned_routing(state: dict, card: dict, pl: dict | None, depth: str, trust
         },
         "control_status": "infeasible" if infeasible else "active",
         "trust_posture": trust,
+        "difficulty_tier": (difficulty or {}).get("tier"),
+        "difficulty_signals": (difficulty or {}).get("signals") or [],
+        "routing_clamped": class_clamped,
     }
     return routing, notes, list(dict.fromkeys(infeasible))
 
@@ -8388,11 +8741,36 @@ def _process_maintenance_requests(ctx, state: dict, now: str, cycle: dict) -> bo
                 decisions = card.setdefault("decisions", [])
                 did = f"dec-{card.get('id')}-{stage}-{dkind}-{entry.get('id')}"
                 if not any(isinstance(d, dict) and d.get("id") == did for d in decisions):
+                    # Give the raised decision a resolvable SHAPE. Previously it was a headless
+                    # {status:open} entry with no options/action, so the UI (which only renders a
+                    # resolve control when d.action || d.options) showed NOTHING and the human could
+                    # never close it — and nothing else did either, so an open back-step/re-spec/park
+                    # decision wedged the advance loop indefinitely (the orphaned-open-decision bug).
+                    # It carries options + an `action` so the decision picker renders A/B, the human
+                    # (or the trust-gated orchestrator) can resolve it, and `chosen` becomes the
+                    # authoritative branch. `req_note` is the user's own words (untrusted provenance).
+                    _req_note = " ".join(str(entry.get("text") or "").split())[:200]
+                    _verb = {"re-scope": "re-scope this step (re-run it smaller)",
+                             "back-step": "step this card back one stage and re-run the predecessor",
+                             "parked": "park this work to the backlog and continue"}[dkind]
                     decisions.append({
                         "id": did, "kind": dkind, "step": stage, "status": "open",
                         "resolution": "human-required", "raised_by": "ui:request",
                         "source_request": entry.get("id"), "at": now,
                         "boundary": entry.get("boundary"),
+                        "action": dkind,
+                        "question": (f"You requested to {_verb}"
+                                     + (f' — "{_req_note}"' if _req_note else "")
+                                     + ". Apply this, or keep the step where it is?"),
+                        "options": [
+                            {"id": "a", "note": f"Apply: {_verb}.",
+                             "risk": "re-runs work; may lose the current step's progress",
+                             "recommended": True},
+                            {"id": "b", "note": "Decline — keep the step as-is and continue.",
+                             "risk": "the concern that prompted the request is not addressed"},
+                        ],
+                        "recommendation": ("Apply (A) — the request was explicit; "
+                                           "decline (B) only if it was sent by mistake."),
                     })
                 _mark_request(entry, "handled", now)  # the decision now carries it
                 handled_this_card = True
@@ -8578,6 +8956,12 @@ def _run_advance_passes(ctx, state: dict, now: str, cycle: dict) -> bool:
             # create the driven child card
             child_id = f"card-{prepo.split('/')[-1] if prepo else 'x'}-{ciss}"
             stage = _child_stage_from_issue(prepo, ciss) if prepo else "investigate"
+            # PRE-FIRE CONFIG PASS (§ pre-fire-orchestrator-config-spec): size this child BEFORE it
+            # exists, by the role the orchestrator's fan-out plan gave it (integration-owner | facet
+            # | leaf). Zero-token, ceiling-clamped; the child is born with its profile so its first
+            # wake honors resolved_routing instead of re-deriving from depth. Only for a scheduler-
+            # managed fan-out (the orchestrator declared roles); a legacy decompose gets no stamp.
+            child_depth = parent.get("depth") or (pl or {}).get("depth") or "standard"
             child = {
                 "id": child_id,
                 "title": f"[{entry.get('feature','child')}] child of #{(parent.get('source') or {}).get('issue')}: {parent.get('title','')}",
@@ -8595,6 +8979,16 @@ def _run_advance_passes(ctx, state: dict, now: str, cycle: dict) -> bool:
                 "guard": parent.get("guard"),  # inherit the parent's verified ownership (same repo/author)
                 "created_at": now, "updated_at": now, "history": [],
             }
+            _role = str(entry.get("topology_role") or entry.get("role") or "").lower()
+            if _role in {"integration-owner", "facet", "leaf"}:
+                try:
+                    _pbudget = _resolve_budget(state, parent, pl)
+                    child["resolved_routing"] = _prefire_child_routing(
+                        parent, entry, _role, _pbudget, child_depth)
+                    if _role == "leaf" and child["resolved_routing"].get("depth"):
+                        child["depth"] = child["resolved_routing"]["depth"]
+                except Exception:
+                    pass  # fail-open: an unstamped child derives normally on its first wake
             cards.append(child)
             _issue_to_card[ciss] = child
             entry["card_id"] = child_id
@@ -8888,6 +9282,9 @@ def _run_advance_passes(ctx, state: dict, now: str, cycle: dict) -> bool:
     if cycle.get("scheduler_control_changed"):
         changed = True
     for scheduled_card in cards:
+        if str(scheduled_card.get("lifecycle") or "").lower() in _SCHEDULER_CANCEL_LIFECYCLES \
+                or str(scheduled_card.get("lifecycle") or "").lower() == "retired":
+            continue  # terminal cards are not awaiting anything
         store = (scheduled_card.get("execution_schedule")
                  if isinstance(scheduled_card, dict) else None)
         node_id = store.get("current_node_id") if isinstance(store, dict) else None
@@ -8905,6 +9302,14 @@ def _run_advance_passes(ctx, state: dict, now: str, cycle: dict) -> bool:
         ladder = _ladder(pl)
         stage = card.get("stage")
         if stage not in ladder:
+            continue
+        # TERMINAL LIFECYCLE: a cancelled/superseded/parked/retired card is NOT running its ladder
+        # and is NOT awaiting approval — it is done. Skip it entirely so it never escalates and,
+        # crucially, never leaks into waiting_gates (the "DLC-YOLO gates awaiting approval" notice
+        # was listing cancelled #29/#30 with a "scheduler withheld: lifecycle:cancelled" reason —
+        # a false "awaiting approval" claim). Terminal cards have no gate to wait on.
+        if str(card.get("lifecycle") or "").lower() in _SCHEDULER_CANCEL_LIFECYCLES \
+                or str(card.get("lifecycle") or "").lower() == "retired":
             continue
         # DECOMPOSED FORM-CHANGE: a parent elaborated into children has CHANGED FORM — it must NOT
         # run its own ladder (escalate steps / advance stages). It stays LIVE only for the
@@ -9712,6 +10117,18 @@ def advance(ctx):
     from datetime import datetime, timezone
 
     _bootstrap()
+    # ROOT-2: hold the cross-process lock across the ENTIRE load→mutate→save cycle. advance() loads
+    # once and _save()s several times off that snapshot; without the lock a backend fold/trigger
+    # landing between the load and a later save is silently overwritten. The lock serializes the
+    # cron's whole RMW against the backend writers (which take the same lock). Fail-open: a failed
+    # acquire still runs the cycle (degraded, unlocked) rather than wedging the pipeline.
+    with _state_lock():
+        return _advance_locked(ctx)
+
+
+def _advance_locked(ctx):
+    from datetime import datetime, timezone
+
     try:
         state = _load()
     except _StateUnreadable as exc:

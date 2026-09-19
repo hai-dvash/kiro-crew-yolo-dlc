@@ -320,6 +320,34 @@ async def _respawn(state: _TunnelState) -> bool:
     return True
 
 
+def _proc_alive(proc: asyncio.subprocess.Process | None) -> bool:
+    """True iff the process is genuinely still running.
+
+    ROOT-CAUSE FIX: ``proc.returncode`` only transitions after something awaits ``proc.wait()``.
+    Once the tunnel dies, the stderr reader hits EOF and ends, and nothing awaits wait() again —
+    so an exited cloudflared can sit as a zombie with ``returncode is None`` and the supervisor
+    would read it as "healthy" forever and never respawn (the observed "channel dies and stays
+    dead"). Ask the OS directly with signal 0 against the process GROUP, which is independent of
+    Python's reaping state. A returned/None-pid proc is dead; ESRCH means the group is gone.
+    """
+    if proc is None:
+        return False
+    if proc.returncode is not None:
+        return False
+    pid = proc.pid
+    if not pid or pid <= 0:
+        return False
+    try:
+        os.killpg(pid, 0)   # signal 0: existence check, sends nothing
+        return True
+    except ProcessLookupError:
+        return False        # the process group is gone — it died without being reaped
+    except PermissionError:
+        return True         # exists but not ours to signal (shouldn't happen; treat as alive)
+    except OSError:
+        return False
+
+
 async def _supervise(state: _TunnelState) -> None:
     """Health-check the tunnel; respawn on unexpected death with bounded backoff.
 
@@ -335,10 +363,16 @@ async def _supervise(state: _TunnelState) -> None:
             if state._stopping:
                 return
             proc = state.proc
-            if proc is not None and proc.returncode is None:
+            if _proc_alive(proc):
                 backoff = _SUPERVISE_BACKOFF_MIN  # healthy — reset backoff
                 continue
-            # Unexpected death: cloudflared exited without a stop(). Respawn.
+            # Unexpected death: cloudflared exited without a stop() (server-side quick-tunnel
+            # teardown, idle expiry, crash). Detected via the signal-0 probe even when asyncio
+            # never reaped the returncode. Force a non-blocking reap so the fd/zombie is released
+            # before we respawn, then respawn.
+            if proc is not None and proc.returncode is None:
+                with contextlib.suppress(asyncio.TimeoutError, Exception):
+                    await asyncio.wait_for(proc.wait(), timeout=0.5)
             if state._stopping:
                 return
             await asyncio.sleep(backoff)

@@ -99,6 +99,22 @@ def test_park_appends_parked_decision():
     assert card["interjection"][0]["status"] == "handled"
 
 
+def test_request_decision_is_resolvable_not_headless():
+    # ROOT-1 regression: a re-spec/back-step/park request must raise a RESOLVABLE decision
+    # (action + options + recommendation), not a headless {status:open} entry the UI can't render
+    # and nothing ever closes — which wedged the advance loop (orphaned-open-decision bug).
+    card = _card()
+    card["interjection"] = [_req("request:re-spec")]
+    _run(card)
+    d = card["decisions"][0]
+    assert d["action"] == "re-scope"                       # UI renders a control when action||options
+    assert isinstance(d.get("options"), list) and len(d["options"]) == 2
+    assert d["options"][0]["id"] == "a" and d["options"][0].get("recommended") is True
+    assert d["options"][1]["id"] == "b"                    # decline path exists
+    assert d.get("question") and d.get("recommendation")
+    assert d["chosen"] is None if "chosen" in d else True  # human still owns the choice
+
+
 def test_cancel_sets_cooperative_flag_via_scheduler():
     card = _card(step_sessions={"design": {"cron_id": "job1"}})
     card["interjection"] = [_req("request:cancel")]

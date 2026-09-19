@@ -115,6 +115,66 @@ class _LiveProc:
     pid = -1
 
 
+class _ZombieProc:
+    """The ROOT-CAUSE case: exited but NOT reaped — returncode is still None while the pid is
+    gone. The old supervisor read this as healthy forever (channel dies and stays dead). pid is
+    set to a value _proc_alive's killpg(pid, 0) will report ESRCH for."""
+    returncode = None
+
+    def __init__(self, pid: int):
+        self.pid = pid
+
+    async def wait(self):
+        self.returncode = 1
+        return 1
+
+
+def test_proc_alive_detects_exited_but_unreaped(monkeypatch):
+    """signal-0 probe: a proc with returncode=None but a dead pid must read as NOT alive —
+    the exact zombie the returncode-only check missed."""
+    # A pid that does not exist as a process group → killpg raises ProcessLookupError.
+    dead = _ZombieProc(pid=2_000_000_000)  # implausible pid; killpg → ESRCH
+    assert tunnel._proc_alive(dead) is False
+    # None / already-reaped are dead too.
+    assert tunnel._proc_alive(None) is False
+    assert tunnel._proc_alive(_DeadProc()) is False
+    # A genuinely-live process group (our own) reads alive. killpg needs a PGID, and a
+    # session-led cloudflared's pid IS its pgid; mirror that with our own process-group id.
+    live = _LiveProc()
+    live.pid = __import__("os").getpgrp()
+    assert tunnel._proc_alive(live) is True
+
+
+def test_supervisor_respawns_a_zombie(monkeypatch):
+    """The regression: an exited-but-unreaped cloudflared (returncode None, pid gone) must be
+    detected as dead by the probe and respawned — the old returncode-only check would not."""
+    _fast_supervisor(monkeypatch)
+    respawns: list[int] = []
+
+    async def _fake_respawn(state):
+        respawns.append(1)
+        state.proc = _LiveProc()
+        state.proc.pid = __import__("os").getpid()  # respawn → genuinely alive
+        return True
+
+    monkeypatch.setattr(tunnel, "_respawn", _fake_respawn)
+
+    async def scenario():
+        state = tunnel._TunnelState()
+        state.port = 8765
+        state.proc = _ZombieProc(pid=2_000_000_000)  # dead pid, returncode still None
+        task = asyncio.create_task(tunnel._supervise(state))
+        await asyncio.sleep(0.1)
+        state._stopping = True
+        task.cancel()
+        with __import__("contextlib").suppress(asyncio.CancelledError):
+            await task
+        return respawns
+
+    got = asyncio.run(scenario())
+    assert len(got) >= 1  # the zombie was detected as dead and respawned
+
+
 def _fast_supervisor(monkeypatch):
     """Shrink the supervisor's timers so a test cycle runs in milliseconds."""
     monkeypatch.setattr(tunnel, "_SUPERVISE_POLL_SECS", 0.01)

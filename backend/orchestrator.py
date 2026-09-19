@@ -70,6 +70,42 @@ async def _wake_advance() -> None:
 
 def _write_trigger(card_id: str) -> dict:
     path = _resolve_state_path()
+    # ROOT-2: take the SAME cross-process lock the advance cron and the crew-stream fold use, so
+    # this blind read→mutate→write cannot lose against a concurrent cron _save. Advisory flock on
+    # the sidecar `<state>.json.lock`; fail-open (a failed acquire still writes — the fsync'd
+    # os.replace remains atomic per-write, only the RMW isolation is best-effort).
+    import fcntl  # noqa: PLC0415
+    lock_path = (str(path)[:-5] + ".json.lock") if str(path).endswith(".json") else (str(path) + ".lock")
+    lock_fd = None
+    try:
+        lock_fd = os.open(lock_path, os.O_CREAT | os.O_RDWR | getattr(os, "O_CLOEXEC", 0), 0o600)
+        import time as _time  # noqa: PLC0415
+        deadline = _time.monotonic() + 5.0
+        while True:
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if _time.monotonic() >= deadline:
+                    break  # fail-open
+                _time.sleep(0.05)
+    except OSError:
+        lock_fd = None
+    try:
+        return _write_trigger_locked(card_id, path)
+    finally:
+        if lock_fd is not None:
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            except OSError:
+                pass
+            try:
+                os.close(lock_fd)
+            except OSError:
+                pass
+
+
+def _write_trigger_locked(card_id: str, path) -> dict:
     try:
         state = json.loads(path.read_text("utf-8"))
     except (OSError, ValueError):

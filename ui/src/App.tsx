@@ -156,7 +156,7 @@ interface PipelineCard {
     scope?: Record<string, number>
   }
   backstep_history?: Array<{ from: string; to: string; reason: string; at: string }>
-  decisions?: Array<{ id: string; at: string; step?: string; raised_by?: string; kind?: string; question?: string; options?: Array<{ id?: string; note?: string; risk?: string }>; chosen?: string; rationale?: string; action?: string; enhancement?: { target_step?: string; add_step?: string; crew?: string }; resolved_at?: string; confidence?: string }>
+  decisions?: Array<{ id: string; at: string; step?: string; raised_by?: string; kind?: string; question?: string; options?: Array<{ id?: string; note?: string; risk?: string; recommended?: boolean }>; chosen?: string; rationale?: string; action?: string; enhancement?: { target_step?: string; add_step?: string; crew?: string }; resolved_at?: string; confidence?: string }>
   parked?: ParkedIdea[]
   history: Array<{ from: string; to: string; at: string; agent: string }>
 }
@@ -1155,6 +1155,79 @@ function MaintenanceMenu({ onRequest }: { onRequest: (kind: string, text: string
   )
 }
 
+function DecisionResolveModal({ card, decision, onClose, onResolve }: {
+  card: PipelineCard
+  decision: NonNullable<PipelineCard['decisions']>[number]
+  onClose: () => void
+  onResolve: (chosenOptionId: string) => void
+}) {
+  const opts = decision.options || []
+  // The agent's recommendation: the explicitly-flagged option, else one named in the rationale,
+  // else the first.
+  const recommendedId = opts.find(o => o.recommended === true)?.id
+    || opts.find(o => o.id && (decision.rationale || '').toLowerCase().includes((o.id + ')').toLowerCase()))?.id
+    || opts[0]?.id
+  const [selected, setSelected] = useState<string>(recommendedId || '')
+  return (
+    <div className="fixed inset-0 z-[72] flex items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.58)', backdropFilter: 'blur(4px)' }}
+      onMouseDown={event => { if (event.currentTarget === event.target) onClose() }}>
+      <section role="dialog" aria-modal="true" aria-labelledby={`decision-resolve-${decision.id}`}
+        className="flex flex-col rounded-xl overflow-hidden"
+        style={{ width: 'min(560px, calc(100vw - 32px))', maxHeight: 'min(80vh, 640px)', background: 'var(--bg-elevated, var(--bg))', border: '1px solid var(--border-strong, var(--border))', boxShadow: '0 28px 90px rgba(0,0,0,0.5)' }}>
+        <header className="px-5 py-4 flex items-start gap-4" style={{ borderBottom: '1px solid var(--border)' }}>
+          <div className="min-w-0 flex-1">
+            <h2 id={`decision-resolve-${decision.id}`} className="text-[14px] font-semibold" style={{ color: 'var(--text-strong, var(--text))' }}>
+              ⚖ Choose an option{decision.step ? ` · ${decision.step}` : ''}
+            </h2>
+            <div className="text-[12px] mt-1" style={{ color: 'var(--text)' }}>{decision.question || decision.kind}</div>
+            <div className="text-[10px] mt-0.5 truncate" style={{ color: 'var(--muted)' }}>{card.title}</div>
+          </div>
+          <button onClick={onClose} aria-label="Close decision" className="w-8 h-8 rounded-lg flex items-center justify-center text-lg leading-none"
+            style={{ color: 'var(--muted)', background: 'var(--bg-hover, transparent)', border: '1px solid var(--border)' }}>×</button>
+        </header>
+        <div className="overflow-y-auto p-4 flex flex-col gap-2">
+          {opts.map((o, i) => {
+            const id = o.id || String.fromCharCode(65 + i)
+            const isSel = selected === (o.id || id)
+            const recommended = (o.id || id) === recommendedId
+            return (
+              <label key={id} className="flex items-start gap-2.5 p-2.5 rounded-lg cursor-pointer"
+                style={{ background: isSel ? 'color-mix(in srgb, var(--accent) 14%, transparent)' : 'var(--bg-hover, transparent)',
+                  border: `1px solid ${isSel ? 'var(--accent)' : 'var(--border)'}` }}>
+                <input type="radio" name={`decision-${decision.id}`} className="mt-0.5"
+                  checked={isSel} onChange={() => setSelected(o.id || id)} />
+                <div className="min-w-0">
+                  <div className="text-[12px] font-semibold flex items-center gap-1.5" style={{ color: 'var(--text-strong, var(--text))' }}>
+                    Option {id}{recommended && <span className="text-[10px] font-normal" style={{ color: 'var(--accent)' }}>⭐ recommended</span>}
+                  </div>
+                  <div className="text-[11px] mt-0.5" style={{ color: 'var(--muted)' }}>{o.note}</div>
+                  {o.risk && <div className="text-[10px] mt-0.5" style={{ color: 'var(--warn, var(--muted))' }}>risk: {o.risk}</div>}
+                </div>
+              </label>
+            )
+          })}
+          {decision.rationale && (
+            <div className="text-[10px] italic mt-1 p-2 rounded" style={{ color: 'var(--muted)', background: 'var(--bg-hover, transparent)' }}>
+              Agent rationale: {decision.rationale}
+            </div>
+          )}
+        </div>
+        <footer className="px-5 py-3 flex items-center justify-end gap-2" style={{ borderTop: '1px solid var(--border)' }}>
+          <button onClick={onClose} className="text-[12px] px-3 py-1.5 rounded-md"
+            style={{ color: 'var(--muted)', border: '1px solid var(--border)' }}>Cancel</button>
+          <button disabled={!selected}
+            onClick={() => { if (selected) { onResolve(selected); onClose() } }}
+            className="text-[12px] px-3 py-1.5 rounded-md font-semibold"
+            style={{ background: selected ? 'var(--accent)' : 'var(--border)', color: selected ? 'var(--bg)' : 'var(--muted)', cursor: selected ? 'pointer' : 'not-allowed' }}>
+            Resolve on this branch
+          </button>
+        </footer>
+      </section>
+    </div>
+  )
+}
+
 function PipelineCardItem({ card, config, isGate, cardStatus, effectiveCapability, producerStep, producerSession, onOpenProducer, onApprove, onReject, onCycleTrust, onCycleDepth, onSetBudget, onInterject, onResolveDecision, onOpenOrchestrator, liveView, allCards, onOpenCard, onRequest, onOpenStepSession, onCancelCard }: {
   card: PipelineCard
   config: PipelineConfig
@@ -1170,7 +1243,7 @@ function PipelineCardItem({ card, config, isGate, cardStatus, effectiveCapabilit
   onCycleDepth?: () => void
   onSetBudget?: (budget?: Budget) => void
   onInterject?: (kind: string, text: string) => void
-  onResolveDecision?: (decisionId: string) => void
+  onResolveDecision?: (decisionId: string, chosenOptionId?: string) => void
   onOpenOrchestrator?: () => void
   liveView?: { stage: string; phase: string; tail: string; active: boolean; seq: number; slotKey: string; source?: string; onOpen: () => void }
   allCards?: PipelineCard[]
@@ -1190,6 +1263,7 @@ function PipelineCardItem({ card, config, isGate, cardStatus, effectiveCapabilit
   const [interjectOpen, setInterjectOpen] = useState(false)
   const [interjectText, setInterjectText] = useState('')
   const [inspectionOpen, setInspectionOpen] = useState(false)
+  const [decisionModalId, setDecisionModalId] = useState<string | null>(null)
   const [timelineOpen, setTimelineOpen] = useState(false)
   const [detailsOpen, setDetailsOpen] = useState(false)
   const { openChat } = useChatLauncher()
@@ -1444,18 +1518,89 @@ function PipelineCardItem({ card, config, isGate, cardStatus, effectiveCapabilit
         </div>
       )}
 
-      {/* Raised decisions are advisory until Slice B's structured action processor exists. */}
-      {onResolveDecision && pendingDecisions.map(d => (
-        <div key={d.id} className="mt-2 p-1.5 rounded-md text-[11px]"
-          style={{ background: 'color-mix(in srgb, var(--accent) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--accent) 35%, var(--border))' }}>
-          <div style={{ color: 'var(--text, var(--muted))' }}>⚖ {d.question || d.kind}</div>
-          <div className="mt-1 text-[10px]" style={{ color: 'var(--muted)' }}>
-            This records acknowledgement only; it does not enact {d.action || 'the proposed pipeline change'}.
+      {/* Blocked with a reason but NO pending decision (e.g. capability-gap, needs-approval):
+          surface the reason so the block is never a silent dead-end, and invite an interjection. */}
+      {(() => {
+        const reasons = card.block_reason || {}
+        const coveredSteps = new Set(pendingDecisions.map(d => d.step).filter(Boolean))
+        const orphanBlocks = Object.entries(reasons).filter(([step]) => !coveredSteps.has(step))
+        if (!orphanBlocks.length) return null
+        return orphanBlocks.map(([step, reason]) => (
+          <div key={`block-${step}`} className="mt-2 p-2 rounded-md text-[11px]"
+            style={{ background: 'color-mix(in srgb, var(--danger, #e66) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--danger, #e66) 35%, var(--border))' }}>
+            <div className="font-semibold" style={{ color: 'var(--danger, #e66)' }}>⏸ Blocked · {step}</div>
+            <div className="mt-1 text-[10px] whitespace-pre-wrap" style={{ color: 'var(--muted)' }}>{reason}</div>
+            {onInterject && (
+              <button className="mt-1.5 text-[10px] px-2 py-0.5 rounded font-semibold"
+                style={{ background: 'var(--accent)', color: 'var(--bg)' }}
+                onClick={() => setInterjectOpen(true)}>✏️ interject to unblock</button>
+            )}
           </div>
-          <button className="mt-1 px-2 py-0.5 rounded font-semibold" style={{ background: 'var(--bg-hover, var(--border))', color: 'var(--accent)' }}
-            onClick={() => onResolveDecision(d.id)}>Acknowledge &amp; continue</button>
-        </div>
-      ))}
+        ))
+      })()}
+
+      {/* Raised decisions: surface the fork, its options, and the agent's recommendation so the
+          human can actually answer it — not a blind free-text box. Choosing an option writes a
+          structured interjection naming the choice (the step-agent reads it on its next run; the
+          deterministic gate-action processor is Slice B). block_reason gives the "why blocked". */}
+      {onResolveDecision && pendingDecisions.map(d => {
+        const blockedStep = d.step && card.block_reason?.[d.step] ? d.step
+          : Object.keys(card.block_reason || {})[0]
+        const blockText = blockedStep ? card.block_reason?.[blockedStep] : undefined
+        const opts = d.options || []
+        return (
+          <div key={d.id} className="mt-2 p-2 rounded-md text-[11px]"
+            style={{ background: 'color-mix(in srgb, var(--accent) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--accent) 35%, var(--border))' }}>
+            <div className="font-semibold" style={{ color: 'var(--text, var(--muted))' }}>
+              ⚖ Decision needed{d.step ? ` · ${d.step}` : ''}{d.confidence ? ` · confidence ${d.confidence}` : ''}
+            </div>
+            <div className="mt-1" style={{ color: 'var(--text, var(--muted))' }}>{d.question || d.kind}</div>
+            {blockText && (
+              <div className="mt-1 text-[10px] whitespace-pre-wrap" style={{ color: 'var(--muted)' }}>{blockText}</div>
+            )}
+            {opts.length > 0 && (
+              <div className="mt-1.5 flex flex-col gap-1">
+                {opts.map((o, i) => {
+                  const id = o.id || String.fromCharCode(65 + i)  // A, B, C…
+                  const recommended = o.recommended === true || d.chosen === o.id
+                    || (d.rationale || '').toLowerCase().includes((o.id || '').toLowerCase() + ')')
+                  return (
+                    <div key={id} className="flex items-start gap-2 p-1 rounded"
+                      style={{ background: recommended ? 'color-mix(in srgb, var(--accent) 12%, transparent)' : 'transparent' }}>
+                      <button className="text-[10px] px-2 py-0.5 rounded font-semibold shrink-0"
+                        style={{ background: 'var(--accent)', color: 'var(--bg)' }}
+                        title={`Resolve this decision by selecting option ${id} — the step resumes on this branch`}
+                        onClick={() => onResolveDecision(d.id, o.id || id)}>
+                        Choose {id}
+                      </button>
+                      <div className="text-[10px]" style={{ color: 'var(--muted)' }}>
+                        {o.note}{o.risk ? ` · risk: ${o.risk}` : ''}{recommended ? '  ⭐ recommended' : ''}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+            {d.rationale && (
+              <div className="mt-1 text-[10px] italic" style={{ color: 'var(--muted)' }}>Agent rationale: {d.rationale}</div>
+            )}
+            <div className="mt-1.5 flex items-center gap-2">
+              {opts.length > 0 && (
+                <button className="px-2 py-0.5 rounded font-semibold" style={{ background: 'var(--accent)', color: 'var(--bg)' }}
+                  title="Open a picker to select an option and resolve this decision"
+                  onClick={() => setDecisionModalId(d.id)}>⚖ resolve in picker…</button>
+              )}
+              <button className="px-2 py-0.5 rounded" style={{ color: 'var(--muted)', border: '1px solid var(--border)' }}
+                title="Answer in your own words instead of choosing an option"
+                onClick={() => setInterjectOpen(true)}>✏️ answer in words</button>
+              {!opts.length && (
+                <button className="px-2 py-0.5 rounded font-semibold" style={{ background: 'var(--bg-hover, var(--border))', color: 'var(--accent)' }}
+                  onClick={() => onResolveDecision(d.id)}>Acknowledge &amp; continue</button>
+              )}
+            </div>
+          </div>
+        )
+      })}
 
       {/* ── Zone: LIVE (streaming peek of the working agent's output — in-card-live-view-spec) ── */}
       {liveView && <LiveMiniPane live={liveView} />}
@@ -1544,6 +1689,18 @@ function PipelineCardItem({ card, config, isGate, cardStatus, effectiveCapabilit
           onInterject={onInterject ? () => { setInspectionOpen(false); setInterjectOpen(true) } : undefined}
         />
       )}
+      {decisionModalId && onResolveDecision && (() => {
+        const d = (card.decisions || []).find(x => x.id === decisionModalId)
+        if (!d) return null
+        return (
+          <DecisionResolveModal
+            card={card}
+            decision={d}
+            onClose={() => setDecisionModalId(null)}
+            onResolve={(optionId) => onResolveDecision(d.id, optionId)}
+          />
+        )
+      })()}
     </div>
   )
 }
@@ -3465,16 +3622,25 @@ export default function SdlcPipeline() {
     })
   }, [mutateState])
 
-  // Acknowledge a raised advisory decision without pretending its proposed action was enacted.
-  const resolveDecision = useCallback((cardId: string, decisionId: string) => {
+  // Resolve a raised decision. STRUCTURED SELECTION (Slice B): when the human picks one of the
+  // agent's `options[]`, write that option's REAL id into `d.chosen` — the deterministic runtime
+  // (_pending_step_decisions) already treats a non-null `chosen` as resolved and unblocks the step,
+  // so the step-agent resumes on the SELECTED BRANCH with no prose re-interpretation. For an
+  // OPTIONLESS advisory decision there is nothing to select, so we fall back to the honest
+  // acknowledge marker (chosen='acknowledged') that records the human saw it without pretending its
+  // proposed action was enacted. Never fabricate an enactment.
+  const resolveDecision = useCallback((cardId: string, decisionId: string, chosenOptionId?: string) => {
     mutateState(state => {
       const card = state.cards.find(c => c.id === cardId)
       if (!card) return
       const d = (card.decisions || []).find(x => x.id === decisionId)
       if (d) {
-        d.chosen = 'acknowledged'
-        ;(d as { status?: string; resolved_at?: string }).status = 'acknowledged'
-        ;(d as { status?: string; resolved_at?: string }).resolved_at = new Date().toISOString()
+        const now = new Date().toISOString()
+        d.chosen = chosenOptionId && chosenOptionId.trim() ? chosenOptionId.trim() : 'acknowledged'
+        ;(d as { status?: string; resolved_at?: string; resolved_by?: string }).status =
+          chosenOptionId ? 'resolved' : 'acknowledged'
+        ;(d as { status?: string; resolved_at?: string; resolved_by?: string }).resolved_at = now
+        ;(d as { status?: string; resolved_at?: string; resolved_by?: string }).resolved_by = 'user'
       }
       card.updated_at = new Date().toISOString()
     })
@@ -3746,7 +3912,7 @@ export default function SdlcPipeline() {
       onSetBudget: (budget?: Budget) => setCardBudget(card.id, budget),
       onInterject: (kind: string, text: string) => submitCardCommand(
         card.id, card.stage, { type: 'interject', kind, text }, expectedRevision),
-      onResolveDecision: (decisionId: string) => resolveDecision(card.id, decisionId),
+      onResolveDecision: (decisionId: string, chosenOptionId?: string) => resolveDecision(card.id, decisionId, chosenOptionId),
       onOpenOrchestrator: () => openOrchestrator(card),
       liveView: (() => {
         // Join the card's CURRENT step session slot → the liveTail stream for it, so the card

@@ -59,6 +59,35 @@ test('blocked and error expose only recorded reasons', () => {
   )
 })
 
+test('blocked severity scales the badge — a decision-with-options is a chill non-red prompt', () => {
+  // A raised decision with options → light "Choose an option", accent (not danger/red).
+  const dec = deriveCardStatus(card({
+    step_status: { design: 'blocked' },
+    block_reason: { design: 'library direction fork' },
+    decisions: [{ id: 'd1', step: 'design', options: [{ id: 'a', note: 'x' }, { id: 'b', note: 'y' }] }],
+  }))
+  assert.equal(dec.kind, 'blocked')
+  assert.equal(dec.severity, 'decision')
+  assert.equal(dec.label, 'Choose an option')
+  assert.equal(dec.color, 'var(--accent)')
+
+  // A capability-gap block → heavy, danger/red.
+  const hard = deriveCardStatus(card({
+    step_status: { design: 'blocked' },
+    block_reason: { design: 'capability-gap: crew not in inventory' },
+  }))
+  assert.equal(hard.severity, 'hard')
+  assert.equal(hard.color, 'var(--danger)')
+
+  // An approval block → medium, warn (not red).
+  const appr = deriveCardStatus(card({
+    step_status: { design: 'blocked' },
+    block_reason: { design: 'awaiting human approval' },
+  }))
+  assert.equal(appr.severity, 'approval')
+  assert.equal(appr.color, 'var(--warn)')
+})
+
 test('gate, live observation, and unconfirmed pending remain distinct', () => {
   assert.equal(deriveCardStatus(card(), { isGate: true }).kind, 'waiting-gate')
   assert.equal(deriveCardStatus(card({ step_status: { design: 'pending' } }), { liveObserved: true }).kind, 'running-observed')

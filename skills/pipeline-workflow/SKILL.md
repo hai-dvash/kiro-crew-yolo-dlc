@@ -603,7 +603,13 @@ agent step, when it finishes its work, MUST:
    fork worth surfacing — RAISE the gate: append a pending entry to `card.decisions[]`
    (`{id, at, step, raised_by, kind, question, options[], chosen?, rationale, action,
    enhancement?, confidence}`) with your recommendation, and do NOT set `step_status='done'`
-   until its `action` is resolved (the orchestrator deliberates + trust-gates it). Actions
+   until its `action` is resolved (the orchestrator deliberates + trust-gates it). **When the
+   fork offers discrete alternatives you MUST populate `options[]` as STRUCTURED entries
+   `{id, note, risk}` (short ids `a`/`b`/`c`, one-line note + risk each) — never leave the
+   choices only as prose inside `question`. The human decision picker renders `options[]`, so a
+   multi-choice `question` with an empty `options[]` is a defect (the user gets no selectable
+   answer). Mark your recommended option with `recommended: true` (and name it in `rationale`);
+   leave `chosen` null — that field is the human's to set.** Actions
    include card-flow moves (back-step/re-scope/split/park/continue/escalate) AND pipeline
    ENHANCEMENTS (add-crew/add-addendum/add-tool/add-step) that reshape the step/pipeline via
    `state.json`. The gate is ON-DEMAND — not every step; skip it when the step cleanly

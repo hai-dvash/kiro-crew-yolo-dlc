@@ -1387,6 +1387,24 @@ class TestAdvanceGate:
         mock_ctx.notify.assert_called_once()
         assert isinstance(exc, Report)
 
+    def test_steady_state_wait_notifies_once_then_stays_silent(
+            self, advance_mod, mock_ctx, state_factory, card_factory, write_state, read_state):
+        # A card parked at a gate makes waiting_gates truthy on EVERY poll. The FIRST wake
+        # notifies + Reports (new signal); subsequent wakes with an unchanged waiting-set must
+        # stay SILENT (Skip, no notify) — otherwise the "advanced … N gate(s) waiting" line spams
+        # every 120s. Regression for the notification-spam bug.
+        card = card_factory(stage="gate-spec", step_status={})
+        first = _run(advance_mod, mock_ctx, write_state, state_factory(cards=[card]))
+        assert isinstance(first, Report)
+        assert mock_ctx.notify.call_count == 1
+
+        # Second + third wake: state already persisted (incl. _notified_waiting); do NOT rewrite.
+        for _ in range(2):
+            with pytest.raises(advance_mod.Skip):
+                advance_mod.advance(mock_ctx)
+        # No further notifications fired on the steady-state waits.
+        assert mock_ctx.notify.call_count == 1
+
     def test_autonomous_gate_without_review_bundle_stays_waiting(
             self, advance_mod, mock_ctx, state_factory, card_factory, write_state, read_state):
         card = card_factory(stage="gate-spec", step_status={}, trust="autonomous")

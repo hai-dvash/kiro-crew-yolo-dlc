@@ -43,6 +43,32 @@ function reasonFor(card, field) {
   return typeof value === 'string' && value.trim() ? value.trim() : null
 }
 
+// Classify HOW HEAVY a block is for the human, so the badge scales its color + label instead of
+// always shouting red. A block is only alarming (danger/red) when it needs real lifting; a
+// "pick one of these good options" pause is a chill, low-stakes prompt.
+//   decision  → a raised decisions[] with options: "Choose an option" — light, accent (not red)
+//   approval  → needs a gate yes/no or an acknowledgement — medium, warn
+//   attention → default human block (needs-info, re-spec) — medium, warn
+//   hard      → capability-gap / needs external fix — heavy, danger (red)
+function classifyBlock(card, reasonText) {
+  const stage = typeof card?.stage === 'string' ? card.stage : ''
+  const pending = Array.isArray(card?.decisions)
+    ? card.decisions.filter(d => d && !d.chosen && !d.resolved_at
+        && (d.step === stage || !d.step) && Array.isArray(d.options) && d.options.length)
+    : []
+  const r = (reasonText || '').toLowerCase()
+  if (pending.length) {
+    return { severity: 'decision', label: 'Choose an option', color: 'var(--accent)' }
+  }
+  if (/capability|missing|not in inventory|no crew|external|unavailable|cannot proceed without a tool/.test(r)) {
+    return { severity: 'hard', label: 'Blocked · needs setup', color: 'var(--danger)' }
+  }
+  if (/approv|confirm|sign.?off|awaiting.*human|needs.?you/.test(r)) {
+    return { severity: 'approval', label: 'Needs approval', color: 'var(--warn)' }
+  }
+  return { severity: 'attention', label: 'Needs input', color: 'var(--warn)' }
+}
+
 export function deriveCardStatus(card, { isGate = false, liveObserved = false } = {}) {
   const stage = typeof card?.stage === 'string' ? card.stage : ''
   const lifecycle = typeof card?.lifecycle === 'string' ? card.lifecycle.toLowerCase() : ''
@@ -64,6 +90,9 @@ export function deriveCardStatus(card, { isGate = false, liveObserved = false } 
 
   let kind
   let reason = null
+  let severity = null
+  let labelOverride = null
+  let colorOverride = null
   if (terminalObserved) {
     kind = 'terminal'
     reason = nodeStatus === 'cancelled' || CANCEL_LIFECYCLES.has(lifecycle)
@@ -75,6 +104,11 @@ export function deriveCardStatus(card, { isGate = false, liveObserved = false } 
   } else if (stepStatus === 'blocked' || nodeStatus === 'blocked') {
     kind = 'blocked'
     reason = reasonFor(card, 'block_reason') || (node?.wait_reasons || [])[0] || 'step blocked'
+    // Scale the badge to how heavy the ask is — a "choose an option" pause is not red.
+    const cls = classifyBlock(card, reason)
+    severity = cls.severity
+    labelOverride = cls.label
+    colorOverride = cls.color
   } else if (stepStatus === 'error' || nodeStatus === 'failed') {
     kind = 'error'
     reason = reasonFor(card, 'error_reason') || node?.dispatch_error || 'step error'
@@ -94,5 +128,12 @@ export function deriveCardStatus(card, { isGate = false, liveObserved = false } 
     kind = 'idle'
   }
 
-  return { kind, reason, ...CARD_STATUS_META[kind] }
+  const meta = CARD_STATUS_META[kind]
+  return {
+    kind,
+    reason,
+    severity,
+    label: labelOverride || meta.label,
+    color: colorOverride || meta.color,
+  }
 }

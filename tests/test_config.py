@@ -314,26 +314,28 @@ def test_priority6_orchestrator_and_workflow_preserve_truthful_binding_boundary(
 # --------------------------------------------------------------------------------------
 def test_priority7_terminal_profiles_have_narrow_immediate_trigger_contract():
     app = _load(_APP_JSON)
-    assert "kirocrew-cron::cron_trigger" in app["permissions"]["mcpTools"]
+    # Separation of concerns (event-driven-liveness): the producer no longer pokes the scheduler,
+    # so cron_trigger is granted to NOBODY — it is off the app permission ceiling entirely.
+    assert "kirocrew-cron::cron_trigger" not in app["permissions"]["mcpTools"]
     for name in ("dlcyolo-readonly", "dlcyolo-authoring", "dlcyolo-builder",
                  "dlcyolo-coordinator"):
         data = _load(_AGENTS_DIR / f"{name}.json")
-        assert "kirocrew-cron::cron_trigger" in data["tools"]
-        assert "kirocrew-cron::cron_trigger" in data["allowedTools"]
+        assert "kirocrew-cron::cron_trigger" not in data["tools"]
+        assert "kirocrew-cron::cron_trigger" not in data["allowedTools"]
         prompt = data["prompt"]
         assert "TERMINAL EVENT BRIDGE" in prompt
-        assert "exact advance job ID" in prompt
-        assert "trigger failure leaves the marker for polling" in prompt
-        assert "never trigger another job" in prompt
+        assert "do NOT call cron_trigger" in prompt
+        assert "bus is the sole mover" in prompt
+        assert "neutral observer" in prompt
     for name in _STEP_AGENTS:
         data = _load(_AGENTS_DIR / f"{name}.json")
-        assert "kirocrew-cron::cron_trigger" in data["tools"]
-        assert "kirocrew-cron::cron_trigger" in data["allowedTools"]
+        assert "kirocrew-cron::cron_trigger" not in data["tools"]
+        assert "kirocrew-cron::cron_trigger" not in data["allowedTools"]
         prompt = data["prompt"]
         assert "TERMINAL EVENT BRIDGE" in prompt
         assert "event_outbox" in prompt
-        assert "advance job ID" in prompt
-        assert "Trigger failure leaves the marker for polling" in prompt
+        assert "do NOT call cron_trigger" in prompt
+        assert "bus is the sole mover" in prompt
 
 
 def test_priority7_workflow_keeps_state_authority_and_external_boundaries_truthful():

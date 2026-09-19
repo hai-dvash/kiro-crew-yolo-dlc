@@ -278,10 +278,11 @@ def test_shipped_configs_bind_the_mocked_flow_to_real_tools_profiles_and_contrac
     assert "^kirocrew agent (create|list|show) " in allowed
     assert "^gh (issue|label) (create|edit|list|view|comment) " in allowed
 
-    assert {"kirocrew-core::ask_question", "kirocrew-core::spawn_run",
-            "kirocrew-cron::cron_trigger"} <= set(intent["allowedTools"])
+    assert {"kirocrew-core::ask_question", "kirocrew-core::spawn_run"} <= set(intent["allowedTools"])
+    assert "kirocrew-cron::cron_trigger" not in intent["allowedTools"]
     assert "TERMINAL EVENT BRIDGE" in intent["prompt"]
     assert "event_outbox" in intent["prompt"]
+    assert "do NOT call cron_trigger" in intent["prompt"]
     assert "existing roster crew or the default agent" in intent["prompt"].lower()
     assert "RESEARCH ADDENDA" in intent["prompt"]
 
@@ -295,5 +296,5 @@ def test_shipped_configs_bind_the_mocked_flow_to_real_tools_profiles_and_contrac
     assert "write" in profiles["authoring"]["allowedTools"]
     assert "shell" in profiles["builder"]["allowedTools"]
     assert "kirocrew-core::select_crew" in profiles["coordinator"]["allowedTools"]
-    assert all("kirocrew-cron::cron_trigger" in profile["allowedTools"]
+    assert all("kirocrew-cron::cron_trigger" not in profile["allowedTools"]
                for profile in profiles.values())

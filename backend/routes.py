@@ -520,6 +520,77 @@ async def _stop_listener(app: web.Application) -> None:
         state.update(status="stopped", runner=None)
 
 
+# ── Poll-free local-completion wake (event-driven-liveness Part I) ──────────────────────────────
+# The step-agent writes its terminal fact into state.json and STOPS — it no longer pokes the
+# scheduler. This always-on backend is the neutral observer: an inotify watch on the state file
+# fires _wake_advance() the instant the fact lands, so a local step completion advances at
+# kernel-event latency instead of waiting up to 120s for the poll. inotify-unavailable falls back
+# to the poll. This is independent of the webhook receiver — it runs whenever the backend is up.
+_STATE_WATCH_KEY: web.AppKey[object] = web.AppKey("dlc_yolo_state_watch", object)
+_STATE_POINTER_PATH = "~/.dlc-yolo/.statepath"
+
+
+def _resolve_state_path():
+    """Mirror the cron's resolution: DLC_YOLO_STATE (absolute) -> .statepath -> ~/.dlc-yolo."""
+    from pathlib import Path  # noqa: PLC0415
+    import os as _os  # noqa: PLC0415
+
+    env = str(_os.environ.get("DLC_YOLO_STATE") or "").strip()
+    if env:
+        p = Path(_os.path.expanduser(env))
+        if p.is_absolute():
+            return p
+    try:
+        pointer = json.loads(Path(_os.path.expanduser(_STATE_POINTER_PATH)).read_text("utf-8"))
+        cand = str(pointer.get("path") or "").strip()
+        if cand:
+            cp = Path(cand)
+            if cp.is_absolute() and cp.exists():
+                return cp
+    except (OSError, ValueError):
+        pass
+    return Path(_os.path.expanduser("~/.dlc-yolo/state.json"))
+
+
+def _load_inotify_watch_module():
+    """Load the sibling ``backend/inotify_watch.py`` by path (proxy loader safe)."""
+    try:
+        from backend import inotify_watch as _mod  # noqa: PLC0415
+
+        return _mod
+    except ImportError:
+        import importlib.util  # noqa: PLC0415
+        from pathlib import Path  # noqa: PLC0415
+
+        target = Path(__file__).resolve().parent / "inotify_watch.py"
+        spec = importlib.util.spec_from_file_location(
+            "_kirocrew_app_dlc_yolo_inotify", target)
+        if spec is None or spec.loader is None:
+            raise
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+
+async def _start_state_watch(app: web.Application) -> None:
+    """Arm the poll-free inotify wake. Fail-open: any error leaves the 120s poll as the wake."""
+    try:
+        mod = _load_inotify_watch_module()
+        watcher = mod.StateFileWatcher(_resolve_state_path(), on_change=_wake_advance)
+        await watcher.start()
+        app[_STATE_WATCH_KEY] = watcher
+    except Exception:  # noqa: BLE001 - never let watch setup crash the backend
+        logger.warning("DLC-YOLO state inotify watch could not start; poll remains the wake",
+                       exc_info=True)
+
+
+async def _stop_state_watch(app: web.Application) -> None:
+    watcher = app.get(_STATE_WATCH_KEY)
+    if watcher is not None:
+        with contextlib.suppress(Exception):
+            await watcher.stop()
+
+
 def register_routes(app: web.Application) -> None:
     """LEGACY in-process registration — NOT the production path.
 
@@ -543,4 +614,6 @@ def register_routes(app: web.Application) -> None:
     app.router.add_post(f"{BASE}/agents/crew", _require_enabled(_handle_crew_route_update))
     app.on_startup.append(_start_listener)
     app.on_cleanup.append(_stop_listener)
+    app.on_startup.append(_start_state_watch)
+    app.on_cleanup.append(_stop_state_watch)
     logger.info("DLC-YOLO webhook backend registered")

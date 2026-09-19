@@ -402,9 +402,11 @@ class TestExecutionEnvelopeObservation:
         assert "PASS CEILINGS ARE HARD" in payload["message"]
         assert "LOCAL TERMINAL EVENT BRIDGE" in payload["message"]
         assert "card.event_outbox" in payload["message"]
-        assert "kirocrew-cron::cron_trigger" in payload["message"]
-        assert f"job_id='{advance_mod._advance_job_id()}'" in payload["message"]
-        assert "Trigger failure does NOT undo" in payload["message"]
+        # The producer no longer pokes the scheduler: it writes the fact and stops. A neutral
+        # observer (the backend state-file watch) wakes the bus; the poll is the fallback.
+        assert "Do NOT call cron_trigger" in payload["message"]
+        assert "kirocrew-cron::cron_trigger" not in payload["message"]
+        assert "the bus is the sole mover" in payload["message"]
         assert pointer["event_bridge"] == {
             "outbox_schema_version": 1,
             "advance_job_id": advance_mod._advance_job_id(),
@@ -1645,7 +1647,8 @@ class TestRevisionSafeGateStateMachine:
         assert "leave it absent if not observed" in payload["message"]
         assert "LOCAL TERMINAL EVENT BRIDGE" in payload["message"]
         assert "card.event_outbox" in payload["message"]
-        assert f"job_id='{advance_mod._advance_job_id()}'" in payload["message"]
+        assert "Do NOT call cron_trigger" in payload["message"]
+        assert "kirocrew-cron::cron_trigger" not in payload["message"]
         pointer = card["step_sessions"]["requirements"]
         assert pointer["requested_model"] == "model-replacement"
         assert pointer["event_bridge"] == {

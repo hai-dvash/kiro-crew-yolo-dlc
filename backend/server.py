@@ -499,6 +499,10 @@ def build_app() -> web.Application:
         }
     app.on_startup.append(routes._start_listener)
     app.on_cleanup.append(routes._stop_listener)
+    # Poll-free local-completion wake: watch state.json and cron-trigger advance on write.
+    # Independent of the webhook receiver; fail-open to the 120s poll (event-driven-liveness Part I).
+    app.on_startup.append(routes._start_state_watch)
+    app.on_cleanup.append(routes._stop_state_watch)
     app.on_cleanup.append(_stop_tunnel_on_cleanup)
     logger.info("DLC-YOLO app backend routes mounted at /api/webhook/*, /api/agents/crew, /api/tunnel/*")
     return app

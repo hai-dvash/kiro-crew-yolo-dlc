@@ -172,11 +172,11 @@ def _terminal_bridge_instruction(step_id: str) -> str:
         f"'terminal_status':'completed|blocked|errored matching the status',"
         f"'delivery_status':'pending','created_at':'<the same current RFC3339>'}}. The record"
         f" contains identifiers/status only—no prompts, prose, artifacts, secrets, or result"
-        f" content. After that state write succeeds, call kirocrew-cron::cron_trigger exactly"
-        f" once with job_id='{_advance_job_id()}'; never trigger another job. Trigger failure"
-        f" does NOT undo or rewrite the terminal status/outbox record: the 120-second polling"
-        f" reconciliation will canonicalize and consume it. Never claim the trigger succeeded"
-        f" unless the tool call did."
+        f" content. Then STOP: writing this fact is your ENTIRE responsibility for advancing."
+        f" Do NOT call cron_trigger or otherwise poke the scheduler—the bus is the sole mover"
+        f" and a neutral observer (the app backend's state-file watch) wakes it the instant your"
+        f" write lands; if that observer is down, the 120-second poll reconciles the same record."
+        f" Never claim the card advanced: you only published the fact."
     )
 
 

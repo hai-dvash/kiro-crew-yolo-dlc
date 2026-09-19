@@ -102,3 +102,100 @@ def test_drain_stderr_captures_late_url_and_fires_callback():
     assert state.url == "https://late-banner-xyz.trycloudflare.com"
     assert state.url_captured_at is not None
     assert fired == ["https://late-banner-xyz.trycloudflare.com"]  # fired exactly once
+
+
+class _DeadProc:
+    """A process that has already exited (returncode set) — simulates cloudflared dying."""
+    returncode = 1
+    pid = -1
+
+
+class _LiveProc:
+    returncode = None
+    pid = -1
+
+
+def _fast_supervisor(monkeypatch):
+    """Shrink the supervisor's timers so a test cycle runs in milliseconds."""
+    monkeypatch.setattr(tunnel, "_SUPERVISE_POLL_SECS", 0.01)
+    monkeypatch.setattr(tunnel, "_SUPERVISE_BACKOFF_MIN", 0.01)
+    monkeypatch.setattr(tunnel, "_SUPERVISE_BACKOFF_MAX", 0.05)
+
+
+def test_supervisor_respawns_on_unexpected_death(monkeypatch):
+    """When cloudflared dies on its own, the supervisor calls _respawn (the self-heal)."""
+    _fast_supervisor(monkeypatch)
+    respawns: list[int] = []
+
+    async def _fake_respawn(state):
+        respawns.append(1)
+        state.proc = _LiveProc()  # respawn succeeds → healthy again
+        return True
+
+    monkeypatch.setattr(tunnel, "_respawn", _fake_respawn)
+
+    async def scenario():
+        state = tunnel._TunnelState()
+        state.port = 8765
+        state.proc = _DeadProc()  # already dead → supervisor should heal it
+        task = asyncio.create_task(tunnel._supervise(state))
+        # let a few poll cycles run, then disarm
+        await asyncio.sleep(0.1)
+        state._stopping = True
+        task.cancel()
+        with __import__("contextlib").suppress(asyncio.CancelledError):
+            await task
+        return respawns
+
+    got = asyncio.run(scenario())
+    assert len(got) >= 1  # at least one respawn happened
+
+
+def test_supervisor_does_not_respawn_after_deliberate_stop(monkeypatch):
+    """A deliberate stop() sets _stopping; the supervisor must NOT respawn a torn-down tunnel."""
+    _fast_supervisor(monkeypatch)
+    respawns: list[int] = []
+
+    async def _fake_respawn(state):
+        respawns.append(1)
+        return True
+
+    monkeypatch.setattr(tunnel, "_respawn", _fake_respawn)
+
+    async def scenario():
+        state = tunnel._TunnelState()
+        state.port = 8765
+        state.proc = _DeadProc()
+        state._stopping = True  # user already stopped it
+        task = asyncio.create_task(tunnel._supervise(state))
+        await asyncio.sleep(0.1)
+        task.cancel()
+        with __import__("contextlib").suppress(asyncio.CancelledError):
+            await task
+        return respawns
+
+    got = asyncio.run(scenario())
+    assert got == []  # never respawned a deliberately-stopped tunnel
+
+
+def test_stop_disarms_supervisor(monkeypatch):
+    """stop() sets _stopping and cancels the supervisor task, leaving nothing running."""
+    async def scenario():
+        state = tunnel._TunnelState()
+        state._supervisor = asyncio.create_task(asyncio.sleep(3600))  # a pretend long-lived loop
+        result = await tunnel.stop(state)
+        assert state._stopping is True
+        assert state._supervisor is None
+        return result
+
+    result = asyncio.run(scenario())
+    assert result["running"] is False
+
+
+def test_status_reports_supervision_fields():
+    state = tunnel._TunnelState()
+    state.respawns = 3
+    s = tunnel.status(state)
+    assert s["respawns"] == 3
+    assert "supervised" in s
+    assert "last_respawn_at" in s

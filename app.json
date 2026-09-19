@@ -48,7 +48,6 @@
       "kirocrew-core::task_run",
       "kirocrew-cron::cron_add",
       "kirocrew-cron::cron_list",
-      "kirocrew-cron::cron_trigger",
       "kirocrew-cron::cron_pause",
       "kirocrew-cron::cron_resume",
       "kirocrew-cron::cron_remove"

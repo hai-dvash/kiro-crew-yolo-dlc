@@ -1,6 +1,7 @@
 import { useAppApi, useNavigate, useChatLauncher } from '@kirocrew/app-sdk'
 import { Card, CardTitle, PageHeader, StatCard } from '@kirocrew/app-sdk/ui'
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { createPortal } from 'react-dom'
 import { appendLiveTail, beginLiveThinking, finishLiveTail, projectProgressTrail } from './liveTail.js'
 import { buildGateInspection, gateValue } from './gateInspection.js'
 import { DURABLE_STATE, readCurrentState, resolveStateFile } from './statePath.js'
@@ -286,6 +287,37 @@ const DEPTH_TOKEN: Record<Depth, string> = {
 }
 
 type ViewMode = 'pipeline' | 'workspace' | 'crew' | 'status'
+
+// Themed confirm modal — replaces the native window.confirm (off-theme, inconsistent).
+// Imperative promise API via useConfirm(): `if (await confirm({ message })) { ... }`.
+type ConfirmOpts = { title?: string; message: string; confirmLabel?: string; cancelLabel?: string; danger?: boolean }
+function useConfirm(): [(opts: ConfirmOpts) => Promise<boolean>, React.ReactNode] {
+  const [state, setState] = useState<(ConfirmOpts & { resolve: (v: boolean) => void }) | null>(null)
+  const confirm = useCallback((opts: ConfirmOpts) => new Promise<boolean>(resolve => {
+    setState({ ...opts, resolve })
+  }), [])
+  const done = useCallback((v: boolean) => { state?.resolve(v); setState(null) }, [state])
+  const node = state ? (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)' }}
+      onMouseDown={e => { if (e.currentTarget === e.target) done(false) }}>
+      <section role="dialog" aria-modal="true" className="flex flex-col rounded-xl overflow-hidden"
+        style={{ width: 'min(420px, calc(100vw - 32px))', background: 'var(--bg-elevated, var(--bg))', border: '1px solid var(--border-strong, var(--border))', boxShadow: '0 28px 90px rgba(0,0,0,0.5)' }}>
+        <div className="px-5 pt-4 pb-3">
+          {state.title && <h2 className="text-[14px] font-semibold mb-1" style={{ color: 'var(--text-strong, var(--text))' }}>{state.title}</h2>}
+          <div className="text-[12px]" style={{ color: 'var(--text)' }}>{state.message}</div>
+        </div>
+        <footer className="px-5 py-3 flex items-center justify-end gap-2" style={{ borderTop: '1px solid var(--border)' }}>
+          <button onClick={() => done(false)} className="text-[12px] px-3 py-1.5 rounded-md"
+            style={{ color: 'var(--muted)', border: '1px solid var(--border)' }}>{state.cancelLabel || 'Cancel'}</button>
+          <button onClick={() => done(true)} className="text-[12px] px-3 py-1.5 rounded-md font-semibold"
+            style={{ background: state.danger ? 'var(--danger, #e66)' : 'var(--accent)', color: 'var(--bg)' }}>{state.confirmLabel || 'Confirm'}</button>
+        </footer>
+      </section>
+    </div>
+  ) : null
+  return [confirm, node]
+}
 
 // Small pill helper using theme tokens.
 function Pill({ color, children, title, onClick, active }: {
@@ -1121,36 +1153,76 @@ function CardDrawer({ card, cardStatus, effectiveCapability, onClose }: {
 
 function MaintenanceMenu({ onRequest }: { onRequest: (kind: string, text: string) => void }) {
   const [open, setOpen] = useState(false)
-  const act = (kind: string) => {
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null)
+  const [confirm, confirmNode] = useConfirm()
+  // Maintain actions FIRE on card state — no "why did this happen?" prompt. A themed confirm
+  // guards the mutating ones; the orchestrator raises a decision downstream if it needs input.
+  const act = async (kind: string) => {
+    console.info('[dlc-yolo maintain] click:', kind)
     const meta = REQUEST_META[kind]
-    let text = ''
-    if (meta.reasonRequired) {
-      const r = window.prompt(meta.confirm)          // reason required (back-step/park)
-      if (!r || !r.trim()) return
-      text = r.trim()
-    } else if (!window.confirm(meta.confirm)) {        // concise confirm / cancel warning
-      return
-    }
-    onRequest(kind, text)
     setOpen(false)
+    const ok = await confirm({
+      message: meta.confirm,
+      confirmLabel: meta.label,
+      danger: kind === 'request:cancel',
+    })
+    if (!ok) { console.info('[dlc-yolo maintain] cancelled'); return }
+    console.info('[dlc-yolo maintain] confirmed -> onRequest', kind)
+    onRequest(kind, '')  // reason-free: next step decides given card state
   }
+  // The menu renders in a PORTAL to document.body (below), NOT inside the card — because the card
+  // root is `isolation:isolate`, an in-card absolute dropdown is trapped in the card's stacking
+  // context and a later sibling card paints over it (the "z-index still fucked in maintain" bug).
+  // A body portal + position:fixed anchored to the button's rect escapes every ancestor stacking
+  // context and overflow clip.
+  const toggle = () => {
+    setOpen(o => {
+      const next = !o
+      if (next && btnRef.current) {
+        const r = btnRef.current.getBoundingClientRect()
+        setMenuPos({ top: r.bottom + 4, left: r.left })
+      }
+      return next
+    })
+  }
+  // Close on scroll/resize (the fixed menu would otherwise detach from its anchor).
+  useEffect(() => {
+    if (!open) return
+    const close = () => setOpen(false)
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('resize', close)
+    return () => {
+      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('resize', close)
+    }
+  }, [open])
   return (
     <div className="relative inline-block">
-      <button className="text-[10px] hover:underline" style={{ color: 'var(--muted)' }}
-        title="Request re-spec / retry / back-step / park / cancel" onClick={() => setOpen(o => !o)}>
+      {confirmNode}
+      <button ref={btnRef} className="text-[10px] hover:underline" style={{ color: 'var(--muted)' }}
+        title="Request re-spec / retry / back-step / park / cancel" onClick={toggle}>
         🔧 maintain
       </button>
-      {open && (
-        <div className="absolute z-20 mt-1 rounded-md py-1 text-[11px]"
-          style={{ background: 'var(--bg-elevated, var(--bg))', border: '1px solid var(--border-strong, var(--border))', boxShadow: '0 8px 28px rgba(0,0,0,0.4)', minWidth: '120px' }}>
-          {Object.entries(REQUEST_META).map(([kind, meta]) => (
-            <button key={kind} className="block w-full text-left px-3 py-1 hover:opacity-80"
-              style={{ color: kind === 'request:cancel' ? 'var(--danger, #e66)' : 'var(--text)' }}
-              onClick={() => act(kind)}>
-              {meta.label}
-            </button>
-          ))}
-        </div>
+      {open && menuPos && createPortal(
+        <>
+          {/* click-away backdrop (transparent, full-viewport) */}
+          <div style={{ position: 'fixed', inset: 0, zIndex: 2147483646 }}
+            onMouseDown={() => setOpen(false)} />
+          <div className="rounded-md py-1 text-[11px]"
+            style={{ position: 'fixed', top: menuPos.top, left: menuPos.left, zIndex: 2147483647,
+              background: 'var(--bg-elevated, var(--bg))', border: '1px solid var(--border-strong, var(--border))',
+              boxShadow: '0 8px 28px rgba(0,0,0,0.4)', minWidth: '120px' }}>
+            {Object.entries(REQUEST_META).map(([kind, meta]) => (
+              <button key={kind} className="block w-full text-left px-3 py-1 hover:opacity-80"
+                style={{ color: kind === 'request:cancel' ? 'var(--danger, #e66)' : 'var(--text)' }}
+                onClick={() => act(kind)}>
+                {meta.label}
+              </button>
+            ))}
+          </div>
+        </>,
+        document.body,
       )}
     </div>
   )
@@ -1327,6 +1399,7 @@ function PipelineCardItem({ card, config, isGate, cardStatus, effectiveCapabilit
   return (
     <div
       id={`card-${card.id}`}
+      data-card-root
       className="rounded-lg p-2.5 transition-all duration-150"
       style={{
         background: 'var(--card)',
@@ -1334,6 +1407,15 @@ function PipelineCardItem({ card, config, isGate, cardStatus, effectiveCapabilit
         border: '1px solid var(--border)',
         borderLeft: `2px solid ${accent}`,
         position: 'relative',
+        // Each card is its own stacking context. Sibling cards in a column share zIndex:1, so
+        // without isolation their stacking falls back to DOM order and a card's absolutely-
+        // positioned children (the live-wing handle/panel at left:100%, ~46px tall, plus the
+        // panel's drop-shadow) composite against neighbouring cards — a lower card paints over
+        // the previous card's handle/shadow region, reading as vertical overlap (most visible in
+        // the ✅ Done column, where retired cards keep a producer session so the wing still
+        // mounts). `isolation:isolate` scopes every card's descendants to its own box so nothing
+        // can bleed onto a sibling; the column's gap-2 then separates them cleanly.
+        isolation: 'isolate',
         zIndex: 1,
       }}
     >
@@ -3182,7 +3264,7 @@ function WingLiveBody({ tail, active }: { tail: string; active: boolean }) {
         style={{
           fontSize: '12px', lineHeight: '1.55',
           color: '#e8eef5',
-          fontFamily: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
+          fontFamily: '"DejaVu Sans Mono", "Ubuntu Mono", "SF Mono", "JetBrains Mono", Consolas, "Liberation Mono", monospace',
           whiteSpace: 'pre-wrap',
           maxHeight: '100%',
           WebkitMaskImage: empty ? undefined : fade,
@@ -3351,7 +3433,7 @@ export default function SdlcPipeline() {
   useEffect(() => {
     // eslint-disable-next-line no-console
     // eslint-disable-next-line no-console
-    console.info('[dlc-yolo] UI bundle build: v35 (worker-model true-order wing). prefers-reduced-motion:',
+    console.info('[dlc-yolo] UI bundle build: v40 (themed confirm modal, reason-free maintain). prefers-reduced-motion:',
       (typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches)
         ? 'REDUCE — drawer re-asserted, should play'
         : 'no-preference')
@@ -3376,6 +3458,53 @@ export default function SdlcPipeline() {
   const [operationsOpen, setOperationsOpen] = useState(false)
   const [liveSpawns, setLiveSpawns] = useState<{ id: string; task: string; status?: string }[]>([])
   const kanbanRef = useRef<HTMLDivElement>(null)
+  // Drag-to-pan ("grab hand"): press on EMPTY board space and drag to scroll the
+  // kanban horizontally. A drag that starts on an interactive control (button, a,
+  // input, a pill, or inside a card) is left alone so it never fights a click.
+  useEffect(() => {
+    const el = kanbanRef.current
+    if (!el) return
+    let dragging = false
+    let startX = 0
+    let startScroll = 0
+    let moved = 0
+    const INTERACTIVE = 'button, a, input, textarea, select, [role="button"], .pill, [data-card-root], [data-no-pan]'
+    const onDown = (e: PointerEvent) => {
+      if (e.button !== 0) return
+      const target = e.target as HTMLElement
+      if (target.closest(INTERACTIVE)) return  // let real interactions through
+      dragging = true
+      moved = 0
+      startX = e.clientX
+      startScroll = el.scrollLeft
+      el.style.cursor = 'grabbing'
+      el.style.userSelect = 'none'
+    }
+    const onMove = (e: PointerEvent) => {
+      if (!dragging) return
+      const dx = e.clientX - startX
+      moved = Math.max(moved, Math.abs(dx))
+      el.scrollLeft = startScroll - dx
+      if (moved > 3) el.setPointerCapture?.(e.pointerId)
+    }
+    const end = () => {
+      if (!dragging) return
+      dragging = false
+      el.style.cursor = 'grab'
+      el.style.userSelect = ''
+    }
+    el.style.cursor = 'grab'
+    el.addEventListener('pointerdown', onDown)
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', end)
+    window.addEventListener('pointercancel', end)
+    return () => {
+      el.removeEventListener('pointerdown', onDown)
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', end)
+      window.removeEventListener('pointercancel', end)
+    }
+  }, [loading, view])
   const liveSpawnsAbsent = useRef(false)  // suppress live_spawns polling once found absent (no cron yet)
   const stateAuthorityResolved = useRef(false)
   const linkedSlotsRef = useRef<Set<string>>(new Set())
@@ -3894,12 +4023,13 @@ export default function SdlcPipeline() {
     const id = newRequestId()  // generated ONCE before the read/re-read (dedupe by id)
     mutateState(state => {
       const card = state.cards.find(c => c.id === cardId)
-      if (!card) return
+      if (!card) { console.warn('[dlc-yolo maintain] card not found in state:', cardId); return }
       let req
       try { req = buildRequest({ id, kind, text, card, now }) }
-      catch { return }  // validation failure (e.g. missing required reason) — no-op
+      catch (be) { console.warn('[dlc-yolo maintain] buildRequest threw:', be); return }  // validation failure — no-op
       card.interjection = appendRequest(card.interjection, req)
       card.updated_at = now
+      console.info('[dlc-yolo maintain] appended request to card', cardId, '- interjection count now', (card.interjection || []).length)
     })
   }, [mutateState])
 
@@ -4294,7 +4424,8 @@ export default function SdlcPipeline() {
   return (
     <>
       <style>{`
-.dlc-yolo-root, .dlc-yolo-root * { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+.dlc-yolo-root, .dlc-yolo-root * { font-family: "Ubuntu", "Ubuntu Sans", "DejaVu Sans", "Segoe UI", "Inter", Roboto, "Helvetica Neue", Arial, sans-serif; font-weight: 400; }
+.dlc-yolo-root .pill, .dlc-yolo-root button { font-weight: 500; }
 @keyframes dlcCursorBlink { 0%,49% { opacity: 1; } 50%,100% { opacity: 0; } }
 .dlc-wing-slide { transition: transform 420ms cubic-bezier(.32,.72,.28,1); }
 .dlc-cursor { animation: dlcCursorBlink 1.1s step-end infinite; }
@@ -4536,8 +4667,10 @@ export default function SdlcPipeline() {
             {loading ? (
               <div className="text-sm p-3" style={{ color: 'var(--muted)' }}>Loading pipeline…</div>
             ) : (
-              <div ref={kanbanRef} className="flex gap-3 overflow-x-auto pb-4">
-                {view === 'pipeline' && activeSteps.map(step => (
+              <div ref={kanbanRef} className="flex gap-3 overflow-x-auto pb-4 pr-4">
+                {/* pr-4: the last column must not sit flush against the overflow-x-auto clip edge,
+                    or a card scrolled to the end is sliced by the scroll boundary (the "pills cut
+                    at the right edge" bug — confirmed via headless render). */}                {view === 'pipeline' && activeSteps.map(step => (
                   <ColumnGroup key={step.id} id={`stage-col-${step.id}`} title={step.name} count={(cardsByStage[step.id] || []).length}>
                     {(cardsByStage[step.id] || []).map(card => <PipelineCardItem key={card.id} {...cardProps(card)} />)}
                   </ColumnGroup>

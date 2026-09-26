@@ -546,6 +546,41 @@ class TestExecutionEnvelopeObservation:
         # …with the back-step decision fallback and no-spam guard.
         assert "kind='back-step'" in msg
 
+    def test_dispatch_design_seed_carries_topology_rubric_and_escalation(
+            self, advance_mod, mock_ctx, state_factory, card_factory, write_state, read_state,
+            monkeypatch):
+        # topology-decision-rubric: the step seed for a topology-live phase (intent/requirements/
+        # design) must carry the PRINCIPLED selection rubric (coupling/independence/difficulty/
+        # reversibility/integration-cost) AND the bounded known-unknowns escalation predicate — so
+        # the step decides by principle, not vibes-under-a-depth-cap, and escalates only for a named
+        # known-unknown (incl. the ratifiable over-budget request).
+        mock_ctx.call_tool.return_value = {"id": "job-rubric"}
+        pipeline = self._pipeline()
+        pipeline["steps"][2]["agent"] = {"name": "design-agent"}
+        card = card_factory(
+            stage="design", step_status={}, target_branch="dlc/card-1",
+            worktree_lease={
+                "lease_id": "lease-rub", "path": "/worktrees/card-1",
+                "repo_path": "/repo", "branch": "dlc/card-1", "base_commit": "abc",
+                "owner_card": "card-1", "status": "active", "locked": True,
+            },
+        )
+        monkeypatch.setattr(
+            advance_mod, "_ensure_worktree_lease", lambda *_args, **_kwargs: (False, None))
+        _run(advance_mod, mock_ctx, write_state,
+             state_factory(cards=[card], pipelines=[pipeline]))
+
+        msg = next(call.args[2] for call in mock_ctx.call_tool.call_args_list
+                   if call.args[:2] == ("kirocrew-cron", "cron_add"))["message"]
+        assert "TOPOLOGY DECISION RUBRIC" in msg
+        assert "COUPLING" in msg and "keep-unified" in msg
+        assert "child COUNT = the number of independent scopes" in msg
+        # bounded escalation ladder — the enumerated known-unknowns
+        assert "KNOWN-UNKNOWN" in msg
+        assert "CROSS-CARD" in msg
+        assert "over_budget:true" in msg
+        assert "escalate merely because a choice exists" in msg
+
     def test_dispatch_requirements_seed_omits_backstep_proposer(
             self, advance_mod, mock_ctx, state_factory, card_factory, write_state, read_state,
             monkeypatch):
@@ -2241,6 +2276,54 @@ class TestBudgetGuard:
         assert out["block_reason"]["design"].startswith("budget:")
         # children are NEVER deleted
         assert len(out["child_tickets"]) == 4
+
+    def test_over_budget_proposal_with_reason_is_ratifiable_not_blocked(
+            self, advance_mod, mock_ctx, state_factory, card_factory, write_state, read_state):
+        # topology-decision-rubric authority model: depth budget is a SOFT default. An UNAUTHORIZED
+        # over-budget fan-out that carries over_budget:true + a reason is a ratifiable REQUEST — it
+        # must be held proposal-awaiting-orchestrator, NOT hard-blocked.
+        card = card_factory(
+            stage="design", depth="standard",
+            child_tickets=[{"issue": i, "status": "open"} for i in range(5)],  # cap 3 → over
+            topology={"schema_version": 1, "action": "fan-out",
+                      "over_budget": True, "reason": "5 truly independent subsystems",
+                      "status": "proposal-awaiting-orchestrator", "raised_by": "step:design"},
+        )
+        _run(advance_mod, mock_ctx, write_state, state_factory(cards=[card]))
+        out = read_state()["cards"][0]
+        assert out["step_status"].get("design") != "blocked"          # not hard-blocked
+        assert out["topology"]["status"] == "proposal-awaiting-orchestrator"
+        assert out["topology"]["over_budget_request"]["proposed_children"] == 5
+        assert out["topology"]["over_budget_request"]["budget"] == 3
+
+    def test_authorized_over_budget_fanout_proceeds(
+            self, advance_mod, mock_ctx, state_factory, card_factory, write_state, read_state):
+        # Once ratified (authority stamped), an over-budget fan-out proceeds past the cap — the
+        # deviation was explicitly authorized, not a silent overrun.
+        card = card_factory(
+            stage="design", depth="standard",
+            child_tickets=[{"issue": i, "status": "open"} for i in range(5)],
+            topology={"schema_version": 1, "action": "fan-out", "authority": "orchestrator",
+                      "over_budget": True, "reason": "ratified: 5 independent subsystems"},
+        )
+        _run(advance_mod, mock_ctx, write_state, state_factory(cards=[card]))
+        out = read_state()["cards"][0]
+        assert out["step_status"].get("design") != "blocked"
+        assert out["topology"].get("status") != "blocked-budget"
+
+    def test_over_budget_without_reason_still_blocks(
+            self, advance_mod, mock_ctx, state_factory, card_factory, write_state, read_state):
+        # An over-budget fan-out with no reason (and no authority) is still a budget breach — a
+        # silent overrun must not slip through; the block hint names the ratifiable path.
+        card = card_factory(
+            stage="design", depth="standard",
+            child_tickets=[{"issue": i, "status": "open"} for i in range(5)],
+            topology={"schema_version": 1, "action": "fan-out", "over_budget": True},  # no reason
+        )
+        _run(advance_mod, mock_ctx, write_state, state_factory(cards=[card]))
+        out = read_state()["cards"][0]
+        assert out["step_status"]["design"] == "blocked"
+        assert "topology.over_budget=true" in out["block_reason"]["design"]
 
     def test_unlimited_budget_never_blocks(self, advance_mod, mock_ctx, state_factory,
                                            card_factory, write_state, read_state):

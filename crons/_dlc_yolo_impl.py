@@ -9277,15 +9277,40 @@ def _run_advance_passes(ctx, state: dict, now: str, cycle: dict) -> bool:
         fanout_budget = _resolve_budget(state, parent, parent_pipeline).get("max_child_cards")
         if isinstance(fanout_budget, int) and not isinstance(fanout_budget, bool) \
                 and len(kids) > fanout_budget:
-            parent_stage = parent.get("stage")
-            parent.setdefault("step_status", {})[parent_stage] = "blocked"
-            parent.setdefault("block_reason", {})[parent_stage] = (
-                f"budget: fan-out {len(kids)} child cards exceeds "
-                f"max_child_cards={fanout_budget} — blocked before child materialization")
-            if declared_topology:
-                declared_topology["status"] = "blocked-budget"
-            changed = True
-            continue
+            # Depth's budget is a SOFT DEFAULT (topology-decision-rubric authority model), not a hard
+            # floor. Three cases for an over-budget fan-out:
+            #   1) The proposal is a ratifiable over-budget REQUEST (unauthorized + over_budget:true +
+            #      a reason): hold it proposal-awaiting-orchestrator so the orch/human can ratify the
+            #      justified deviation — do NOT hard-block a principled request.
+            #   2) It is already AUTHORIZED (orch/resolved-decision/autonomous-policy stamped it):
+            #      the deviation was explicitly ratified → let it proceed past the cap.
+            #   3) Anything else (an over-budget fan-out with no reason and no authority): block as
+            #      before — a silent overrun is still a budget breach.
+            _over = bool(declared_topology.get("over_budget")) and \
+                bool(str(declared_topology.get("reason") or "").strip())
+            _authed = _scheduler_topology_authorized(parent, declared_topology)
+            if _authed:
+                pass  # ratified deviation — fall through to normal materialization below
+            elif _over:
+                if declared_topology.get("status") != "proposal-awaiting-orchestrator":
+                    declared_topology["status"] = "proposal-awaiting-orchestrator"
+                    changed = True
+                if "over_budget_request" not in declared_topology:
+                    declared_topology["over_budget_request"] = {
+                        "proposed_children": len(kids), "budget": fanout_budget}
+                    changed = True
+                continue
+            else:
+                parent_stage = parent.get("stage")
+                parent.setdefault("step_status", {})[parent_stage] = "blocked"
+                parent.setdefault("block_reason", {})[parent_stage] = (
+                    f"budget: fan-out {len(kids)} child cards exceeds "
+                    f"max_child_cards={fanout_budget} — blocked before child materialization "
+                    f"(set topology.over_budget=true + a reason to request a ratifiable deviation)")
+                if declared_topology:
+                    declared_topology["status"] = "blocked-budget"
+                changed = True
+                continue
         # Only a parent still RUNNING its ladder can be freshly decomposed. A parent already at the
         # terminal stage (done) / retired is the retire-gate's business, not ingestion's — do not
         # retroactively re-decompose it (that would strip its lifecycle handling). Ingestion fires
@@ -9612,17 +9637,37 @@ def _run_advance_passes(ctx, state: dict, now: str, cycle: dict) -> bool:
         bud = _resolve_budget(state, card, pl)
         stage = card.get("stage")
         breach = None
+        topo = card.get("topology") if isinstance(card.get("topology"), dict) else {}
 
         mcc = bud.get("max_child_cards")
         if isinstance(mcc, int) and len(kids) > mcc:
-            breach = f"fan-out {len(kids)} child cards exceeds max_child_cards={mcc}"
+            # Depth budget is a SOFT default (topology-decision-rubric). An over-budget fan-out that
+            # is (a) already AUTHORIZED (ratified deviation) proceeds; (b) an UNAUTHORIZED proposal
+            # carrying over_budget:true + a reason is a ratifiable REQUEST → hold it awaiting the
+            # orchestrator, do NOT hard-block; (c) anything else is a real breach.
+            _authed = _scheduler_topology_authorized(card, topo) if topo else False
+            _over_req = bool(topo.get("over_budget")) and bool(str(topo.get("reason") or "").strip())
+            if _authed:
+                pass  # ratified — no breach
+            elif _over_req:
+                if topo.get("status") != "proposal-awaiting-orchestrator":
+                    topo["status"] = "proposal-awaiting-orchestrator"
+                    changed = True
+                if "over_budget_request" not in topo:
+                    topo["over_budget_request"] = {"proposed_children": len(kids), "budget": mcc}
+                    changed = True
+                continue  # ratifiable request — never block
+            else:
+                breach = (f"fan-out {len(kids)} child cards exceeds max_child_cards={mcc}"
+                          f" (set topology.over_budget=true + a reason to request a ratifiable deviation)")
 
         if breach is None:
             ceil = bud.get("effort_ceiling")
             scope = (card.get("effort") or {}).get("scope")
             if isinstance(ceil, int) and isinstance(scope, dict) and scope:
                 try:
-                    spent = sum(v for v in scope.values() if isinstance(v, (int, float)))
+                    spent = sum(p for p in (_scope_points(v) for v in scope.values())
+                                if p is not None)
                 except Exception:
                     spent = 0
                 if spent > ceil:
@@ -10173,6 +10218,44 @@ def _run_advance_passes(ctx, state: dict, now: str, cycle: dict) -> bool:
                             f" metadata is absent, raise a topology/capability decision and block"
                             f" rather than silently fanning out or keeping one overloaded card."
                             if stage in ("intent", "requirements") else "")
+                        # TOPOLOGY SELECTION RUBRIC + ESCALATION LADDER (topology-decision-rubric).
+                        # Replaces "propose ≤N children under the depth cap" (vibes-under-a-cap) with a
+                        # principled CHOICE of action + count. Three-layer model: (1) the step decides
+                        # by rubric (decentralized), (2) it escalates to the orchestrator ONLY for an
+                        # enumerated known-unknown, (3) a human owns the true unknown. Authority model
+                        # (agreed): depth's budget is a SOFT DEFAULT, not a hard floor — the step may
+                        # PROPOSE exceeding it WITH a reason (over_budget:true), and the orchestrator or
+                        # a resolved decision ratifies; the step still never self-authorizes. Scoped to
+                        # the phases where topology choice is live.
+                        topology_rubric_line = (
+                            f" TOPOLOGY DECISION RUBRIC: choose the card.topology action by PRINCIPLE,"
+                            f" not by the depth cap. Signals → action: tight data/state COUPLING between"
+                            f" sub-parts (splitting costs more integration than parallelism saves) →"
+                            f" keep-unified; genuinely INDEPENDENT scopes with their own files/tests →"
+                            f" fan-out, and set the child COUNT = the number of independent scopes you"
+                            f" actually found (not the budget number); a sub-part that needs its own"
+                            f" design/decision and would block this card → park it (dlc-backlog), do not"
+                            f" stall; this phase's scope ≫ its predecessor → back-step; you over-split"
+                            f" earlier and coupling emerged → unify. Weight the call by DIFFICULTY (hard/"
+                            f" novel/visual work deserves more isolation + a note that it may need"
+                            f" stronger routing), REVERSIBILITY (real tickets/branches are costly to"
+                            f" unwind — prefer the smaller reversible move when unsure), and INTEGRATION"
+                            f" COST (more children = more fan-in surface). Write your chosen action as a"
+                            f" card.topology PROPOSAL (schema_version={_SCHEDULER_SCHEMA_VERSION},"
+                            f" status='proposal-awaiting-orchestrator', reason='<why>', raised_by="
+                            f"'step:{stage}', OMIT authority — you never self-authorize)."
+                            f" ESCALATE TO THE ORCHESTRATOR (raise a card.decisions[] fork with"
+                            f" structured options[] AND leave the topology proposal unauthorized) ONLY"
+                            f" for a KNOWN-UNKNOWN — one of: (a) CROSS-CARD coupling (the split touches"
+                            f" scope another live card owns — you cannot see the whole pipeline);"
+                            f" (b) the principled split needs MORE children/effort than depth allows"
+                            f" (set over_budget:true + proposed_children/proposed_effort + reason — a"
+                            f" ratifiable request, NOT a silent overrun); (c) IRREVERSIBLE / high"
+                            f" blast-radius fan-out; (d) CONFLICTING or failed required children at"
+                            f" fan-in; (e) genuinely LOW CONFIDENCE in your independence/coupling read"
+                            f" (say so, set confidence). For everything else the rubric resolves, decide"
+                            f" it yourself and propose — do not escalate merely because a choice exists."
+                            if stage in ("intent", "requirements", "design") else "")
                         # SCOPE-GROWTH BACK-STEP PROPOSER (leg #2 of the back-step machinery —
                         # closes the Step Review Contract gap where the step-agent was never TOLD to
                         # propose a back-step). The deterministic HB1 §3.1 backstop reads
@@ -10351,7 +10434,7 @@ def _run_advance_passes(ctx, state: dict, now: str, cycle: dict) -> bool:
                                  f"{card.get('id')} in repo {(card.get('source') or {}).get('repo')}. "
                                  f"Effective modes — trust={trust}, depth={depth}, capability={profile}."
                                  f"{_step_request_instruction(step)}"
-                                 f"{crew_line}{decomp_line}{backstep_line}{branch_line}{receipt_line}"
+                                 f"{crew_line}{decomp_line}{topology_rubric_line}{backstep_line}{branch_line}{receipt_line}"
                                  f"{control_line}{result_record_line}{result_line} "
                                  f"Follow the pipeline-workflow skill and PRODUCE the step's "
                                  f"artifact (code where applicable). Follow the DELEGATION directive "

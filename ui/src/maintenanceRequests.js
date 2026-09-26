@@ -13,8 +13,8 @@ export const TEXT_MAX = 500  // bounded user rationale
 export const REQUEST_META = {
   'request:retry':     { label: 'Retry step',   reasonRequired: false, confirm: 'Re-run this failed step?' },
   'request:re-spec':   { label: 'Re-spec',      reasonRequired: false, confirm: 'Ask the orchestrator to re-scope this card?' },
-  'request:back-step': { label: 'Back-step',    reasonRequired: true,  confirm: 'Propose stepping this card back a level? A reason is required.' },
-  'request:park':      { label: 'Park',         reasonRequired: true,  confirm: 'Park this card to the backlog? A reason is required.' },
+  'request:back-step': { label: 'Back-step',    reasonRequired: false, confirm: 'Propose stepping this card back a level?' },
+  'request:park':      { label: 'Park',         reasonRequired: false, confirm: 'Park this card to the backlog?' },
   'request:cancel':    { label: 'Cancel',       reasonRequired: false,
     confirm: 'Cancel cooperatively: writes are revoked, the live turn may NOT stop immediately, and the permit/worktree are retained until terminal observation. Continue?' },
 }

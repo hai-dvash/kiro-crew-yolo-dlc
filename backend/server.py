@@ -491,7 +491,11 @@ def build_app() -> web.Application:
     autosync = _load_autosync_module()
     app = web.Application(
         middlewares=[_proxy_auth_middleware],
-        client_max_size=routes.webhook.MAX_BODY_BYTES + routes.webhook.READ_CHUNK_BYTES,
+        # client_max_size must cover the LARGEST body any route accepts. The state-write route
+        # (_handle_state_write) takes the full state document, which grows past the webhook-sized
+        # 320KB cap (a 526KB state 413'd at the app boundary before the handler ran). Size it to the
+        # state-write bound + a chunk; the handler still enforces MAX_STATE_WRITE_REQUEST_BYTES.
+        client_max_size=routes.MAX_STATE_WRITE_REQUEST_BYTES + routes.webhook.READ_CHUNK_BYTES,
     )
     app["_dlc_proxy_secret"] = os.environ.get("KIROCREW_PROXY_SECRET", "")
     app["_dlc_routes_mod"] = routes

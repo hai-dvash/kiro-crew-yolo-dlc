@@ -80,6 +80,28 @@ test('projectProgressTrail returns null for empty/malformed trails', () => {
   assert.equal(projectProgressTrail({ lines: [{ seq: 1, note: '' }] }), null)
 })
 
+test('projectProgressTrail orders colliding seqs by timestamp (coordinator vs crew-fold)', () => {
+  // The agent's own checkpoints and the backend crew-fold both append to step_progress and are
+  // NOT seq-synchronized, so a seq COLLISION is possible. A bare (seq - seq) sort would leave
+  // these in unstable/insertion order; the `at` tiebreak must restore true wall-clock order.
+  const entry = { lines: [
+    { seq: 2, at: '2026-09-26T17:00:03Z', phase: 'crew', note: 'crew: later fold' },
+    { seq: 1, at: '2026-09-26T17:00:00Z', phase: 'grounding', note: 'coordinator: read repo' },
+    { seq: 2, at: '2026-09-26T17:00:01Z', phase: 'dispatch', note: 'coordinator: fan out' },
+  ] }
+  const v = projectProgressTrail(entry)
+  // seq 1 first; then the two seq-2 lines ordered by `at` (01 before 03) — not by array position.
+  assert.equal(v.tail, 'coordinator: read repo · coordinator: fan out · crew: later fold')
+})
+
+test('projectProgressTrail keeps insertion order when seq AND at both tie', () => {
+  const entry = { lines: [
+    { seq: 1, at: '2026-09-26T17:00:00Z', note: 'first' },
+    { seq: 1, at: '2026-09-26T17:00:00Z', note: 'second' },
+  ] }
+  assert.equal(projectProgressTrail(entry).tail, 'first · second')
+})
+
 test('projectProgressTrail bounds the tail to the buffer cap', () => {
   const lines = Array.from({ length: 40 }, (_, i) => ({ seq: i + 1, note: 'x'.repeat(30) }))
   const v = projectProgressTrail({ lines })

@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import {
   DURABLE_STATE,
   STATE_POINTER,
+  STATE_ENDPOINT,
   TMP_STATE,
   readCurrentState,
   resolveStateFile,
@@ -19,6 +20,40 @@ function reader(entries, calls = []) {
     return value
   }
 }
+
+test('uncapped endpoint tier wins when it returns a card-shaped body (permanent ghost fix)', async () => {
+  const state = { cards: [{ id: 'e1' }], pipelines: [{ id: 'pl' }], config: {} }
+  const endpoint = reader(new Map([[STATE_ENDPOINT, state]]))
+  const resolved = await resolveStateFile(reader(new Map()), endpoint)
+  assert.equal(resolved.source, 'endpoint')
+  assert.deepEqual(resolved.data, state)
+})
+
+test('endpoint failure falls through to durable file tier (pre-restart install)', async () => {
+  const state = { cards: [{ id: 'd1' }], pipelines: [] }
+  const endpoint = async () => { throw new Error('404 — route not mounted yet') }
+  const resolved = await resolveStateFile(reader(new Map([[DURABLE_STATE, state]])), endpoint)
+  assert.equal(resolved.source, 'durable')
+  assert.deepEqual(resolved.data, state)
+})
+test('all tiers unreadable returns empty-but-valid state and never throws (ghosting fix)', async () => {
+  // The "pipeline ghosting" bug: real state lived at ~/.dlc-yolo but a stale cached /tmp path 404'd
+  // AND the /tmp fallback read itself threw (no guard) → the throw propagated to fetchCards → the
+  // board blanked with no recovery. resolveStateFile must NEVER throw: when every tier is
+  // unreadable it returns an empty-but-valid payload the board renders as "no cards yet".
+  const calls = []
+  const resolved = await resolveStateFile(reader(new Map(), calls))  // nothing reads
+  assert.equal(resolved.source, 'unresolved')
+  assert.deepEqual(resolved.data, { cards: [], pipelines: [], config: {} })
+  assert.deepEqual(calls, [STATE_POINTER, DURABLE_STATE, TMP_STATE])
+})
+
+test('durable tier used when pointer missing but ~/.dlc-yolo reads', async () => {
+  const state = { cards: [{ id: 'durable-card' }], pipelines: [{ id: 'pl-1' }] }
+  const resolved = await resolveStateFile(reader(new Map([[DURABLE_STATE, state]])))
+  assert.deepEqual(resolved, { path: DURABLE_STATE, data: state, source: 'durable' })
+})
+
 
 test('absolute runtime override wins and returns its state payload', async () => {
   const target = '/srv/dlc-yolo/custom-state.json'

@@ -1261,7 +1261,6 @@ function PipelineCardItem({ card, config, isGate, cardStatus, effectiveCapabilit
     !!ptr.last_response_at && !ptr.chat_disabled_at && !ptr.superseded &&
     (!ptr.last_response_handled_at || ptr.last_response_handled_at < ptr.last_response_at)
   )
-  const [interjectOpen, setInterjectOpen] = useState(false)
   const [interjectText, setInterjectText] = useState('')
   const [inspectionOpen, setInspectionOpen] = useState(false)
   const [decisionModalId, setDecisionModalId] = useState<string | null>(null)
@@ -1288,6 +1287,43 @@ function PipelineCardItem({ card, config, isGate, cardStatus, effectiveCapabilit
   // Any decision still awaiting a human choice (e.g. a depth-driven addendum suggestion)
   const pendingDecisions = (card.decisions || []).filter(d => !d.chosen && !d.resolved_at && (!!d.action || !!d.options))
 
+  // Slide-out live session panel (live-session-wing): a collapsible overlay that extends off the
+  // card's RIGHT edge and hovers ON TOP of neighbouring cards (absolute-positioned, so the grid
+  // never reflows). Expanded via a click on the edge handle; width persists per browser. The panel
+  // is ephemeral — it only renders while the step has a live session (liveView present) and the
+  // whole affordance disappears when the session ends.
+  const [wingOpen, setWingOpen] = useState(false)
+  const [wingDragging, setWingDragging] = useState(false)
+  const [wingWidth, setWingWidth] = useState<number>(() => {
+    const v = Number(typeof localStorage !== 'undefined' && localStorage.getItem('dlc-live-wing-width'))
+    return Number.isFinite(v) && v >= 220 ? v : 320
+  })
+  // The wing renders whenever the card has a CURRENT step session (handle always reachable). When
+  // liveView is present (active stream/trail) it drives the peek; otherwise show the LAST recorded
+  // output for the step so a blocked/idle step is never empty as long as its agent produced work:
+  // prefer the persisted result summary, then the last progress checkpoint, then the step headline.
+  const _wingStepSlot = card.step_sessions?.[card.stage]?.slot_key
+  const _lastOutput = (() => {
+    const sr = card.step_results?.[card.stage]
+    const summary = sr && typeof sr === 'object' && sr.bundle && typeof sr.bundle === 'object'
+      ? sr.bundle.summary : undefined
+    if (typeof summary === 'string' && summary.trim()) return summary
+    const sp = card.step_progress?.[card.stage]
+    const lines = sp && typeof sp === 'object' && Array.isArray(sp.lines) ? sp.lines : []
+    if (lines.length) {
+      const notes = lines.map((l: { note?: string }) => String(l?.note || '')).filter(Boolean)
+      if (notes.length) return notes.join('\n')
+    }
+    const headline = card.step_summaries?.[card.stage]?.headline
+    return typeof headline === 'string' && headline.trim() ? headline : ''
+  })()
+  const wingLive: { stage: string; phase: string; tail: string; buffer?: string; active: boolean; seq: number; slotKey: string; source?: string; onOpen: () => void } | null =
+    liveView || (_wingStepSlot ? {
+      stage: card.stage, phase: 'idle', tail: _lastOutput, buffer: _lastOutput, active: false, seq: 0,
+      slotKey: _wingStepSlot,
+      onOpen: () => navigate(`/chat?sid=${encodeURIComponent(_wingStepSlot)}`),
+    } : null)
+
   return (
     <div
       id={`card-${card.id}`}
@@ -1297,6 +1333,8 @@ function PipelineCardItem({ card, config, isGate, cardStatus, effectiveCapabilit
         color: 'var(--card-fg, var(--text))',
         border: '1px solid var(--border)',
         borderLeft: `2px solid ${accent}`,
+        position: 'relative',
+        zIndex: 1,
       }}
     >
       {(() => {
@@ -1534,7 +1572,7 @@ function PipelineCardItem({ card, config, isGate, cardStatus, effectiveCapabilit
             {onInterject && (
               <button className="mt-1.5 text-[10px] px-2 py-0.5 rounded font-semibold"
                 style={{ background: 'var(--accent)', color: 'var(--bg)' }}
-                onClick={() => setInterjectOpen(true)}>✏️ interject to unblock</button>
+                onClick={() => setWingOpen(true)}>✏️ interject to unblock</button>
             )}
           </div>
         ))
@@ -1593,7 +1631,7 @@ function PipelineCardItem({ card, config, isGate, cardStatus, effectiveCapabilit
               )}
               <button className="px-2 py-0.5 rounded" style={{ color: 'var(--muted)', border: '1px solid var(--border)' }}
                 title="Answer in your own words instead of choosing an option"
-                onClick={() => setInterjectOpen(true)}>✏️ answer in words</button>
+                onClick={() => setWingOpen(true)}>✏️ answer in words</button>
               {!opts.length && (
                 <button className="px-2 py-0.5 rounded font-semibold" style={{ background: 'var(--bg-hover, var(--border))', color: 'var(--accent)' }}
                   onClick={() => onResolveDecision(d.id)}>Acknowledge &amp; continue</button>
@@ -1603,8 +1641,133 @@ function PipelineCardItem({ card, config, isGate, cardStatus, effectiveCapabilit
         )
       })}
 
-      {/* ── Zone: LIVE (streaming peek of the working agent's output — in-card-live-view-spec) ── */}
-      {liveView && <LiveMiniPane live={liveView} />}
+      {/* ── Live session WING (slide-out drawer). ALWAYS MOUNTED when the card has a step session.
+             ARCHITECTURE (fixes the old overlay bug):
+               • A fixed-width CLIP wrapper is anchored at left:100% (flush to the card's RIGHT edge)
+                 with overflow:hidden. Because it starts AT the card's right edge it NEVER overlaps
+                 the card body, whatever it contains.
+               • The PANEL lives inside the clip and translates translateX(-100%)→translateX(0). When
+                 closed it is fully translated OUT of the clip region (to the right of the card, so its
+                 invisible travel never crosses the card) and clipped away → nothing shows over the
+                 card. When open it slides in to fill the clip. A real horizontal slide, both ways.
+               • The HANDLE is positioned separately at left:100% and rides on translateX from the
+                 card's right edge (closed) out to the panel's right edge (open), so it moves WITH the
+                 drawer and always stays visible.
+             The old code translated the whole unit LEFT to hide it, which parked the panel ON TOP of
+             the card (a positive-z child paints above its parent). Clipping at left:100% removes that
+             overlap entirely. ── */}
+      {wingLive && (
+        <>
+          {/* CLIP wrapper — flush to the card's right edge, never overlaps the card. */}
+          <div
+            role="region" aria-label="Live session"
+            style={{
+              position: 'absolute', top: 0, left: '100%', height: '100%',
+              width: `${wingWidth}px`, overflow: 'hidden', zIndex: 0,
+              pointerEvents: wingOpen ? 'auto' : 'none',
+            }}
+          >
+            {/* the sliding PANEL — clipped out (translateX(-100%)) when closed, in view when open */}
+            <div
+              className={wingDragging ? undefined : 'dlc-wing-slide'}
+              style={{
+                position: 'absolute', top: 0, left: 0, height: '100%', width: '100%',
+                transform: wingOpen ? 'translateX(0)' : 'translateX(-100%)',
+                willChange: 'transform',
+                background: 'var(--card)', color: 'var(--card-fg, var(--text))',
+                border: '1px solid var(--border)', borderRight: `2px solid ${accent}`,
+                borderRadius: '8px 0 0 8px', boxShadow: '-4px 0 18px rgba(0,0,0,0.35)',
+                display: 'flex', flexDirection: 'column', overflow: 'hidden',
+              }}
+            >
+              {/* drag-to-resize edge (on the panel's right edge) */}
+              <div
+                onMouseDown={(e) => {
+                  e.preventDefault()
+                  const startX = e.clientX
+                  const startW = wingWidth
+                  let latest = startW
+                  setWingDragging(true)
+                  const onMove = (ev: MouseEvent) => {
+                    latest = Math.min(720, Math.max(240, startW + (ev.clientX - startX)))
+                    setWingWidth(latest)
+                  }
+                  const onUp = () => {
+                    setWingDragging(false)
+                    try { localStorage.setItem('dlc-live-wing-width', String(latest)) } catch { /* ignore */ }
+                    window.removeEventListener('mousemove', onMove)
+                    window.removeEventListener('mouseup', onUp)
+                  }
+                  window.addEventListener('mousemove', onMove)
+                  window.addEventListener('mouseup', onUp)
+                }}
+                title="Drag to resize"
+                style={{ position: 'absolute', top: 0, right: 0, width: '6px', height: '100%',
+                  cursor: 'ew-resize', zIndex: 2 }}
+              />
+              <div className="flex items-center gap-1.5 px-2 py-1.5 text-[10px]"
+                style={{ borderBottom: '1px solid var(--border)' }}>
+                <span className="uppercase tracking-wider" style={{ color: 'var(--muted)' }}>
+                  {(_STAGE_GLYPH[wingLive.stage] || '⚙')} {wingLive.stage} · live session
+                </span>
+                {wingLive.active && <ActivitySpinner size={10} />}
+                <button className="ml-auto hover:underline" onClick={wingLive.onOpen}
+                  style={{ color: 'var(--accent)' }} title="Open the full step session">open ↗</button>
+                <button className="hover:underline" onClick={() => setWingOpen(false)}
+                  style={{ color: 'var(--muted)' }} title="Collapse">✕</button>
+              </div>
+              <WingLiveBody tail={(wingLive as { buffer?: string }).buffer || wingLive.tail} active={wingLive.active} />
+              {onInterject && (
+                <div className="px-2 py-1.5 flex items-center gap-1.5" style={{ borderTop: '1px solid var(--border)' }}>
+                  <input
+                    value={interjectText}
+                    onChange={e => setInterjectText(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' && interjectText.trim()) {
+                        onInterject('note', interjectText.trim()); setInterjectText('')
+                      }
+                    }}
+                    placeholder="Message this session…"
+                    className="flex-1 text-[10px] px-2 py-1 rounded"
+                    style={{ background: 'var(--bg-elevated, var(--bg))', color: 'var(--text)',
+                      border: '1px solid var(--border)', outline: 'none' }}
+                    title="Interject into the running session — steers it live, or lands at its next response"
+                  />
+                  <button
+                    onClick={() => { if (interjectText.trim()) { onInterject('note', interjectText.trim()); setInterjectText('') } }}
+                    disabled={!interjectText.trim()}
+                    className="text-[10px] px-2 py-1 rounded font-semibold"
+                    style={{ background: interjectText.trim() ? 'var(--accent)' : 'var(--border)',
+                      color: interjectText.trim() ? 'var(--bg)' : 'var(--muted)',
+                      cursor: interjectText.trim() ? 'pointer' : 'default' }}
+                    title="Send the interjection">Send</button>
+                </div>
+              )}
+            </div>
+          </div>
+          {/* HANDLE — rides on translateX from the card's right edge (closed) to the panel's right
+              edge (open). Separate from the clip so it stays visible when the panel is clipped out. */}
+          <button
+            className={wingDragging ? undefined : 'dlc-wing-slide'}
+            aria-label={wingOpen ? 'Collapse live session panel' : 'Open live session panel'}
+            title={wingOpen ? 'Collapse live session' : 'Open live session'}
+            onClick={() => setWingOpen(o => !o)}
+            style={{
+              position: 'absolute', top: '10px', left: '100%', zIndex: 1,
+              width: '14px', height: '46px', cursor: 'pointer', padding: 0,
+              transform: wingOpen ? `translateX(${wingWidth}px)` : 'translateX(0)',
+              transition: wingDragging ? 'none' : undefined,
+              willChange: 'transform',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: wingLive.active ? 'var(--accent)' : 'var(--border)',
+              color: 'var(--bg)', border: 'none', borderRadius: '0 6px 6px 0',
+              boxShadow: '1px 0 4px rgba(0,0,0,0.25)',
+            }}
+          >
+            <span style={{ fontSize: '9px', lineHeight: 1 }} aria-hidden="true">{wingOpen ? '›' : '‹'}</span>
+          </button>
+        </>
+      )}
 
       <SelfEnablementSurface card={card} openChat={openChat} />
 
@@ -1613,24 +1776,10 @@ function PipelineCardItem({ card, config, isGate, cardStatus, effectiveCapabilit
         <div className="mt-2 flex items-center gap-2 flex-wrap"
           style={{ borderTop: '1px dashed var(--border)', paddingTop: '6px' }}>
           <span className="text-[9px] uppercase tracking-wider select-none" style={{ color: 'var(--muted)' }}>⚡ actions</span>
-          {onInterject && (
-            interjectOpen ? (
-              <div className="w-full flex flex-col gap-1">
-                <textarea value={interjectText} onChange={e => setInterjectText(e.target.value)}
-                  placeholder="Interject: design/spec note, re-scope…" rows={2}
-                  className="w-full text-[11px] px-2 py-1 rounded outline-none resize-none"
-                  style={{ background: 'var(--bg-elevated, var(--bg))', border: '1px solid var(--border)', color: 'var(--text)' }} />
-                <div className="flex gap-1.5">
-                  <button className="text-[11px] px-2 py-0.5 rounded font-semibold" style={{ background: 'var(--accent)', color: 'var(--bg)' }}
-                    onClick={() => { if (interjectText.trim()) { onInterject('note', interjectText.trim()); setInterjectText(''); setInterjectOpen(false) } }}>Send</button>
-                  <button className="text-[11px] px-2 py-0.5 rounded" style={{ color: 'var(--muted)' }}
-                    onClick={() => { setInterjectOpen(false); setInterjectText('') }}>Cancel</button>
-                </div>
-              </div>
-            ) : (
-              <button className="text-[10px] hover:underline" style={{ color: 'var(--muted)' }}
-                onClick={() => setInterjectOpen(true)}>✏️ interject</button>
-            )
+          {liveView && (
+            <button className="text-[10px] hover:underline" style={{ color: 'var(--muted)' }}
+              title="Open the live session wing to watch output and steer this session"
+              onClick={() => setWingOpen(true)}>💬 steer session</button>
           )}
           {onOpenOrchestrator && (
             <button className="text-[10px] hover:underline" style={{ color: 'var(--muted)' }}
@@ -1687,7 +1836,7 @@ function PipelineCardItem({ card, config, isGate, cardStatus, effectiveCapabilit
           onOpenProducer={onOpenProducer}
           onApprove={onApprove}
           onReject={onReject}
-          onInterject={onInterject ? () => { setInspectionOpen(false); setInterjectOpen(true) } : undefined}
+          onInterject={onInterject ? () => { setInspectionOpen(false); setWingOpen(true) } : undefined}
         />
       )}
       {decisionModalId && onResolveDecision && (() => {
@@ -3005,6 +3154,55 @@ function useTypewriter(target: string, active: boolean): string {
   return shown
 }
 
+// Terminal/CLI-styled live PEEK for the session wing ("looky-loo", not a full session): black
+// background, monospace, blinking cursor while streaming. Shows only the LAST N lines of output —
+// no scrollback — so it's a glance at recent activity beside the card, not an embedded session.
+// N is configurable via localStorage 'dlc-live-peek-lines' (default 8).
+const _PEEK_LINES = (() => {
+  try {
+    const v = Number(typeof localStorage !== 'undefined' && localStorage.getItem('dlc-live-peek-lines'))
+    return Number.isFinite(v) && v >= 2 && v <= 40 ? v : 14
+  } catch { return 14 }
+})()
+
+function WingLiveBody({ tail, active }: { tail: string; active: boolean }) {
+  const shown = useTypewriter(tail, active)
+  // Show as much text as the panel space holds; overflow:hidden on the flex body bounds it.
+  const peek = shown
+  const empty = !String(peek || '').trim()
+  // ACTIVE stream: newest text is at the END, pin it to the BOTTOM and fade the older text out at
+  // the TOP (with a leading … cue). IDLE last-output: oldest first, top-anchored, fade at the BOTTOM.
+  const fade = active
+    ? 'linear-gradient(to bottom, transparent 0, #000 30px)'
+    : 'linear-gradient(to bottom, #000 calc(100% - 30px), transparent 100%)'
+  return (
+    <div className={`flex-1 min-h-0 flex flex-col overflow-hidden ${active ? 'justify-end' : 'justify-start'}`} style={{ background: '#0a0c10' }}>
+      <div
+        className="min-h-0 px-3 py-2 break-words overflow-hidden"
+        style={{
+          fontSize: '12px', lineHeight: '1.55',
+          color: '#e8eef5',
+          fontFamily: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
+          whiteSpace: 'pre-wrap',
+          maxHeight: '100%',
+          WebkitMaskImage: empty ? undefined : fade,
+          maskImage: empty ? undefined : fade,
+        }}
+      >
+        {empty
+          ? <span style={{ color: '#5a6b7d' }}>{active ? 'waiting for output…' : '— session idle —'}</span>
+          : (
+            <span>
+              {active && <span style={{ color: '#5a6b7d' }}>… </span>}
+              <span style={{ color: '#e6edf3' }}>{peek}</span>
+              {active && <span className="dlc-cursor" style={{ color: '#7ee787' }}>▍</span>}
+            </span>
+          )}
+      </div>
+    </div>
+  )
+}
+
 function LiveMiniPane({ live }: { live: { stage: string; phase: string; tail: string; active: boolean; seq: number; source?: string; onOpen: () => void } }) {
   const [open, setOpen] = useState(true)
   const bodyRef = useRef<HTMLDivElement>(null)
@@ -3150,6 +3348,14 @@ function CardTimelineDrawer({ card, events, children, parent, onOpenCard, onClos
 export default function SdlcPipeline() {
   const api = useAppApi()
   const navigate = useNavigate()
+  useEffect(() => {
+    // eslint-disable-next-line no-console
+    // eslint-disable-next-line no-console
+    console.info('[dlc-yolo] UI bundle build: v35 (worker-model true-order wing). prefers-reduced-motion:',
+      (typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+        ? 'REDUCE — drawer re-asserted, should play'
+        : 'no-preference')
+  }, [])
   const [allCards, setAllCards] = useState<PipelineCard[]>([])
   const [pipelines, setPipelines] = useState<Pipeline[]>([])
   const [stateExtras, setStateExtras] = useState<{ github_webhook_history?: any[]; scheduler_state?: any }>({})
@@ -3180,15 +3386,40 @@ export default function SdlcPipeline() {
     (path: string) => api.get('/api/file-read?path=' + encodeURIComponent(path)),
     [api],
   )
+  // Reader for the uncapped backend state endpoint (proxied app-backend route). Passed to
+  // resolveStateFile/readCurrentState as the preferred, size-cap-free source.
+  const readAppEndpoint = useCallback((path: string) => api.get(path), [api])
 
   const fetchCards = useCallback(async (reconcileAuthority = false) => {
     try {
       const resolved = !stateAuthorityResolved.current || reconcileAuthority
-        ? await resolveStateFile(readAppFile)
-        : await readCurrentState(readAppFile, STATE_PATH)
-      STATE_PATH = resolved.path
-      stateAuthorityResolved.current = true
-      const data = resolved.data
+        ? await resolveStateFile(readAppFile, readAppEndpoint)
+        : await readCurrentState(readAppFile, STATE_PATH, readAppEndpoint)
+      // STATE_PATH must remain a real FILESYSTEM path — it drives file-write (mutations) and the
+      // live_spawns dir derivation. The endpoint tier resolves to a ROUTE ('/apps/dlc-yolo/api/state'),
+      // which is read-only; never assign that to STATE_PATH or writes 404. Keep the durable file path
+      // in that case (the endpoint read still populated `resolved.data` for display).
+      STATE_PATH = resolved.source === 'endpoint' ? DURABLE_STATE : resolved.path
+      // Only treat authority as RESOLVED when we actually read a state file. An 'unresolved'
+      // result is the throw-safe empty fallback (no tier read) — caching it as authority would
+      // pin fetchCards on a non-reading path and show 0 cards forever; leave authority unresolved
+      // so the next poll re-runs the full pointer→durable→tmp resolution until real state appears.
+      stateAuthorityResolved.current = resolved.source !== 'unresolved'
+      // api.get may hand back a parsed object OR a raw JSON string depending on the host SDK's
+      // response handling. Normalize before reading .cards: a string body is parsed; a body that
+      // is not a card-shaped object (e.g. a {error} payload from a soft-failed read) is treated as
+      // empty so the board renders "no cards" instead of silently showing 0 off an unparsed string.
+      let data = resolved.data
+      if (typeof data === 'string') {
+        try { data = JSON.parse(data) } catch { data = null }
+      }
+      if (!data || typeof data !== 'object' || Array.isArray(data)) {
+        data = { cards: [], pipelines: [], config: {} }
+      }
+      // eslint-disable-next-line no-console
+      console.info('[dlc-yolo] state resolved:', resolved.source, 'from', resolved.path,
+        '| rawType', typeof resolved.data, '| cards', Array.isArray(data.cards) ? data.cards.length : 'none',
+        '| pipelines', Array.isArray(data.pipelines) ? data.pipelines.length : 'none')
       setAllCards(data.cards || [])
       setPipelines(data.pipelines || [])
       setStateExtras({ github_webhook_history: data.github_webhook_history || [], scheduler_state: data.scheduler_state || null })
@@ -3198,7 +3429,7 @@ export default function SdlcPipeline() {
     } finally {
       setLoading(false)
     }
-  }, [readAppFile])
+  }, [readAppFile, readAppEndpoint])
 
   // Repo list for the scroller: union of pipeline repos and any repo that has cards.
   const repoList = useMemo(() => {
@@ -3272,8 +3503,43 @@ export default function SdlcPipeline() {
             }
             return
           }
+          // SUBAGENT STREAM (live crew-pass flow): a DLC step runs as a cron session that cannot
+          // stream chat_chunk, BUT the crew subagents it spawns DO stream — the host broadcasts
+          // `subagent_chunk` for them, CARD-KEYED via the payload `id` (= card_id), delivered to the
+          // owning app with no scope declaration (own-slot subagents). Route those deltas into a
+          // card-scoped live tail (`card:<id>`) so the card's LiveMiniPane renders real crew output.
+          if (frame.type === 'subagent_spawn' || frame.type === 'subagent_chunk' || frame.type === 'subagent_done') {
+            const cardId = typeof data?.id === 'string' ? data.id : null
+            if (!cardId || !cardIdsRef.current.has(cardId)) return
+            const key = `card:${cardId}`
+            setLiveTails(previous => {
+              const cur = previous[key]
+              if (frame.type === 'subagent_spawn') {
+                // A NEW pass/agent begins. Keep the accumulated flow (do NOT clear the buffer) and
+                // append a light separator so the stream reads as one continuous, advancing log
+                // across all agents/passes of the step — the pane never resets to empty between them.
+                const agent = typeof data?.agent === 'string' ? data.agent : (data?.task ? String(data.task).slice(0, 40) : 'agent')
+                const sep = (cur?.buffer ? '\n' : '') + `── ${agent} ──\n`
+                const next = appendLiveTail(
+                  cur?.active ? cur : { buffer: cur?.buffer || '', tail: '', active: true, phase: 'crew', seq: cur?.seq || 0 },
+                  sep, (cur?.seq || 0) + 1)
+                return { ...previous, [key]: next }
+              }
+              if (frame.type === 'subagent_chunk' && typeof data.text === 'string') {
+                const next = appendLiveTail(cur, data.text, Number(data.seq))
+                return next === cur ? previous : { ...previous, [key]: next }
+              }
+              // subagent_done: mark idle ONLY (keep the buffer so the flow stays visible). If
+              // another pass spawns next, its subagent_spawn re-activates and continues the log.
+              const next = finishLiveTail(cur)
+              return next === cur ? previous : { ...previous, [key]: next }
+            })
+            return
+          }
           const slot = data?.slot
-          if (!slot || !linkedSlotsRef.current.has(slot)) return
+          if (!slot || !linkedSlotsRef.current.has(slot)) {
+            return
+          }
           if ((frame.type === 'chat_status' && String(data.status || '').toLowerCase().startsWith('thinking')) ||
               frame.type === 'chat_thinking') {
             setLiveTails(previous => {
@@ -3518,8 +3784,8 @@ export default function SdlcPipeline() {
 
   const mutateState = useCallback(async (mutator: (state: { config?: PipelineConfig; pipelines?: Pipeline[]; cards: PipelineCard[] }) => void) => {
     try {
-      const initial = await resolveStateFile(readAppFile)
-      STATE_PATH = initial.path
+      const initial = await resolveStateFile(readAppFile, readAppEndpoint)
+      STATE_PATH = initial.source === 'endpoint' ? DURABLE_STATE : initial.path
       initial.data.cards = initial.data.cards || []
       mutator(initial.data)
       // H2 (reduce lost-update vs the 120s cron): re-resolve + re-read immediately before
@@ -3527,22 +3793,36 @@ export default function SdlcPipeline() {
       // updates and a runtime override pointer that changed after the first read.
       let destination = initial
       try {
-        destination = await resolveStateFile(readAppFile)
-        STATE_PATH = destination.path
+        destination = await resolveStateFile(readAppFile, readAppEndpoint)
+        STATE_PATH = destination.source === 'endpoint' ? DURABLE_STATE : destination.path
         destination.data.cards = destination.data.cards || []
         mutator(destination.data)
       } catch {
         destination = initial
       }
-      await api.post('/api/file-write', {
-        path: destination.path,
-        content: JSON.stringify(destination.data, null, 2),
-      })
+      // Write path. The host /api/file-write validates `content` at max_len=512000, so a >512KB
+      // state.json failed EVERY mutation with 400 "invalid input". Primary path: POST the state
+      // OBJECT to the uncapped backend endpoint (/apps/dlc-yolo/api/state — the same proxied route
+      // the GET readAppEndpoint uses), which writes it atomically + uncapped server-side. Fallback:
+      // on any endpoint failure (pre-restart installs where the POST route is not mounted yet) fall
+      // back to the capped host file-write to the DURABLE filesystem path. So it works both before
+      // and after the kirocrew restart that mounts the new route.
+      try {
+        await api.post('/apps/dlc-yolo/api/state', destination.data)
+      } catch (endpointErr) {
+        console.warn('[dlc-yolo] uncapped state POST failed; falling back to file-write (capped):', endpointErr)
+        // Fall back to a real FILE path, never the read-only endpoint route (destination.path is the
+        // route when the read resolved via the endpoint) — else file-write 404s.
+        await api.post('/api/file-write', {
+          path: destination.source === 'endpoint' ? DURABLE_STATE : destination.path,
+          content: JSON.stringify(destination.data, null, 2),
+        })
+      }
       fetchCards()
     } catch (e) {
       console.error('Failed to mutate state:', e)
     }
-  }, [api, fetchCards, readAppFile])
+  }, [api, fetchCards, readAppFile, readAppEndpoint])
 
   const setPipelineConfig = useCallback((patch: Partial<PipelineConfig>) => {
     setConfig(prev => ({ ...prev, ...patch }))
@@ -3937,23 +4217,48 @@ export default function SdlcPipeline() {
         const slot = card.step_sessions?.[card.stage]?.slot_key
         const tail = slot ? liveTails[slot] : undefined
         const live = runStatus.some(row => row.cardId === card.id && row.step === card.stage && row.live)
-        // Source selection: an INTERACTIVE slot streams a real chat_chunk tail (tail?.active).
-        // A cron-launched step slot never does (proven platform wall), so fall back to the
-        // agent-authored progress trail — the only in-app liveness for a cron step session.
+        // Source model (step-agent-as-worker + true-order narrative):
+        //   The ordered NARRATIVE OF RECORD is card.step_progress[stage] — a single seq'd, flock-
+        //   shared trail into which BOTH the coordinator's own checkpoints AND the crew fold
+        //   (_fold_crew_tail) append. Because they share one monotonic seq under one lock, the trail
+        //   is the ONLY source with correct cross-writer ordering. The WS `subagent_chunk` buffer
+        //   (`card:<id>`) is token-granular but arrives on a SEPARATE host clock with no shared seq,
+        //   so it cannot be trusted for ordering against coordinator lines — it is a live PREVIEW of
+        //   the currently-streaming subagent's tail, not the ordered record.
+        const crewTail = liveTails[`card:${card.id}`]
         const trail = projectProgressTrail(card.step_progress?.[card.stage])
-        if (tail?.active) {
+        const trailLive = !!trail && (live || card.step_status?.[card.stage] === 'pending')
+        // 1) Ordered narrative: render the trail buffer (true order). While a subagent is actively
+        //    streaming, surface its live tokens as the `tail` preview on top of the ordered buffer —
+        //    the buffer stays authoritative for order, the tail just shows what's flowing right now.
+        if (trail && (trailLive || crewTail?.buffer || crewTail?.tail)) {
+          const streaming = !!crewTail?.active
           return {
-            stage: card.stage, phase: tail.phase || 'running', tail: tail.tail || '',
-            active: !!tail.active && live, seq: tail.seq || 0, slotKey: slot!,
-            onOpen: () => navigate(`/chat?sid=${encodeURIComponent(slot!)}`),
-          }
-        }
-        if (trail && (live || card.step_status?.[card.stage] === 'pending')) {
-          return {
-            stage: card.stage, phase: trail.phase, tail: trail.tail,
-            active: !!live, seq: trail.seq, slotKey: slot || '',
+            stage: card.stage,
+            phase: streaming ? 'crew' : trail.phase,
+            tail: streaming ? (crewTail?.tail || trail.tail) : trail.tail,
+            buffer: trail.buffer || trail.tail || '',
+            active: !!(trailLive || streaming), seq: trail.seq, slotKey: slot || '',
             source: 'progress-trail',
             onOpen: () => slot && navigate(`/chat?sid=${encodeURIComponent(slot)}`),
+          }
+        }
+        // 2) No trail yet but the WS crew buffer has content — show it (early stream before the first
+        //    fold lands in step_progress). Persists once content has streamed (never reset on card).
+        if (crewTail && (crewTail.buffer || crewTail.tail)) {
+          return {
+            stage: card.stage, phase: crewTail.active ? 'crew' : 'idle',
+            tail: crewTail.tail || '', buffer: crewTail.buffer || '',
+            active: !!crewTail.active, seq: crewTail.seq || 0, slotKey: slot || '',
+            onOpen: () => slot && navigate(`/chat?sid=${encodeURIComponent(slot)}`),
+          }
+        }
+        // 3) An INTERACTIVE slot's chat_chunk tail (for steps run interactively, not cron).
+        if (tail?.active) {
+          return {
+            stage: card.stage, phase: tail.phase || 'running', tail: tail.tail || '', buffer: tail.buffer || '',
+            active: !!tail.active && live, seq: tail.seq || 0, slotKey: slot!,
+            onOpen: () => navigate(`/chat?sid=${encodeURIComponent(slot!)}`),
           }
         }
         return undefined
@@ -3988,6 +4293,21 @@ export default function SdlcPipeline() {
 
   return (
     <>
+      <style>{`
+.dlc-yolo-root, .dlc-yolo-root * { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+@keyframes dlcCursorBlink { 0%,49% { opacity: 1; } 50%,100% { opacity: 0; } }
+.dlc-wing-slide { transition: transform 420ms cubic-bezier(.32,.72,.28,1); }
+.dlc-cursor { animation: dlcCursorBlink 1.1s step-end infinite; }
+/* The host injects a reduced-motion reset whose selector :not([data-virtuoso-scroller] *) has the
+   SAME (0,1,0) specificity as a single class, so it wins on source order (it loads later) and zeroes
+   our durations. Use a doubled-class selector (0,2,0) to definitively win, so the wing's slide
+   (a brief, user-triggered spatial cue) still plays under the user's reduced-motion setting. */
+@media (prefers-reduced-motion: reduce) {
+  .dlc-wing-slide.dlc-wing-slide { transition-duration: 420ms !important; }
+  .dlc-cursor.dlc-cursor { animation-duration: 1.1s !important; animation-iteration-count: infinite !important; }
+}
+`}</style>
+      <div className="dlc-yolo-root">
       <PageHeader title="DLC-YOLO" subtitle="Autonomous SDLC pipeline with human gates" />
       {agentCatalogOpen && <AgentCrewCatalogModal
         profiles={agentProfiles}
@@ -4256,6 +4576,7 @@ export default function SdlcPipeline() {
             )}
           </div>
         </div>
+      </div>
       </div>
     </>
   )

@@ -11,3 +11,4 @@ __pycache__/
 !ui/dist/index.mjs
 
 docs/
+.kiro/settings/.kirocrew-cli-settings.lock

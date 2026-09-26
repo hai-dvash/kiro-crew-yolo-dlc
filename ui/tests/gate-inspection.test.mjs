@@ -180,7 +180,7 @@ test('gate dialog is read-only and exposes the required review sections and guar
   assert.match(appSource, /onApprove\(\); onClose\(\)/)
   assert.match(appSource, /const requestReject = \(\) =>/)
   assert.match(appSource, /onReject\(reason\.trim\(\)\)/)
-  assert.match(appSource, /setInspectionOpen\(false\); setInterjectOpen\(true\)/)
+  assert.match(appSource, /setInspectionOpen\(false\); setWingOpen\(true\)/)
   assert.doesNotMatch(appSource, /const gateInspection.*mutateState/)
   assert.doesNotMatch(appSource, /\bcard\.stage\s*=(?!=)/)
 })

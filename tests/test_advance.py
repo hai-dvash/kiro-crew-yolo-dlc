@@ -72,6 +72,95 @@ def _complete_gate_review(revision: int = 1, gate: str = "gate-spec",
 # =========================================================================== #
 # TIER 1 — pure helpers
 # =========================================================================== #
+class TestSelfDelegationTargets:
+    """stream-every-agent-step: every AGENT step must delegate >=1 subagent so its output streams
+    (cron step sessions cannot emit chat_chunk; only spawn_run subagents emit subagent_chunk). A
+    crew-less agent step SELF-DELEGATES its own main agent (kind='agent'); a crew step delegates the
+    crew; a GATE delegates nothing (it is a human approval point, no agent)."""
+
+    def test_agent_step_without_crew_works_inline_no_self_delegate(self, advance_mod):
+        # step-agent-as-worker: a crewless agent step is the WORKER — it does NOT self-delegate a
+        # clone. No delegation targets → the seed tells it to work inline and narrate via
+        # step_progress. Subagents appear only for real crew/addenda.
+        step = {"id": "implement", "type": "agent", "agent": {"name": "impl-agent"}}
+        targets = advance_mod._delegation_targets(step)
+        assert targets == []
+
+    def test_agent_step_without_agent_name_also_no_self_delegate(self, advance_mod):
+        step = {"id": "review", "type": "agent"}
+        targets = advance_mod._delegation_targets(step)
+        assert targets == []
+
+    def test_gate_step_yields_no_delegation(self, advance_mod):
+        step = {"id": "gate-spec", "type": "gate"}
+        assert advance_mod._delegation_targets(step) == []
+
+    def test_crew_step_still_delegates_crew_not_self(self, advance_mod):
+        step = {"id": "design", "type": "agent",
+                "agent": {"name": "design-agent", "crew": "dlcyolo-x-design"}}
+        targets = advance_mod._delegation_targets(step)
+        assert len(targets) == 1
+        assert targets[0] == {"kind": "crew", "id": "dlcyolo-x-design", "required": True}
+
+    def test_addenda_step_delegates_only_the_addendum(self, advance_mod):
+        step = {"id": "design", "type": "agent", "agent": {"name": "design-agent"},
+                "addenda": [{"crew": "secure-design"}]}
+        targets = advance_mod._delegation_targets(step)
+        # a real addendum target, and NO self-delegate agent target
+        assert all(t["kind"] != "agent" for t in targets)
+        assert any(t["kind"] == "addendum" for t in targets)
+
+    def test_planned_routing_crewless_step_works_inline_zero_crew_passes(self, advance_mod):
+        # A crewless agent step is the worker → no forced crew pass (was >=1 under the old hub).
+        state = {"config": {}}
+        card = {"id": "c1", "source": {"repo": "o/r"}}
+        step = {"id": "implement", "type": "agent", "agent": {"name": "impl-agent"}}
+        budget = {"compute": {"max_agent_passes": 3, "max_research_passes": 0,
+                              "max_parallel_runs": 3}}
+        contract = {"scope": {}}
+        routing, _notes, _infeasible = advance_mod._planned_routing(
+            state, card, None, "standard", "assisted", budget, step, contract, "builder")
+        assert routing["crew_passes"] == 0
+        assert routing["pass_allocation"]["targets"] == []
+
+    def test_planned_routing_gate_gets_no_crew_pass(self, advance_mod):
+        state = {"config": {}}
+        card = {"id": "c1", "source": {"repo": "o/r"}}
+        step = {"id": "gate-spec", "type": "gate"}
+        budget = {"compute": {"max_agent_passes": 3, "max_research_passes": 0,
+                              "max_parallel_runs": 3}}
+        routing, _n, _i = advance_mod._planned_routing(
+            state, card, None, "standard", "assisted", budget, step, {"scope": {}}, "authoring")
+        assert routing["crew_passes"] == 0
+
+
+class TestWildcardCapabilityMatch:
+    """A profile's '@kirocrew-core' wildcard grants every core tool (incl spawn_run/select_crew),
+    so a self-delegate/authoring step must NOT false-block on 'assigned-profile-missing-tools'."""
+
+    def test_wildcard_satisfies_required_core_tools(self, advance_mod):
+        observed = ["read", "write", "@kirocrew-core"]
+        required = ["kirocrew-core::spawn_run", "kirocrew-core::select_crew"]
+        assert advance_mod._missing_capabilities(required, observed) == []
+
+    def test_explicit_server_wildcard_satisfies(self, advance_mod):
+        observed = ["kirocrew-core::*"]
+        assert advance_mod._missing_capabilities(["kirocrew-core::spawn_run"], observed) == []
+
+    def test_missing_without_wildcard_is_reported(self, advance_mod):
+        observed = ["read", "write", "kirocrew-core::ask_question"]
+        assert advance_mod._missing_capabilities(
+            ["kirocrew-core::spawn_run"], observed) == ["kirocrew-core::spawn_run"]
+
+    def test_wildcard_does_not_cover_other_servers(self, advance_mod):
+        observed = ["@kirocrew-core"]
+        assert advance_mod._missing_capabilities(
+            ["kirocrew-cron::cron_add"], observed) == ["kirocrew-cron::cron_add"]
+
+
+# =========================================================================== #
+# TIER 1 — pure helpers
+# =========================================================================== #
 class TestLadder:
     def test_default_ladder_when_no_steps(self, advance_mod):
         assert advance_mod._ladder({"steps": []}) == advance_mod.DEFAULT_STEP_IDS
@@ -420,6 +509,67 @@ class TestExecutionEnvelopeObservation:
         assert pointer["writes_allowed"] is True
         assert "gate_review" not in out
 
+    def test_dispatch_design_seed_carries_scope_growth_backstep_proposer(
+            self, advance_mod, mock_ctx, state_factory, card_factory, write_state, read_state,
+            monkeypatch):
+        # LEG #2 of the back-step machinery: the step-agent seed for a scope-bearing phase
+        # (design/tasks/implement) MUST instruct it to attribute effort.scope and PROACTIVELY
+        # propose a back-step as a correctly-shaped card.topology proposal (no `authority`, so the
+        # reconciler holds it 'proposal-awaiting-orchestrator'). Without this the proposer leg is
+        # dead — the deterministic backstop fires only after the fact.
+        mock_ctx.call_tool.return_value = {"id": "job-backstep"}
+        pipeline = self._pipeline()
+        pipeline["steps"][2]["agent"] = {"name": "design-agent"}  # design, crewless → worker
+        card = card_factory(
+            stage="design", step_status={}, target_branch="dlc/card-1",
+            worktree_lease={
+                "lease_id": "lease-bs", "path": "/worktrees/card-1",
+                "repo_path": "/repo", "branch": "dlc/card-1", "base_commit": "abc",
+                "owner_card": "card-1", "status": "active", "locked": True,
+            },
+        )
+        monkeypatch.setattr(
+            advance_mod, "_ensure_worktree_lease", lambda *_args, **_kwargs: (False, None))
+        _run(advance_mod, mock_ctx, write_state,
+             state_factory(cards=[card], pipelines=[pipeline]))
+
+        payload = next(call.args[2] for call in mock_ctx.call_tool.call_args_list
+                       if call.args[:2] == ("kirocrew-cron", "cron_add"))
+        msg = payload["message"]
+        # It is told to attribute realized scope (feeds the deterministic backstop)…
+        assert "SELF-REVIEW / SCOPE-GROWTH" in msg
+        assert "card.effort.scope['design']" in msg
+        # …and to raise the fork as an UN-authorized topology proposal (never self-authorize)…
+        assert "'action':'back-step'" in msg
+        assert "proposal-awaiting-orchestrator" in msg
+        assert "OMIT `authority`" in msg
+        # …with the back-step decision fallback and no-spam guard.
+        assert "kind='back-step'" in msg
+
+    def test_dispatch_requirements_seed_omits_backstep_proposer(
+            self, advance_mod, mock_ctx, state_factory, card_factory, write_state, read_state,
+            monkeypatch):
+        # requirements has no scope-bearing predecessor, so the back-step proposer line is omitted
+        # (it is scoped to design/tasks/implement — the boundaries the deterministic backstop walks).
+        mock_ctx.call_tool.return_value = {"id": "job-req"}
+        pipeline = self._pipeline()
+        card = card_factory(
+            stage="requirements", step_status={}, target_branch="dlc/card-1",
+            worktree_lease={
+                "lease_id": "lease-req", "path": "/worktrees/card-1",
+                "repo_path": "/repo", "branch": "dlc/card-1", "base_commit": "abc",
+                "owner_card": "card-1", "status": "active", "locked": True,
+            },
+        )
+        monkeypatch.setattr(
+            advance_mod, "_ensure_worktree_lease", lambda *_args, **_kwargs: (False, None))
+        _run(advance_mod, mock_ctx, write_state,
+             state_factory(cards=[card], pipelines=[pipeline]))
+
+        payload = next(call.args[2] for call in mock_ctx.call_tool.call_args_list
+                       if call.args[:2] == ("kirocrew-cron", "cron_add"))
+        assert "SELF-REVIEW / SCOPE-GROWTH" not in payload["message"]
+
     def test_dispatch_binds_explicit_model_and_records_requested_provenance(
             self, advance_mod, mock_ctx, state_factory, card_factory, write_state, read_state,
             monkeypatch):
@@ -610,9 +760,12 @@ class TestPriority5IntentResearchResultScope:
     def test_terminal_result_blocks_research_and_crew_pass_overruns(
             self, advance_mod, state_factory, card_factory):
         pipeline = self._pipeline(depth="standard")
+        # This design step has no crew, so under step-agent-as-worker its crew allocation = 0 (it
+        # works inline; subagents are only for real fan-out). Recording TWO child runs is an overrun
+        # (2 > 0) and must block, the same way an over-allocated crew pass does.
         card = card_factory(
             stage="design", step_status={"design": "done"},
-            child_runs={"design": ["unexpected-child-run"]},
+            child_runs={"design": ["child-run-a", "child-run-b"]},
         )
         state = state_factory(cards=[card], pipelines=[pipeline])
         step = advance_mod._step_def(pipeline, "design")
@@ -742,6 +895,61 @@ class TestPriority5IntentResearchResultScope:
             card, pipeline, "design", "2026-09-05T00:01:00Z") is True
         assert card["step_status"]["design"] == "done"
         assert card["result_scope_checks"]["design"]["status"] == "satisfied"
+
+    def test_visual_step_without_any_visual_evidence_blocks(
+            self, advance_mod, state_factory, card_factory):
+        # Regression (visual-critic gate): a visual-facet step whose bundle carries NO
+        # rendered-and-inspected evidence must BLOCK, not self-pass. This is the exact
+        # card-rps3d-fixgame failure — a washed-out render shipped as PASS-WITH-NOTES because
+        # nothing forced external visual eyes.
+        pipeline = self._pipeline(depth="standard")
+        card = card_factory(
+            stage="design", step_status={"design": "done"}, facets=["visual"],
+        )
+        state = state_factory(cards=[card], pipelines=[pipeline])
+        step = advance_mod._step_def(pipeline, "design")
+        advance_mod._ensure_execution_envelope(
+            state, card, step, pipeline, "2026-09-05T00:00:00Z")
+        envelope = card["execution_envelope"]
+        # visual-evidence must be a REQUIRED evidence item on a visual step
+        assert "visual-evidence" in envelope["result_scope"]["evidence"]
+        assert envelope["result_scope"]["enforcement"]["evidence"] == "required"
+        card["step_results"] = {"design": {
+            "envelope_id": envelope["id"], "status": "completed",
+            "bundle": self._bundle(),  # no validation_and_evidence records at all
+        }}
+        assert advance_mod._enforce_step_result(
+            card, pipeline, "design", "2026-09-05T00:01:00Z") is True
+        assert card["step_status"]["design"] == "blocked"
+        assert "required evidence visual-evidence" in card["block_reason"]["design"]
+
+    def test_screenshot_kind_satisfies_visual_evidence_family(
+            self, advance_mod, state_factory, card_factory):
+        # A record whose kind is in the visual-evidence family (here 'screenshot') satisfies the
+        # requirement — the gate demands external eyes, not one literal kind string.
+        pipeline = self._pipeline(depth="standard")
+        card = card_factory(
+            stage="design", step_status={"design": "done"}, facets=["frontend"],
+        )
+        state = state_factory(cards=[card], pipelines=[pipeline])
+        step = advance_mod._step_def(pipeline, "design")
+        advance_mod._ensure_execution_envelope(
+            state, card, step, pipeline, "2026-09-05T00:00:00Z")
+        envelope = card["execution_envelope"]
+        card["step_results"] = {"design": {
+            "envelope_id": envelope["id"], "status": "completed",
+            "bundle": self._bundle(validation_and_evidence=[
+                {"id": "SS-1", "kind": "screenshot", "status": "passed",
+                 "ref": "/results/frame.png"},
+                {"id": "F-1", "kind": "functional", "status": "passed", "ref": "/results/f.md"},
+                {"id": "R-1", "kind": "rationale", "status": "passed", "ref": "/results/r.md"},
+            ]),
+        }}
+        assert advance_mod._enforce_step_result(
+            card, pipeline, "design", "2026-09-05T00:01:00Z") is True
+        # visual-evidence is NOT in the missing set — the screenshot kind satisfied its family
+        assert "visual-evidence" not in (card.get("block_reason", {}).get("design") or "")
+        assert card["step_status"]["design"] == "done"
 
     def test_preferred_shortfall_is_visible_but_does_not_block(
             self, advance_mod, state_factory, card_factory):
@@ -955,8 +1163,10 @@ class TestRuntimeHandshake:
         assert handshake["delegation"]["outcome"] == "blocked"
         mismatch = handshake["preflight"]["mismatches"][0]
         assert mismatch["kind"] == "assigned-profile-missing-tools"
-        assert {"kirocrew-core::select_crew", "kirocrew-core::spawn_run"} == set(
-            mismatch["missing"])
+        # This step has a crew + addenda → it needs the full routing toolbelt. The authoring profile
+        # now declares kirocrew-core::spawn_run (required for self-delegation streaming) but still
+        # does NOT declare select_crew, so a crew-routing step correctly blocks on the missing verb.
+        assert {"kirocrew-core::select_crew"} == set(mismatch["missing"])
 
     def test_inline_fallback_requires_explicit_allow_inline_policy(
             self, advance_mod, mock_ctx, state_factory, card_factory,
@@ -1326,6 +1536,31 @@ class TestAdvanceBlocked:
         assert isinstance(exc, Report)  # waiting_gates -> notify -> Report
         mock_ctx.notify.assert_called_once()
         assert "blocked" in mock_ctx.notify.call_args.args[0]
+
+    def test_false_card_init_capability_gap_is_cleared_and_reescalated(
+            self, advance_mod, mock_ctx, state_factory, card_factory, write_state, read_state):
+        # A readonly step-agent self-blocked claiming the card "must be written by the orchestrator"
+        # / "cannot initialize card" — but the card IS runtime-initialized (intent_integrity
+        # satisfied + envelope + intent). The predicate that drives the deterministic clear must
+        # recognize this as a FALSE block (issue-#33 class), and NOT a genuine tool/crew gap.
+        false_card = {
+            "intent_integrity": {"status": "satisfied", "violations": [], "checked_at": "t"},
+            "execution_envelope": {"id": "env-x", "step": "investigate"},
+            "raw_intent": {"text": "fix my game", "captured_at": "t", "source_ref": None},
+        }
+        false_reason = ("capability-gap: readonly step agent cannot initialize card in state.json; "
+                        "card must be written by orchestrator or console before investigate can run.")
+        assert advance_mod._is_false_card_init_block(false_card, false_reason) is True
+
+        # A GENUINE capability-gap (missing tool/crew) must NOT be treated as the false card-init
+        # block — the clear must not over-reach.
+        genuine_reason = "capability-gap: missing select_crew tool to dispatch the research crew"
+        assert advance_mod._is_false_card_init_block(false_card, genuine_reason) is False
+
+        # An uninitialized card (integrity NOT satisfied) with the same wording is a REAL block —
+        # the premise holds, so it must not be cleared.
+        uninit_card = {"intent_integrity": {"status": "violation"}, "raw_intent": {"text": "x"}}
+        assert advance_mod._is_false_card_init_block(uninit_card, false_reason) is False
 
 
 class TestAdvanceError:
@@ -1899,6 +2134,46 @@ class TestBootstrap:
         # released after the context — a fresh acquire now succeeds
         with advance_mod._state_lock() as got2:
             assert got2 is True
+
+    def test_save_collapses_duplicate_card_ids(self, advance_mod, state_path):
+        # Render-safety: two cards sharing an id break the board (duplicate React key → the pipeline
+        # column fails to render, "pipe gone UI-wise"). _save must collapse duplicates to the MOST
+        # COMPLETE entry before persisting, so a double-append (two sessions backfilling the same
+        # card) can never recur.
+        bare = {"id": "card-x", "stage": "investigate", "lifecycle": "ingested"}
+        full = {"id": "card-x", "stage": "investigate", "lifecycle": "ingested",
+                "step_status": {"investigate": "blocked"}, "execution_schedule": {"nodes": {}},
+                "event_outbox": []}
+        advance_mod._save({"config": {}, "pipelines": [{"id": "pl-1"}, {"id": "pl-1"}],
+                           "cards": [bare, {"id": "card-y"}, full]})
+        out = advance_mod._load()
+        fixgame = [c for c in out["cards"] if c["id"] == "card-x"]
+        assert len(fixgame) == 1                                  # collapsed to one
+        assert fixgame[0].get("step_status") == {"investigate": "blocked"}  # kept the complete one
+        assert [c["id"] for c in out["cards"]] == ["card-x", "card-y"]       # order preserved
+        assert len(out["pipelines"]) == 1                          # pipeline dupes collapse too
+
+    def test_save_caps_per_card_history(self, advance_mod, state_path):
+        # RENDER-SAFETY: the host /api/file-read endpoint truncates at 512000 bytes; unbounded
+        # per-card history (execution_envelope_history entries are ~11KB each) grows state.json
+        # past the cap → the UI reads chopped JSON → JSON.parse throws → board shows 0 cards
+        # despite intact state (the "pipeline ghosting" root cause). _save must bound these
+        # append-only arrays to the last 3 snapshots on every persist, without touching the live
+        # execution_envelope / gate_review fields or any other card data.
+        card = {
+            "id": "card-hist", "stage": "requirements", "lifecycle": "ingested",
+            "execution_envelope": {"live": True},                       # live field, must survive
+            "execution_envelope_history": [{"revision": r} for r in range(9)],
+            "gate_review_history": [{"g": g} for g in range(7)],
+        }
+        advance_mod._save({"config": {}, "pipelines": [{"id": "pl-1"}], "cards": [card]})
+        out = advance_mod._load()
+        saved = out["cards"][0]
+        assert len(saved["execution_envelope_history"]) == 1
+        assert [e["revision"] for e in saved["execution_envelope_history"]] == [8]   # last 1
+        assert len(saved["gate_review_history"]) == 1
+        assert [e["g"] for e in saved["gate_review_history"]] == [6]                 # last 1
+        assert saved["execution_envelope"] == {"live": True}           # live field untouched
 
     def test_save_is_durable_and_atomic(self, advance_mod, state_path):
         # ROOT-2: _save writes via a temp file + fsync + os.replace (no partial/torn file) and
@@ -2592,6 +2867,30 @@ class TestWorktreeLeases:
         assert not any(item["kind"].startswith("worktree-")
                        for item in handshake["preflight"]["mismatches"])
 
+    def test_terminal_unobservable_binding_with_completed_result_does_not_false_block(
+            self, advance_mod, state_factory, card_factory, tmp_path, monkeypatch):
+        # FALSE-BLOCK GUARD: a finished cron step reports no live worktree observation, so
+        # binding_status is unobservable (not 'verified'). If the step RESULT is completed, that
+        # absence of evidence must NOT hard-block the step on 'worktree-binding-unverified'.
+        repo = self._repo(tmp_path)
+        monkeypatch.setattr(advance_mod.subprocess, "run", _REAL_SUBPROCESS_RUN)
+        pipeline = self._pipeline(repo)
+        card = card_factory(id="card-unobs", pipeline_id="pl-lease", stage="implement",
+                            step_status={"implement": "done"})
+        # The step produced a completed result but NO step_sessions working_dir → binding unobservable.
+        card["step_results"] = {"implement": {"status": "completed",
+                                              "bundle": {"summary": "done"}}}
+        state = state_factory(cards=[card], pipelines=[pipeline])
+        step = advance_mod._step_def(pipeline, "implement")
+        assert advance_mod._ensure_worktree_lease(
+            state, card, step, pipeline, "2026-09-05T08:00:00Z")[1] is None
+        handshake, _ = advance_mod._ensure_runtime_handshake(
+            state, card, step, pipeline, "2026-09-05T08:01:00Z", "terminal")
+        # No worktree-binding-unverified mismatch, because the binding is unobservable AND the
+        # result is completed — evidence of absence is not evidence of mismatch.
+        assert not any(item["kind"] == "worktree-binding-unverified"
+                       for item in handshake["preflight"]["mismatches"])
+
     def test_dispatch_provisions_lease_and_never_instructs_branch_switching(
             self, advance_mod, mock_ctx, state_factory, card_factory, write_state,
             read_state, tmp_path, monkeypatch):
@@ -2649,3 +2948,340 @@ class TestWorktreeLeases:
         assert _REAL_SUBPROCESS_RUN(
             ["git", "-C", str(repo), "show-ref", "--verify", f"refs/heads/{branch}"],
             capture_output=True, text=True).returncode == 0
+
+
+# =========================================================================== #
+# STALE-NODE REAPER — orphaned scheduler node whose owning session is dead      #
+# (card-rps3d-fixgame: node status='running', session_ref -> a dead cron,       #
+#  step_status='pending' -> the card wedged forever). The reaper resets such a  #
+#  node to a re-dispatchable 'observed' status so the plan re-escalates it.     #
+# =========================================================================== #
+class TestStaleNodeReaper:
+    def _card_with_orphan_node(self, advance_mod, *, step="investigate",
+                               node_status="running", pending_age_secs, lifecycle="ingested",
+                               step_status="pending", first_output=False,
+                               session_started_delta=None):
+        """Build a card carrying ONE card-step node in an ACTIVE status with a session_ref
+        pointing at a (dead) cron, and a matching pending_at that is `pending_age_secs` old."""
+        pending_ts = _iso(_now() - timedelta(seconds=pending_age_secs))
+        node = {
+            "schema_version": advance_mod._SCHEDULER_SCHEMA_VERSION,
+            "id": f"sched:card-orphan:{step}:1",
+            "kind": "card-step",
+            "card_id": "card-orphan",
+            "step": step,
+            "status": node_status,
+            "session_ref": {"cron_id": "b2076bd0", "slot_key": "cron-b2076bd0",
+                            "session_key": "cron:b2076bd0"},
+            "session_started_at": pending_ts,
+            "permit_id": "permit-deadbeef",
+            "permit_acquired_at": pending_ts,
+            "created_at": pending_ts,
+            "updated_at": pending_ts,
+        }
+        if first_output:
+            node["first_output_at"] = _iso(_now() - timedelta(seconds=5))
+        if session_started_delta is not None:
+            node["session_started_at"] = _iso(_now() - timedelta(seconds=session_started_delta))
+        card = {
+            "id": "card-orphan",
+            "title": "Orphaned node card",
+            "pipeline_id": "pl-1",
+            "stage": step,
+            "lifecycle": lifecycle,
+            "step_status": {step: step_status} if step_status is not None else {},
+            "pending_at": {step: pending_ts},
+            "execution_schedule": {
+                "schema_version": advance_mod._SCHEDULER_SCHEMA_VERSION,
+                "nodes": {node["id"]: node},
+                "current_node_id": node["id"],
+            },
+        }
+        state = {"config": {}, "pipelines": [{"id": "pl-1", "repo": "owner/repo"}],
+                 "cards": [card]}
+        return state, card, node["id"]
+
+    def test_orphaned_stale_running_node_is_reaped_to_observed(self, advance_mod):
+        # (a) An orphaned RUNNING node stale past the window is reset to a re-dispatchable state.
+        state, card, node_id = self._card_with_orphan_node(
+            advance_mod, pending_age_secs=advance_mod.PENDING_STALE_SECS + 120)
+        now = _iso(_now())
+        changed = advance_mod._scheduler_reconcile_nodes(state, now)
+        node = card["execution_schedule"]["nodes"][node_id]
+        assert changed is True
+        assert node["status"] == "observed"                       # re-dispatchable resting status
+        assert "session_ref" not in node                          # dead binding popped
+        assert "session_started_at" not in node
+        assert "permit_id" not in node
+        assert "permit_acquired_at" not in node
+        assert node["requeued_reason"] == "orphaned-session-dead"
+        assert node["requeued_at"] == now
+        assert node["updated_at"] == now
+
+    def test_orphaned_node_with_completed_result_is_not_reaped(self, advance_mod):
+        # GUARD: a step whose RESULT is already completed is NOT an abandoned spawn — reaping it
+        # re-queues finished work (observed: implement completed inline, node stayed 'running' on a
+        # dead session, step_status got re-opened to 'pending', reaper re-ran the whole step).
+        state, card, node_id = self._card_with_orphan_node(
+            advance_mod, step="implement", pending_age_secs=advance_mod.PENDING_STALE_SECS + 120)
+        card["step_results"] = {"implement": {"status": "completed", "bundle": {"summary": "done"}}}
+        now = _iso(_now())
+        advance_mod._scheduler_reconcile_nodes(state, now)
+        node = card["execution_schedule"]["nodes"][node_id]
+        # Not reaped: no requeue, session binding preserved (the status branches finalize it).
+        assert node.get("requeued_reason") != "orphaned-session-dead"
+        assert node["status"] != "observed" or "session_ref" in node
+
+    def test_fresh_running_node_within_window_is_not_reaped(self, advance_mod):
+        # (b) A FRESH running node inside the staleness window is left untouched.
+        state, card, node_id = self._card_with_orphan_node(
+            advance_mod, pending_age_secs=30)                     # well under PENDING_STALE_SECS
+        now = _iso(_now())
+        advance_mod._scheduler_reconcile_nodes(state, now)
+        node = card["execution_schedule"]["nodes"][node_id]
+        assert node.get("requeued_reason") is None               # never reaped
+        assert "session_ref" in node                              # binding intact
+        # the normal reconcile keeps a fresh pending node as running (not observed)
+        assert node["status"] == "running"
+
+    def test_node_with_observed_progress_is_not_reaped(self, advance_mod):
+        # A stale-but-LIVE session (recorded first_output_at) is protected from reaping.
+        state, card, node_id = self._card_with_orphan_node(
+            advance_mod, pending_age_secs=advance_mod.PENDING_STALE_SECS + 120,
+            first_output=True)
+        advance_mod._scheduler_reconcile_nodes(state, _iso(_now()))
+        node = card["execution_schedule"]["nodes"][node_id]
+        assert node.get("requeued_reason") is None
+        assert "session_ref" in node
+
+    def test_retired_card_node_is_untouched(self, advance_mod):
+        # (c) A retired/terminal-lifecycle card is untouched by the reaper (its own branch owns it).
+        state, card, node_id = self._card_with_orphan_node(
+            advance_mod, pending_age_secs=advance_mod.PENDING_STALE_SECS + 120,
+            lifecycle="retired")
+        advance_mod._scheduler_reconcile_nodes(state, _iso(_now()))
+        node = card["execution_schedule"]["nodes"][node_id]
+        assert node.get("requeued_reason") is None               # reaper skipped it
+        # terminal-lifecycle reconcile completes the node instead.
+        assert node["status"] == "completed"
+
+    def test_cancelled_card_node_is_untouched_by_reaper(self, advance_mod):
+        # A cancel-lifecycle card is handled by the cancel branch, not the reaper.
+        state, card, node_id = self._card_with_orphan_node(
+            advance_mod, pending_age_secs=advance_mod.PENDING_STALE_SECS + 120,
+            lifecycle="cancelled")
+        advance_mod._scheduler_reconcile_nodes(state, _iso(_now()))
+        node = card["execution_schedule"]["nodes"][node_id]
+        assert node.get("requeued_reason") is None
+
+    def test_terminal_step_status_node_is_not_reaped(self, advance_mod):
+        # A node whose step already reached a terminal outcome (done) is NOT an orphan.
+        state, card, node_id = self._card_with_orphan_node(
+            advance_mod, pending_age_secs=advance_mod.PENDING_STALE_SECS + 120,
+            step_status="done")
+        advance_mod._scheduler_reconcile_nodes(state, _iso(_now()))
+        node = card["execution_schedule"]["nodes"][node_id]
+        assert node.get("requeued_reason") is None
+        assert node["status"] == "completed"                     # terminal branch owns it
+
+    def test_reaper_is_idempotent(self, advance_mod):
+        # (d) Running the reconcile twice yields the SAME result (idempotent) — the second pass is
+        # a no-op because the node is no longer in an active status.
+        state, card, node_id = self._card_with_orphan_node(
+            advance_mod, pending_age_secs=advance_mod.PENDING_STALE_SECS + 120)
+        now1 = _iso(_now())
+        advance_mod._scheduler_reconcile_nodes(state, now1)
+        node = card["execution_schedule"]["nodes"][node_id]
+        first = json.loads(json.dumps(node))                     # snapshot after first reap
+        assert first["status"] == "observed"
+        assert first["requeued_at"] == now1
+
+        now2 = _iso(_now() + timedelta(seconds=1))
+        advance_mod._scheduler_reconcile_nodes(state, now2)
+        node2 = card["execution_schedule"]["nodes"][node_id]
+        # requeue provenance is stable — a second pass did not re-reap or re-stamp it.
+        assert node2["requeued_at"] == now1
+        assert node2["requeued_reason"] == "orphaned-session-dead"
+        assert "session_ref" not in node2
+
+    def test_permit_acquired_orphan_is_reaped(self, advance_mod):
+        # The reaper covers all three active statuses; a stale 'permit-acquired' orphan is reset.
+        state, card, node_id = self._card_with_orphan_node(
+            advance_mod, node_status="permit-acquired",
+            pending_age_secs=advance_mod.PENDING_STALE_SECS + 120)
+        advance_mod._scheduler_reconcile_nodes(state, _iso(_now()))
+        node = card["execution_schedule"]["nodes"][node_id]
+        assert node["status"] == "observed"
+        assert node["requeued_reason"] == "orphaned-session-dead"
+
+    def test_reaped_node_becomes_dispatchable_through_full_plan(self, advance_mod):
+        # END-TO-END: the whole point of the reaper is that _scheduler_plan (which calls
+        # reconcile first) turns a wedged orphan into a SELECTED/ready node instead of an
+        # immortal 'running' one. After the plan runs, the orphan node must no longer be counted
+        # active-and-stuck; it is re-readied (ready/queued/permit-acquired/selected), which is
+        # exactly what unwedges the card.
+        state, card, node_id = self._card_with_orphan_node(
+            advance_mod, step="requirements",              # a real ladder step so the plan visits it
+            pending_age_secs=advance_mod.PENDING_STALE_SECS + 120)
+        # give the pipeline the default ladder so stage 'requirements' is planned
+        state["pipelines"][0]["steps"] = [
+            {"id": "requirements", "name": "Requirements", "type": "agent",
+             "agent": {"name": "spec-agent", "role": "req"}, "label": "dlc:requirements"},
+        ]
+        now = _iso(_now())
+        cycle = {"max_escalations": 2, "escalations": 0}
+        selected, _changed = advance_mod._scheduler_plan(state, now, cycle)
+        node = card["execution_schedule"]["nodes"][node_id]
+        # The node was reaped (requeued provenance present) and re-planned to a live/ready status,
+        # NOT left immortally 'running'. Either it was selected this cycle or it is queued/ready
+        # for the next — never stuck active on the dead session.
+        assert node.get("requeued_reason") == "orphaned-session-dead"
+        assert "session_ref" not in node
+        assert node["status"] in {"ready", "queued", "permit-acquired"}
+
+
+
+# =========================================================================== #
+# COMPLETED-RESULT FINALIZER — anti-wedge for the self-delegate HUB model.       #
+# A step's streaming subagent completes the work and the step writes a           #
+# completed result (step_results[step].status == 'completed'), but the thin hub  #
+# session ends WITHOUT writing terminal step_status='done'. The reconcile was    #
+# purely (step_status -> node) so the step stayed 'pending', the node was        #
+# re-derived to 'running' every cycle, and the card wedged forever (observed at  #
+# tasks/implement/review on card-rps3d-fixgame). The finalizer promotes a        #
+# non-terminal, non-blocked completed step to 'done' deterministically.          #
+# =========================================================================== #
+class TestCompletedResultFinalizer:
+    def _card(self, *, step="review", step_status="pending", node_status="running",
+              result_status="completed", lifecycle="elaborated", is_gate=False,
+              stale=True):
+        pending_ts = _iso(_now() - timedelta(seconds=999999 if stale else 5))
+        card = {
+            "id": "card-fin",
+            "title": "Finalizer card",
+            "pipeline_id": "pl-1",
+            "stage": step,
+            "sot": "local",
+            "source": {"type": "github", "repo": "owner/repo", "issue": 7},
+            "lifecycle": lifecycle,
+            "step_status": {step: step_status} if step_status is not None else {},
+            "pending_at": {step: pending_ts},
+            "step_sessions": {step: {"cron_id": "dead", "kept": True, "at": pending_ts}},
+            "execution_schedule": {
+                "schema_version": 1,
+                "current_node_id": f"sched:card-fin:{step}:1",
+                "nodes": {f"sched:card-fin:{step}:1": {
+                    "schema_version": 1, "id": f"sched:card-fin:{step}:1",
+                    "kind": "card-step", "card_id": "card-fin", "step": step,
+                    "status": node_status, "created_at": pending_ts}},
+            },
+        }
+        if result_status is not None:
+            card["step_results"] = {step: {"status": result_status,
+                                           "bundle": {"summary": "PASS"}}}
+        step_def = ({"id": step, "type": "gate", "label": f"dlc:{step}"} if is_gate
+                    else {"id": step, "type": "agent",
+                          "agent": {"name": "review-agent", "role": "review"},
+                          "label": f"dlc:{step}"})
+        state = {
+            "config": {"trust": "assisted", "depth": "standard"},
+            "pipelines": [{"id": "pl-1", "repo": "owner/repo", "workspace": "default",
+                           "trust": "assisted", "depth": "standard", "steps": [step_def]}],
+            "cards": [card],
+        }
+        return state, card, f"sched:card-fin:{step}:1"
+
+    def test_completed_result_pending_step_finalizes_to_done(self, advance_mod):
+        # (a) THE FIX: a step with a completed result but step_status='pending' on a 'running'
+        # node is finalized to step_status='done' and node 'completed' on reconcile — it does NOT
+        # stay pending/running (the wedge).
+        state, card, node_id = self._card(step="review", step_status="pending",
+                                           node_status="running", result_status="completed")
+        changed = advance_mod._scheduler_reconcile_nodes(state, _iso(_now()))
+        assert changed is True
+        assert card["step_status"]["review"] == "done"
+        assert card["execution_schedule"]["nodes"][node_id]["status"] == "completed"
+        assert card["execution_schedule"]["nodes"][node_id].get("finalized_reason") \
+            == "completed-result"
+        # pending_at for the step is cleared so nothing re-reads it as an in-flight spawn.
+        assert "review" not in (card.get("pending_at") or {})
+
+    def test_completed_result_finalizes_regardless_of_staleness(self, advance_mod):
+        # The finalizer keys on the completed RESULT, not on the pending window — a FRESH pending
+        # (within the window) whose result already completed must also finalize, not sit 'running'.
+        state, card, node_id = self._card(step="tasks", step_status="pending",
+                                          node_status="running", result_status="completed",
+                                          stale=False)
+        advance_mod._scheduler_reconcile_nodes(state, _iso(_now()))
+        assert card["step_status"]["tasks"] == "done"
+        assert card["execution_schedule"]["nodes"][node_id]["status"] == "completed"
+
+    def test_error_status_with_completed_result_finalizes(self, advance_mod):
+        # A step left 'error' whose work nonetheless completed is finalized rather than retried.
+        state, card, node_id = self._card(step="implement", step_status="error",
+                                          node_status="running", result_status="completed")
+        advance_mod._scheduler_reconcile_nodes(state, _iso(_now()))
+        assert card["step_status"]["implement"] == "done"
+        assert card["execution_schedule"]["nodes"][node_id]["status"] == "completed"
+
+    def test_running_step_without_completed_result_is_not_finalized(self, advance_mod):
+        # (b) A step still genuinely running (NO completed result) must NOT be prematurely
+        # finalized — it stays pending/running as before.
+        state, card, node_id = self._card(step="review", step_status="pending",
+                                          node_status="running", result_status=None,
+                                          stale=False)
+        advance_mod._scheduler_reconcile_nodes(state, _iso(_now()))
+        assert card["step_status"]["review"] == "pending"
+        assert card["execution_schedule"]["nodes"][node_id]["status"] == "running"
+        assert "finalized_reason" not in card["execution_schedule"]["nodes"][node_id]
+
+    def test_in_progress_result_status_is_not_finalized(self, advance_mod):
+        # A result present but NOT 'completed' (e.g. 'in_progress') is not proof of completion.
+        state, card, node_id = self._card(step="review", step_status="pending",
+                                          node_status="running", result_status="in_progress",
+                                          stale=False)
+        advance_mod._scheduler_reconcile_nodes(state, _iso(_now()))
+        assert card["step_status"]["review"] == "pending"
+        assert card["execution_schedule"]["nodes"][node_id]["status"] == "running"
+
+    def test_gate_is_unaffected_by_finalizer(self, advance_mod):
+        # (c) A gate carries no step_results and is a gate type — the finalizer must never touch
+        # it. It stays whatever it was (here: awaiting, no step_status promotion).
+        state, card, node_id = self._card(step="gate-review", step_status="pending",
+                                          node_status="running", result_status=None,
+                                          is_gate=True, stale=False)
+        advance_mod._scheduler_reconcile_nodes(state, _iso(_now()))
+        assert card["step_status"]["gate-review"] == "pending"
+        assert "finalized_reason" not in card["execution_schedule"]["nodes"][node_id]
+
+    def test_gate_with_stray_completed_result_still_unaffected(self, advance_mod):
+        # Defense in depth: even if a gate somehow carried a completed step_result, the explicit
+        # _is_gate guard keeps the finalizer from promoting a gate step.
+        state, card, node_id = self._card(step="gate-review", step_status="pending",
+                                          node_status="running", result_status="completed",
+                                          is_gate=True, stale=False)
+        advance_mod._scheduler_reconcile_nodes(state, _iso(_now()))
+        assert card["step_status"]["gate-review"] == "pending"
+        assert "finalized_reason" not in card["execution_schedule"]["nodes"][node_id]
+
+    def test_terminal_lifecycle_card_not_re_finalized(self, advance_mod):
+        # A retired card is owned by the terminal-lifecycle branch; the finalizer must not run
+        # ahead of it (guarded on lifecycle).
+        state, card, node_id = self._card(step="review", step_status="pending",
+                                          node_status="running", result_status="completed",
+                                          lifecycle="retired")
+        advance_mod._scheduler_reconcile_nodes(state, _iso(_now()))
+        node = card["execution_schedule"]["nodes"][node_id]
+        # terminal-lifecycle branch owns it -> completed; the finalizer did not stamp it.
+        assert node["status"] == "completed"
+        assert node.get("finalized_reason") != "completed-result"
+
+    def test_finalizer_is_idempotent(self, advance_mod):
+        # Running reconcile twice yields the same terminal result (second pass sees 'done', the
+        # done branch owns it — no re-finalization churn).
+        state, card, node_id = self._card(step="review", step_status="pending",
+                                          node_status="running", result_status="completed")
+        advance_mod._scheduler_reconcile_nodes(state, _iso(_now()))
+        advance_mod._scheduler_reconcile_nodes(state, _iso(_now() + timedelta(seconds=1)))
+        assert card["step_status"]["review"] == "done"
+        assert card["execution_schedule"]["nodes"][node_id]["status"] == "completed"

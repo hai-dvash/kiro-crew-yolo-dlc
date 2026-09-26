@@ -58,6 +58,31 @@ def test_scope_growth_not_raised_within_factor():
     assert not [x for x in card.get("decisions", []) if x.get("kind") == "scope-growth"]
 
 
+def test_scope_growth_fires_on_tshirt_size_strings():
+    # ROOT-CAUSE regression (scope-growth-dead-trigger): step-agents write effort.scope as SIZE
+    # STRINGS ('S'/'XL'), and every numeric consumer used to skip on isinstance(int|float) — so
+    # scope-growth NEVER fired on real data (0/15 live cards). With _scope_points coercion,
+    # XL(8) > 2.0 * S(1) must now raise the fork.
+    card = {"id": "c1", "stage": "design", "pipeline_id": "pl1",
+            "depth": "standard", "effort": {"scope": {"requirements": "S", "design": "XL"}}}
+    state = {"config": {"depth": "standard"}, "pipelines": [_pipeline()], "cards": [card]}
+    _run(state)
+    d = [x for x in card.get("decisions", []) if x.get("kind") == "scope-growth"]
+    assert len(d) == 1, "scope-growth must fire on size strings, not only numeric points"
+    assert d[0]["boundary"] == "design→requirements"
+    # spent is the coerced sum: S(1) + XL(8) = 9
+    assert card["effort"]["spent"] == 9
+
+
+def test_scope_growth_size_strings_within_factor_not_raised():
+    # M(3) <= 2.0 * M(3)=6 → no raise, proving the coercion respects the factor, not just presence.
+    card = {"id": "c1", "stage": "design", "pipeline_id": "pl1",
+            "depth": "standard", "effort": {"scope": {"requirements": "M", "design": "M"}}}
+    state = {"config": {"depth": "standard"}, "pipelines": [_pipeline()], "cards": [card]}
+    _run(state)
+    assert not [x for x in card.get("decisions", []) if x.get("kind") == "scope-growth"]
+
+
 def test_scope_growth_not_double_raised():
     card = {"id": "c1", "stage": "design", "pipeline_id": "pl1",
             "depth": "standard", "effort": {"scope": {"requirements": 3, "design": 9}},

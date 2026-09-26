@@ -414,6 +414,46 @@ async def _stop_tunnel_on_cleanup(app: web.Application) -> None:
         await tunnel.stop(state)
 
 
+async def _autostart_tunnel(app: web.Application) -> None:
+    """Bring the quick tunnel UP on backend startup when the guarded receiver is ready.
+
+    The tunnel lifecycle used to be purely user-initiated (the Webhook tab's Start action), so a
+    gateway restart / app-cycle left the tunnel DOWN until someone clicked Start — and the
+    self-healing supervisor only arms AFTER a successful start(), so it could never resurrect a
+    tunnel that was never started. This closes that gap: on startup, if the receiver is enabled,
+    secret-protected, allowlisted, and actually listening on the matching port (the SAME
+    _receiver_readiness gate the manual Start uses — we NEVER publish an unguarded loopback port),
+    start the tunnel and wire the autosync-on-URL callback. The supervisor then keeps it alive.
+    Fail-open: any error leaves the tunnel down and the manual Start path intact; it never crashes
+    the backend. Runs LAST on_startup so the receiver listener is already up when readiness is checked.
+    """
+    try:
+        tunnel = app.get("_dlc_tunnel_mod")
+        state = app.get(_TUNNEL_STATE_KEY)
+        if tunnel is None or state is None:
+            return
+        port = _tunnel_target_port(app)
+        ready, reason = _receiver_readiness(app, port)
+        if not ready:
+            logger.info("DLC-YOLO tunnel auto-start skipped: receiver not ready (%s)", reason)
+            return
+        async def _on_url(url: str) -> None:
+            with contextlib.suppress(Exception):
+                await _maybe_autosync(app, url)
+        with contextlib.suppress(Exception):
+            state.on_url_captured = _on_url
+        payload = await tunnel.start(state, port)
+        live_url = payload.get("public_url")
+        if live_url:
+            with contextlib.suppress(Exception):
+                await _maybe_autosync(app, live_url)
+        logger.info("DLC-YOLO tunnel auto-started on restart (url=%s)",
+                    live_url or "awaiting-capture")
+    except Exception:  # noqa: BLE001 - auto-start must never crash the backend
+        logger.warning("DLC-YOLO tunnel auto-start failed; tunnel stays down until manual Start",
+                       exc_info=True)
+
+
 # --- Cron control (pause/resume the app's own automation) ---------------------
 async def _handle_crons_status(request: web.Request) -> web.StreamResponse:
     crons = request.app["_dlc_crons_mod"]
@@ -477,6 +517,20 @@ def build_app() -> web.Application:
     app.router.add_post("/api/webhook/config", require_enabled(routes._handle_config_update))
     app.router.add_post("/api/agents/crew", require_enabled(routes._handle_crew_route_update))
 
+    # Uncapped state read. The UI previously fetched state.json via the host /api/file-read, which
+    # truncates at 512000 bytes — once ~/.dlc-yolo/state.json grew past ~500KB the board ghosted to
+    # 0 cards on chopped JSON. This route reads the SAME resolved state file (routes._resolve_state_path)
+    # with NO size cap and returns parsed JSON, empty-but-valid shape at 200 when absent/unreadable.
+    # Proxied to the UI at /apps/dlc-yolo/api/state.
+    app.router.add_get("/api/state", require_enabled(routes._handle_state))
+
+    # Uncapped state WRITE — the mutation-side mirror of GET /api/state. The UI mutates state by
+    # POSTing the full state object here; the host /api/file-write caps `content` at 512000 bytes,
+    # so a >512KB state.json failed every gate Approve/reject/config/cancel with 400 "invalid input".
+    # This route writes the SAME resolved state file atomically + uncapped under the shared state
+    # lock. Proxied to the UI at /apps/dlc-yolo/api/state.
+    app.router.add_post("/api/state", require_enabled(routes._handle_state_write))
+
     # Cloudflare quick-tunnel controls (guarded by app-enabled like the rest).
     app.router.add_get("/api/tunnel/status", require_enabled(_handle_tunnel_status))
     app.router.add_post("/api/tunnel/start", require_enabled(_handle_tunnel_start))
@@ -507,6 +561,10 @@ def build_app() -> web.Application:
     # LiveMiniPane shows crew output while a pass runs (docs/live-crew-stream-spec.md). Fail-open.
     app.on_startup.append(routes._start_crew_watch)
     app.on_cleanup.append(routes._stop_crew_watch)
+    # Auto-start the quick tunnel on backend startup when the guarded receiver is ready, so a
+    # restart/app-cycle brings the tunnel back WITHOUT a manual Start click (the supervisor then
+    # self-heals it). Registered LAST so the receiver listener is already up for the readiness gate.
+    app.on_startup.append(_autostart_tunnel)
     app.on_cleanup.append(_stop_tunnel_on_cleanup)
     logger.info("DLC-YOLO app backend routes mounted at /api/webhook/*, /api/agents/crew, /api/tunnel/*")
     return app

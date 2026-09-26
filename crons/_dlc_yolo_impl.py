@@ -127,6 +127,33 @@ MAX_STEP_RETRIES = 3
 # deterministic constant + backstop, so a prompt regression cannot silently disable them. The
 # growth factor is the single source of truth; the prompt references these values.
 GROWTH_FACTOR = {"quick": 1.5, "standard": 2.0, "deep": 3.0}
+
+# The ONE T-shirt-size → effort-points table (matches the SKILL's S=1/M=3/L=5/XL=8 currency).
+# Root-cause fix (scope-growth-dead-trigger): step-agents write effort.scope[phase] as SIZE
+# STRINGS ('M','S') but every numeric consumer (difficulty tier, budget backstop, spent-sum)
+# guarded on isinstance(int|float) and silently skipped — so scope-growth NEVER fired on real
+# data. This coercion is the shared normalizer; a number passes through, a known size maps, an
+# unknown value stays None (skip, never faked).
+_SIZE_POINTS = {"S": 1, "M": 3, "L": 5, "XL": 8}
+
+
+def _scope_points(value) -> float | None:
+    """Coerce a scope value to numeric effort points. Number → itself; T-shirt size string
+    ('S'/'M'/'L'/'XL', case-insensitive) → its points; anything else → None (unmeasurable,
+    skipped by callers — we never fabricate a number on unknown data)."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        pts = _SIZE_POINTS.get(value.strip().upper())
+        if pts is not None:
+            return float(pts)
+        try:
+            return float(value.strip())
+        except (ValueError, AttributeError):
+            return None
+    return None
 TRIGGER_PHASES = frozenset({"requirements", "design", "tasks", "implement"})
 MAX_BOOTSTRAP_CREWS = 3
 
@@ -549,6 +576,60 @@ def _load() -> dict:
 
 
 def _save(state: dict) -> None:
+    # DEDUP GUARD: collapse duplicate card ids (and pipeline ids) before persisting. Two entries
+    # with the same id are a render-breaker — the board keys its list by id, so a duplicate key
+    # makes the whole pipeline column fail to render (the "pipe gone UI-wise" bug), and duplicate
+    # ids also confuse every id-keyed lookup in the runtime. A double-append happens when two
+    # actors backfill the same card (the /dlc-yolo label-without-card handoff forced hand-writes).
+    # Keep the MOST COMPLETE entry per id (most keys, then one with execution_schedule/step_status),
+    # preserving order by first occurrence. Deterministic, idempotent, no data invented.
+    for _key in ("cards", "pipelines"):
+        items = state.get(_key)
+        if not isinstance(items, list):
+            continue
+        seen: dict[str, int] = {}          # id -> index in `kept`
+        kept: list = []
+        collapsed = 0
+        for item in items:
+            iid = item.get("id") if isinstance(item, dict) else None
+            if not iid:
+                kept.append(item)          # keep unkeyed/malformed entries untouched
+                continue
+            if iid not in seen:
+                seen[iid] = len(kept)
+                kept.append(item)
+                continue
+            # duplicate id: keep whichever record is more complete, in the first slot.
+            collapsed += 1
+            prev_idx = seen[iid]
+            prev = kept[prev_idx]
+            def _completeness(c: dict) -> tuple:
+                return (len(c.keys()) if isinstance(c, dict) else 0,
+                        int(isinstance(c, dict) and "execution_schedule" in c),
+                        int(isinstance(c, dict) and bool(c.get("step_status"))),
+                        int(isinstance(c, dict) and "event_outbox" in c))
+            if _completeness(item) > _completeness(prev):
+                kept[prev_idx] = item
+        if collapsed:
+            state[_key] = kept
+    # HISTORY CAP: bound the append-only per-card history arrays before persisting. The host
+    # dashboard's /api/file-read endpoint TRUNCATES responses at 512000 bytes; once state.json
+    # crosses that, the UI receives chopped JSON, JSON.parse throws in resolveStateFile, and the
+    # board renders 0 cards despite fully intact state (the "pipeline ghosting" bug — root-caused
+    # 2026-09-23). execution_envelope_history entries are ~11KB each, so a handful of cards with
+    # deep history alone blow the cap. Keep only the most recent _HISTORY_KEEP snapshot per card;
+    # the LIVE execution_envelope / gate_review fields are separate and never touched here.
+    # NOTE: interim guard only — the durable fix is the uncapped backend /api/state endpoint. At
+    # ~11KB/entry, even 3 kept across 15 advancing cards re-crosses 512KB, so keep just 1.
+    _HISTORY_KEEP = 1
+    _CAPPED_HISTORIES = ("execution_envelope_history", "gate_review_history")
+    for _card in state.get("cards", []):
+        if not isinstance(_card, dict):
+            continue
+        for _hk in _CAPPED_HISTORIES:
+            _hv = _card.get(_hk)
+            if isinstance(_hv, list) and len(_hv) > _HISTORY_KEEP:
+                _card[_hk] = _hv[-_HISTORY_KEEP:]
     # CLOBBER GUARD (matches _bootstrap): never persist an EMPTY state over a file that exists
     # with bytes. An empty in-memory state reaching here means an upstream read degraded to {};
     # writing it would zero a populated board (the 13-card-wipe class). Refuse and leave disk intact.
@@ -962,9 +1043,9 @@ def _classify_dispatch_difficulty(card: dict, step: dict, pl: dict | None,
     try:
         idx = ladder.index(step_id)
         for j in range(idx - 1, -1, -1):
-            prev_v = scope.get(ladder[j])
-            cur_v = scope.get(step_id)
-            if isinstance(prev_v, (int, float)) and isinstance(cur_v, (int, float)) and prev_v > 0:
+            prev_v = _scope_points(scope.get(ladder[j]))
+            cur_v = _scope_points(scope.get(step_id))
+            if prev_v is not None and cur_v is not None and prev_v > 0:
                 if cur_v > prev_v * factor:
                     grew = True
                 break
@@ -1187,6 +1268,83 @@ def _scheduler_pending_stale(card: dict, step_id: str, now: str) -> bool:
     if started is None or observed is None:
         return False
     return (observed - started).total_seconds() >= PENDING_STALE_SECS
+
+
+# A node's status counts as "active" (occupying a permit/session slot) under these words. The plan
+# treats such a node as already-dispatched and will neither re-ready nor complete it — so if the
+# owning session is DEAD the card wedges forever (card-rps3d-fixgame: node status='running',
+# session_ref -> a cron that no longer exists, step_status='pending'). The reaper below breaks that
+# wedge.
+_SCHEDULER_ACTIVE_STATUSES = {"permit-acquired", "running", "cancelling"}
+
+
+def _scheduler_node_session_dead(card: dict, node: dict, step_id: str, now: str) -> bool:
+    """Deterministically decide whether an ACTIVE node's owning session is dead and reclaimable.
+
+    The reconcile pass is a pure ``(state, now)`` function with no MCP/ctx access, so it CANNOT
+    call ``cron list`` to prove a cron gone from inside the sandbox. We use the conservative,
+    deterministic time-based rule the design sanctions: an active node whose owning step is still
+    ``pending`` (no terminal outcome ever landed), whose ``pending_at[step]`` is stale past
+    ``PENDING_STALE_SECS``, AND that shows NO observed session progress (no ``first_output_at`` and
+    no ``session_started_at`` newer than the stale window) is treated as an abandoned/dead spawn.
+
+    A genuinely in-flight session is protected two ways: (1) the pending window has not elapsed, or
+    (2) the session emitted progress (``first_output_at``), which a live run records. This never
+    fires on a fresh running node inside the window, and it is idempotent (once requeued the node is
+    no longer in an ACTIVE status, so a second pass is a no-op)."""
+    if not isinstance(node, dict) or node.get("status") not in _SCHEDULER_ACTIVE_STATUSES:
+        return False
+    # Only an unresolved (still-pending) step can have an orphaned active node. A step that reached
+    # a terminal outcome is reconciled by the status branches, not the reaper.
+    statuses = card.get("step_status") if isinstance(card.get("step_status"), dict) else {}
+    if str(statuses.get(step_id) or "") != "pending":
+        return False
+    # Never reap a step whose RESULT is already completed — reaping re-queues it and repeats
+    # finished work (observed: implement completed inline, its node stayed 'running' on a dead
+    # session, step_status got re-opened to 'pending', and the reaper then re-ran the whole step).
+    # A completed result means the work is done; the status branches finalize it, not the reaper.
+    _sr = (card.get("step_results") or {}).get(step_id)
+    if isinstance(_sr, dict) and str(_sr.get("status") or "").lower() == "completed":
+        return False
+    if not _scheduler_pending_stale(card, step_id, now):
+        return False
+    # Positive liveness signal: a live session records first output. If present, do NOT reap.
+    if node.get("first_output_at"):
+        return False
+    # A session_started_at within the stale window also means a spawn is genuinely in flight.
+    observed = _scheduler_time(now)
+    started = _scheduler_time(node.get("session_started_at"))
+    if observed is not None and started is not None \
+            and (observed - started).total_seconds() < PENDING_STALE_SECS:
+        return False
+    return True
+
+
+def _scheduler_reap_orphan_node(card: dict, node: dict, step_id: str, now: str) -> bool:
+    """Reset an orphaned active node whose owning session is dead back to a re-dispatchable state.
+
+    Pops the dead session/permit bindings, sets status='observed' (the re-dispatchable resting
+    status a fresh node starts in), records requeued provenance, and clears the stale pending_at
+    entry so the plan's ``status == "pending"`` guard re-escalates the step cleanly. Idempotent:
+    after this runs the node is no longer ACTIVE, so a repeat pass short-circuits in
+    ``_scheduler_node_session_dead``."""
+    for field in ("session_ref", "session_started_at", "permit_id", "permit_acquired_at"):
+        if field in node:
+            node.pop(field)
+    node["status"] = "observed"
+    node["updated_at"] = now
+    node["requeued_reason"] = "orphaned-session-dead"
+    node["requeued_at"] = now
+    pending = card.get("pending_at")
+    if isinstance(pending, dict) and step_id in pending:
+        pending.pop(step_id, None)
+    statuses = card.get("step_status")
+    if isinstance(statuses, dict) and statuses.get(step_id) == "pending":
+        # A dead spawn never truly ran, so return the step to UNSTARTED. The deterministic
+        # escalation path treats step_status in ('' / absent) as re-dispatchable, so the plan
+        # re-readies the 'observed' node and a fresh dispatch re-registers pending_at cleanly.
+        statuses.pop(step_id, None)
+    return True
 
 
 def _scheduler_store(card: dict) -> dict:
@@ -1894,6 +2052,50 @@ def _scheduler_reconcile_nodes(state: dict, now: str) -> bool:
             pointer = sessions.get(step_id) if isinstance(sessions.get(step_id), dict) else {}
             node_status = node.get("status")
             lifecycle = str(card.get("lifecycle") or "").lower()
+            # STALE-NODE REAPER: an ACTIVE node (permit-acquired/running/cancelling) whose owning
+            # session is dead (still-pending step, stale past the window, no observed progress) is
+            # requeued to a re-dispatchable 'observed' status so the plan re-escalates it. Skip
+            # terminal (retired/merged) and cancel (cancelled/superseded/parked) lifecycles — those
+            # are finalized by their own branches, not reclaimed. Runs before the status branches so
+            # the reset node falls through to the normal 'pending' re-escalation path this cycle.
+            if lifecycle not in _SCHEDULER_TERMINAL_LIFECYCLES \
+                    and lifecycle not in _SCHEDULER_CANCEL_LIFECYCLES \
+                    and _scheduler_node_session_dead(card, node, step_id, now):
+                changed |= _scheduler_reap_orphan_node(card, node, step_id, now)
+                # The node is now 'observed' (re-dispatchable) with its stale pending_at cleared.
+                # Skip the rest of this node's derivation THIS pass: the status branches below would
+                # otherwise see the still-'pending' step_status with a now-absent pending_at and
+                # re-mark the node 'running', undoing the reap. The plan re-escalates it via the
+                # normal pending path once the step agent re-registers pending_at.
+                continue
+            # DETERMINISTIC COMPLETED-RESULT FINALIZER (anti-wedge). Under the self-delegate HUB
+            # model a step's streaming subagent does the work and the step writes a completed
+            # result (step_results[step].status == "completed"), but the THIN hub session often
+            # ends WITHOUT writing the terminal step_status='done' — so step_status stays
+            # 'pending', the branch below re-derives the node to 'running' every cycle, and the
+            # card wedges forever (observed at tasks/implement/review on card-rps3d-fixgame). The
+            # reconcile was purely (step_status -> node); nothing promoted (completed result ->
+            # step_status). Do that here, deterministically, so finalization never depends on the
+            # LLM remembering to write step_status. Promote a non-terminal, non-blocked step that
+            # has a completed result to 'done'; the existing `done` branch then finalizes the node,
+            # and the main loop's result-scope enforcement still sends a genuinely-incomplete
+            # completed result to a human-visible `blocked` (never back to `pending`). Gates carry
+            # no step_results, so they are inherently excluded; guard on it explicitly too.
+            if status in {"pending", "error", ""} \
+                    and lifecycle not in _SCHEDULER_TERMINAL_LIFECYCLES \
+                    and lifecycle not in _SCHEDULER_CANCEL_LIFECYCLES:
+                _step_def_fin = _step_def(_pipeline_for(state, card), step_id)
+                _result_fin = (card.get("step_results") or {}).get(step_id)
+                if (not _is_gate(_step_def_fin) and isinstance(_result_fin, dict)
+                        and str(_result_fin.get("status") or "").lower() == "completed"):
+                    statuses[step_id] = "done"
+                    card.setdefault("step_status", statuses)
+                    card.setdefault("pending_at", {}).pop(step_id, None)
+                    card["updated_at"] = now
+                    status = "done"
+                    node["finalized_reason"] = "completed-result"
+                    node["finalized_at"] = now
+                    changed = True
             if lifecycle in _SCHEDULER_TERMINAL_LIFECYCLES:
                 changed |= _scheduler_set(
                     node, status="completed",
@@ -3144,11 +3346,25 @@ def _build_envelope_observation(state: dict, card: dict, step: dict,
     if research_policy.get("required"):
         scope_enforcement["research"] = "required"
     required_skills, facets = _required_step_skills(card, step, contract)
+    evidence_list = _clone(evidence if isinstance(evidence, list) else [evidence])
+    validation_list = _clone(validation if isinstance(validation, list) else [validation])
+    # VISUAL-CRITIC GATE (external-eyes-spec): a step touching a visual/frontend facet must carry
+    # a RENDERED-AND-INSPECTED evidence record, not a self-declared PASS. Research (arxiv
+    # 2510.11498 MLLM-critic; Fermi 37-run report) is unambiguous that LLMs self-score
+    # optimistically — a self-pass on an ugly render is the exact failure this repo hit
+    # (card-rps3d-fixgame shipped a washed-out blob as PASS-WITH-NOTES). Forcing 'visual-evidence'
+    # into REQUIRED evidence means _result_scope_assessment blocks terminal `done` until the bundle
+    # actually contains a screenshot+assessment record — external eyes, not the builder's word.
+    visual_facet = any(f in {"visual", "frontend", "ui", "ux", "interaction-design"} for f in facets)
+    if visual_facet:
+        evidence_list = _string_values(evidence_list, "visual-evidence")
+        if scope_enforcement.get("evidence") != "required":
+            scope_enforcement["evidence"] = "required"
     result_scope = {
         "detail": scope.get("artifact_detail", _DEPTH_ENVELOPE_DEFAULTS[depth]["result_scope"]["detail"]),
         "alternatives": _clone(alternatives),
-        "evidence": _clone(evidence if isinstance(evidence, list) else [evidence]),
-        "validation": _clone(validation if isinstance(validation, list) else [validation]),
+        "evidence": evidence_list,
+        "validation": validation_list,
         "enforcement": scope_enforcement,
         "required_outcome_ids": _clone(required_outcome_ids),
         "hard_constraint_ids": _clone(hard_constraint_ids),
@@ -3679,16 +3895,25 @@ def _research_record_complete(record: dict, citations_required: bool) -> bool:
 def _matching_result_records(bundle: dict, expected: list[str]) -> list[str]:
     records = bundle.get("validation_and_evidence")
     records = records if isinstance(records, list) else []
+    # Semantic alias families: a required token is satisfied by any record whose kind is in its
+    # family. 'visual-evidence' (the visual-critic gate) accepts the range of rendered-and-inspected
+    # kinds agents actually emit — a screenshot proof, a visual review, a render/diff — so the gate
+    # demands external visual eyes without dictating one literal kind string.
+    _TOKEN_FAMILIES = {
+        "visual-evidence": {"visual-evidence", "visual-proof", "visual-review", "visual-diff",
+                            "screenshot", "render", "rendered-screenshot", "vlm-critique"},
+    }
     missing = []
     for need in expected:
         token = str(need).lower()
+        family = _TOKEN_FAMILIES.get(token, {token})
         matched = False
         for item in records:
             if not isinstance(item, dict):
                 continue
             kind = str(item.get("kind") or item.get("type") or item.get("id") or "").lower()
             status = str(item.get("status") or "").lower()
-            if (kind == token or token in _string_values(item.get("satisfies"))) \
+            if (kind in family or token in _string_values(item.get("satisfies"))) \
                     and status in _RESULT_COMPLETE_STATUSES and _record_ref(item):
                 matched = True
                 break
@@ -3736,6 +3961,34 @@ def _scheduler_phase_assessment(card: dict, step_id: str, envelope: dict) -> lis
             child_runs = _child_run_ids(card, step_id, _runtime_handshake(card, step_id))
             legacy_research_ok = not required_research or bool(complete_research)
             legacy_crew_ok = not required_crews or bool(child_runs)
+            # FALSE-BLOCK RECOVERY (completed-but-unrecorded crew pass): a step can finish its crew
+            # pass and write a completed result, yet leave child_runs/pass_schedule empty — a
+            # read-only step profile cannot persist pass_schedule (no write tool), and nothing
+            # auto-records the completed subagent's run id. Without this, a demonstrably-FINISHED
+            # step (step_results.status == "completed") false-blocks forever on "required phase
+            # schedule record". When the result is complete AND the step allocated exactly the
+            # crew pass(es) it was supposed to run, accept the completed result as proof the
+            # required crew pass ran, rather than demanding bookkeeping the profile couldn't write.
+            if (not legacy_crew_ok and isinstance(result, dict)
+                    and str(result.get("status") or "").lower() == "completed"):
+                alloc = ((card.get("step_sessions") or {}).get(step_id) or {}).get("pass_allocation")
+                allocated_crews = (int(alloc.get("crew_passes") or 0)
+                                   if isinstance(alloc, dict) else 0)
+                # Fall back to the ENVELOPE's own allocation when the session pointer has none yet
+                # (e.g. a completed result reconciled before/without a step_sessions pass_allocation,
+                # or a SELF-DELEGATE agent step whose single streaming subagent finished but whose
+                # readonly/authoring profile could not persist pass_schedule). The envelope is the
+                # authoritative allocation the dispatch used, so it is safe proof the step ran the
+                # crew pass(es) it was allocated.
+                if allocated_crews <= 0:
+                    _env_routing = (envelope.get("routing")
+                                    if isinstance(envelope.get("routing"), dict) else {})
+                    env_alloc = (_env_routing.get("pass_allocation")
+                                 if isinstance(_env_routing.get("pass_allocation"), dict) else {})
+                    allocated_crews = (int(env_alloc.get("crew_passes") or 0)
+                                       if isinstance(env_alloc, dict) else 0)
+                if allocated_crews >= required_crews and allocated_crews > 0:
+                    legacy_crew_ok = True
             if (legacy_research_ok and legacy_crew_ok and isinstance(result, dict)):
                 # Legacy records prove at least one required delegated/research run under the old
                 # coarse schema, but cannot prove target-level fan-in or timings. New producers
@@ -3761,13 +4014,18 @@ def _scheduler_phase_assessment(card: dict, step_id: str, envelope: dict) -> lis
             continue
         if not isinstance(observed_node, dict):
             continue
-        started = observed_node.get("started_at") or observed_node.get("session_started_at")
+        node_terminal = observed_node.get("terminal_at") or observed_node.get("completed_at")
         for dependency_id in item.get("depends_on") or []:
             dependency = observed_nodes.get(str(dependency_id))
             if not isinstance(dependency, dict):
                 continue
             finished = dependency.get("terminal_at") or dependency.get("completed_at")
-            if started and finished and str(started) < str(finished):
+            # Order violation ONLY when both nodes reached terminal AND the dependent finished
+            # BEFORE its dependency. The older started<finished check false-blocks the self-delegate
+            # HUB topology: a hub/synthesis node's started_at is the hub session start, which by
+            # construction PRECEDES the child (crew-*) it spawns — so started<finished is normal and
+            # not an ordering error. Compare terminal timestamps (a real inversion) instead.
+            if node_terminal and finished and str(node_terminal) < str(finished):
                 errors.append(f"phase dependency order {dependency_id}->{node_id}")
 
     unknown = sorted(set(observed_nodes) - set(declared))
@@ -4698,6 +4956,32 @@ _WORKTREE_BLOCK_PREFIX = "worktree lease:"
 _WORKTREE_TERMINAL_LIFECYCLES = frozenset({"retired", "merged", "cancelled"})
 
 
+def _is_false_card_init_block(card: dict, reason: str) -> bool:
+    """True when a step-agent self-blocked claiming the card 'cannot be initialized / must be
+    written by the orchestrator' — but the card is ACTUALLY runtime-initialized.
+
+    This block reason is composed by the step-agent (readonly capability) when it decides the card
+    was not created through the orchestrator ingest path. But a card created by the console or a
+    backfill IS legitimate: the deterministic runtime still stamps intent integrity, the execution
+    envelope, the lease, and the ownership guard before dispatch. When those are present the
+    premise of the block is false — the agent had everything it needed. The runtime detects that
+    and clears the false block so the step re-dispatches, instead of leaving the card wedged
+    forever waiting for a human to resolve a capability-gap that does not exist. (A readonly agent
+    cannot clear its own false block; the deterministic loop must.)
+    """
+    r = str(reason or "").lower()
+    if not (("initialize card" in r or "must be written by orchestrator" in r
+             or "cannot initialize" in r)
+            and "capability-gap" in r):
+        return False
+    # The card must genuinely be initialized for the block to be FALSE.
+    integrity = card.get("intent_integrity")
+    integrity_ok = isinstance(integrity, dict) and integrity.get("status") == "satisfied"
+    has_envelope = isinstance(card.get("execution_envelope"), dict)
+    has_intent = isinstance(card.get("raw_intent"), dict) or isinstance(card.get("intent_contract"), dict)
+    return integrity_ok and has_envelope and has_intent
+
+
 def _git(repo: Path, *args: str, timeout: int = 20):
     """Run one argument-safe git command rooted in a proven repository."""
     try:
@@ -5225,8 +5509,33 @@ def _missing_skills(required: list[str], observed: list[str]) -> list[str]:
 
 
 def _missing_capabilities(required: list[str], observed: list[str]) -> list[str]:
-    available = {_tool_leaf(item) for item in observed}
-    return [item for item in required if _tool_leaf(item) not in available]
+    # A profile tool entry may be a WILDCARD server grant: '@kirocrew-core' (or 'kirocrew-core::*')
+    # grants EVERY tool on that MCP server, including select_crew/spawn_run. The dlcyolo-* profiles
+    # declare '@kirocrew-core' rather than listing each core tool, so a literal-leaf match would
+    # FALSE-BLOCK a self-delegate/authoring step on 'assigned-profile-missing-tools' even though the
+    # routing tools are granted. Expand wildcards into the servers they cover, and treat a required
+    # 'server::tool' as satisfied when that server is wildcard-granted.
+    wildcard_servers: set[str] = set()
+    available: set[str] = set()
+    for item in observed:
+        token = str(item)
+        if token.startswith("@"):
+            wildcard_servers.add(token[1:])
+            continue
+        if token.endswith("::*"):
+            wildcard_servers.add(token[:-3])
+            continue
+        available.add(_tool_leaf(token))
+    missing: list[str] = []
+    for item in required:
+        token = str(item)
+        server = token.rsplit("::", 1)[0] if "::" in token else None
+        if _tool_leaf(token) in available:
+            continue
+        if server is not None and server in wildcard_servers:
+            continue
+        missing.append(item)
+    return missing
 
 
 def _delegation_targets(step: dict) -> list[dict]:
@@ -5248,6 +5557,26 @@ def _delegation_targets(step: dict) -> list[dict]:
             "optional", "preferred", "advisory",
         }
         targets.append({"kind": "addendum", "id": str(target), "required": required})
+    # SELF-DELEGATION (stream-every-agent-step): a cron STEP session cannot stream its own tokens
+    # (the host broadcasts chat_chunk only for interactive chat-* slots, never for cron-* step
+    # slots). Only spawn_run SUBAGENTS stream — as card-keyed subagent_chunk frames the UI 'wing'
+    # consumes. A crew/addendum step already delegates → it streams. But an agent step with NO
+    # crew/addenda (tasks/implement/review/pr) would run INLINE in the cron session → no subagent →
+    # the wing shows 'idle' then dumps the whole result at once. So when an agent step produced NO
+    # STEP-AGENT IS THE WORKER (step-agent-as-worker-spec, supersedes stream-every-agent-step).
+    # A crewless agent step does its work INLINE in its own persistent session and reasons there —
+    # it is NOT a relay that spawns a clone of itself just to stream. That self-delegate 'hub' was a
+    # workaround for one thing only: a cron session can't emit chat_chunk, so the old design bounced
+    # the work through a subagent purely to get a live subagent_chunk stream — a whole second session
+    # per step for streaming alone. Instead the step-agent narrates via card.step_progress
+    # checkpoints (the ordered, seq'd, flock-shared trail the crew fold also writes to), so the
+    # coordinator's line-of-thought and any real crew output interleave in true order in the wing
+    # WITHOUT a clone. spawn_run subagents now earn their existence: they appear ONLY as genuine
+    # crew/addenda targets (real parallel fan-out), never as a mandatory self-clone. Gates
+    # (type!='agent') never reach here with a target and get none.
+    #
+    # (No self-delegate target is appended: an agent step with no crew/addenda has an EMPTY target
+    #  list, which the seed reads as 'work inline, narrate via step_progress'.)
     return targets
 
 
@@ -5461,20 +5790,33 @@ def _ensure_runtime_handshake(state: dict, card: dict, step: dict, pl: dict | No
     required_targets = [item for item in targets if item.get("required")]
     delegation_required = bool(required_targets)
     fallback, fallback_source = _fallback_policy(state, card, step, pl)
-    # Single-crew inline-collapse: the runtime (not the agent) sets allow-inline and drops the
-    # delegation-required gate, so a lone-crew step runs in ONE session on the crew's profile
-    # instead of a coordinator delegating to a separate crew session.
-    _sc_single, _sc_crew, _sc_profile = _single_crew_inline(card, step)
-    if _sc_single:
-        fallback, fallback_source = "allow-inline", "single-crew-collapse"
-        delegation_required = False
+    # STREAM-EVERY-AGENT-STEP reconciliation with single-crew inline-collapse:
+    # A single-crew step still runs on the CREW'S OWN capability profile (the profile narrowing at
+    # `assigned_profile` above, and at the launch seed) — that efficiency is preserved. But we NO
+    # LONGER suppress delegation for it: the user requires that EVERY agent step delegate >=1
+    # subagent so its output STREAMS (cron step sessions can't stream chat_chunk; only spawn_run
+    # subagents emit the card-keyed subagent_chunk frames the wing consumes). The old collapse set
+    # fallback=allow-inline + delegation_required=False, which ran the work INLINE (no subagent, no
+    # stream). Removing that keeps the single-crew step a thin hub that spawns one streaming
+    # subagent on the crew's profile — same 1-session cost shape as before, but it streams.
     research_policy = (envelope.get("research_policy")
                        if isinstance(envelope, dict)
                        and isinstance(envelope.get("research_policy"), dict) else {})
     research_required = research_policy.get("mode") == "required"
     worktree_required = _step_requires_worktree(card, step, pl)
     worktree_observation = _worktree_observation(card, ptr)
-    required_tools = list(_REQUIRED_ROUTING_TOOLS) if delegation_required else []
+    # Kind-aware routing-tool requirement. Under the step-agent-as-WORKER model _delegation_targets
+    # no longer emits a self-delegate (kind='agent') target, so required_targets holds only real
+    # crew/addendum kinds and this branch resolves to the full routing toolbelt. The agent-only
+    # guard is retained as a defensive fallback: IF an agent-kind target ever reappears, such a step
+    # needs only spawn_run (no named crew to select_crew for) and must not false-block on select_crew.
+    _self_delegate_only = bool(required_targets) and all(
+        item.get("kind") == "agent" for item in required_targets)
+    if delegation_required:
+        required_tools = (["kirocrew-core::spawn_run"] if _self_delegate_only
+                          else list(_REQUIRED_ROUTING_TOOLS))
+    else:
+        required_tools = []
     if research_required:
         required_tools = _unique_strings(required_tools, research_policy.get("tools"),
                                          list(_RESEARCH_TOOLS))
@@ -5523,10 +5865,26 @@ def _ensure_runtime_handshake(state: dict, card: dict, step: dict, pl: dict | No
                 "lease_id": worktree_observation.get("lease_id"),
             })
         elif phase == "terminal" and worktree_observation.get("binding_status") != "verified":
-            hard_mismatches.append({
-                "kind": "worktree-binding-unverified",
-                "lease_id": worktree_observation.get("lease_id"),
-            })
+            # FALSE-BLOCK GUARD: a finished cron step often reports NO live worktree observation, so
+            # binding_status is 'unobservable'/absent rather than 'verified'. Treating that as a
+            # hard mismatch blocks a demonstrably-completed step (step_results.status == 'completed')
+            # on an absence of evidence, not evidence of a problem — the same false-block class as
+            # investigate's 'required phase schedule record'. Only block when the binding was
+            # actually OBSERVED as not-verified; skip when it is merely unobservable AND the step
+            # result is completed.
+            _binding = str(worktree_observation.get("binding_status") or "")
+            _sr = (card.get("step_results") or {}).get(step_id)
+            _result_completed = (isinstance(_sr, dict)
+                                 and str(_sr.get("status") or "").lower() == "completed")
+            # 'unverified' = a lease exists but no working_dir was observed (absence of evidence, the
+            # normal finished-cron case); 'unobservable'/'' = no lease observation at all. Both are
+            # absence-of-evidence, NOT 'mismatch' (an observed wrong path, blocked separately above).
+            _absent_binding = _binding in ("", "unverified", "unobservable", "unknown")
+            if not (_absent_binding and _result_completed):
+                hard_mismatches.append({
+                    "kind": "worktree-binding-unverified",
+                    "lease_id": worktree_observation.get("lease_id"),
+                })
     if model_resolution == "mismatch":
         hard_mismatches.append({
             "kind": "model-binding-mismatch",
@@ -9154,7 +9512,8 @@ def _run_advance_passes(ctx, state: dict, now: str, cycle: dict) -> bool:
         eff = card.get("effort")
         if isinstance(eff, dict) and isinstance(eff.get("scope"), dict) and eff["scope"]:
             try:
-                total = sum(v for v in eff["scope"].values() if isinstance(v, (int, float)))
+                total = sum(p for p in (_scope_points(v) for v in eff["scope"].values())
+                            if p is not None)
                 if eff.get("spent") != total:
                     eff["spent"] = total
                     changed = True
@@ -9173,8 +9532,8 @@ def _run_advance_passes(ctx, state: dict, now: str, cycle: dict) -> bool:
             ladder = _ladder(plc) if plc else []
             for i in range(1, len(ladder)):
                 cur_step, prev_step = ladder[i], ladder[i - 1]
-                cur_v, prev_v = scope.get(cur_step), scope.get(prev_step)
-                if not (isinstance(cur_v, (int, float)) and isinstance(prev_v, (int, float)) and prev_v > 0):
+                cur_v, prev_v = _scope_points(scope.get(cur_step)), _scope_points(scope.get(prev_step))
+                if not (cur_v is not None and prev_v is not None and prev_v > 0):
                     continue
                 if cur_v <= prev_v * factor:
                     continue
@@ -9484,6 +9843,20 @@ def _run_advance_passes(ctx, state: dict, now: str, cycle: dict) -> bool:
                     elif current_block != lease_error:
                         card.setdefault("block_reason", {})[stage] = lease_error
                         changed = True
+                # FALSE card-init capability-gap: a readonly step-agent blocked claiming the card
+                # was not initialized / must be written by the orchestrator — but the card IS
+                # runtime-initialized (intent integrity satisfied + envelope + intent, guard
+                # re-checked below). The premise is false and the agent can't clear its own block,
+                # so the deterministic loop clears it and re-escalates (a fresh dispatch proceeds).
+                # This is what unwedges a console/backfill-created card (issue #33 class).
+                elif (status == "blocked" and trust != "manual"
+                        and _is_false_card_init_block(card, current_block)
+                        and _owner_ok(state, card, pl)):
+                    card.get("step_status", {}).pop(stage, None)
+                    card.get("block_reason", {}).pop(stage, None)
+                    card.setdefault("guard", {"passed": True, "at": now})
+                    status = ""
+                    changed = True
                 # blocked: hand to a human; the loop neither advances nor re-fires it.
                 if status == "blocked":
                     waiting_gates.append(
@@ -9722,26 +10095,64 @@ def _run_advance_passes(ctx, state: dict, now: str, cycle: dict) -> bool:
                             if isinstance(item, dict) and item.get("id")]
                         target_ids = (allocated_target_ids
                                       if "targets" in pass_allocation else configured_target_ids)
+                        # Kind-aware delegation wording. A self-delegate target (kind='agent',
+                        # produced when an agent step has no crew/addenda) must be spawned with
+                        # spawn_run of the step's OWN agent — NOT select_crew (there is no crew).
+                        # A crew/addendum target routes via select_crew/spawn_run as before. This
+                        # is what makes tasks/implement/review/pr each spawn ONE streaming subagent.
+                        _alloc_targets = (pass_allocation.get("targets")
+                                          if isinstance(pass_allocation.get("targets"), list)
+                                          else (delegation.get("targets") or []))
+                        # step-agent-as-worker: there is no self-delegate target anymore, so a
+                        # crewless step has NO delegation.required — it falls to the worker branch.
+                        _narrate = (
+                            f" NARRATE: you are a cron step session — your own tokens do NOT stream."
+                            f" Between tool calls, append SHORT substantive checkpoints to"
+                            f" card.step_progress['{stage}'].lines (schema: {{seq,at,phase,note}},"
+                            f" note<=120 chars, no ids/paths/secrets) describing your line of thought"
+                            f" — what you found, what you decided, what you are doing next. These are"
+                            f" the ONLY live view of your reasoning in the wing, and they interleave"
+                            f" in true order with any crew subagent's folded output (same seq'd"
+                            f" trail). Narrate the reasoning, not noise.")
                         if delegation.get("required"):
                             if delegation.get("outcome") == "inline-authorized":
                                 crew_line = (
                                     f" DELEGATION: targets={target_ids}. The deterministic preflight"
                                     f" found a capability mismatch, but fallback_policy=allow-inline"
                                     f" was explicitly configured before dispatch. Work inline, record"
-                                    f" why delegation was unavailable, and never fabricate child runs.")
+                                    f" why delegation was unavailable, and never fabricate child runs."
+                                    + _narrate)
                             else:
                                 crew_line = (
                                     f" DELEGATION: targets={target_ids}; fallback_policy="
                                     f"{delegation.get('fallback_policy', 'delegated-or-blocked')}."
                                     f" Profile '{profile}' declares routing capability, but the"
                                     f" deterministic driver cannot observe the live tool inventory."
-                                    f" Attempt select_crew/spawn_run from THIS session and record every"
-                                    f" matching child run ID in card.child_runs['{stage}']. If the live"
+                                    f" These are REAL crew/addendum targets (genuine parallel work),"
+                                    f" not a clone of yourself. Attempt select_crew/spawn_run from THIS"
+                                    f" session and record every matching child run ID in"
+                                    f" card.child_runs['{stage}']. Their output streams live"
+                                    f" (subagent_chunk) and folds into the same step_progress trail as"
+                                    f" your own checkpoints, in true order. As the COORDINATOR, read"
+                                    f" each return and reason about it (accept / steer / re-delegate /"
+                                    f" integrate) — the handoff discussion is the work. If the live"
                                     f" tools or required target are unavailable, write 'blocked'; do"
                                     f" NOT execute inline unless fallback_policy=allow-inline and do"
-                                    f" NOT fake delegation.")
+                                    f" NOT fake delegation."
+                                    + _narrate)
                         else:
-                            crew_line = ""
+                            # WORKER (no crew/addenda): do the work IN THIS session and reason here.
+                            # Spawn subagents ONLY for genuinely independent parallel sub-work, then
+                            # integrate their returns — never a mandatory clone just to stream.
+                            crew_line = (
+                                f" WORKER: this step has no crew/addenda — you ARE the worker. Do the"
+                                f" step's actual work IN THIS session and reason here. Do NOT spawn a"
+                                f" subagent that merely re-does this whole step (no self-cloning)."
+                                f" spawn_run a subagent ONLY when there is genuinely INDEPENDENT"
+                                f" parallel sub-work worth fanning out; record each child run ID in"
+                                f" card.child_runs['{stage}'] and integrate its return. Otherwise work"
+                                f" directly and write the step artifact + terminal status yourself."
+                                + _narrate)
                         # DECOMPOSITION directive (persistent-step-agent ↔ depth-budget seam): the
                         # decompose-into-child-cards logic lives in the ORCHESTRATOR prompt, but under
                         # Spec C the spec/intent step is run by a capability PROFILE agent (not
@@ -9762,6 +10173,44 @@ def _run_advance_passes(ctx, state: dict, now: str, cycle: dict) -> bool:
                             f" metadata is absent, raise a topology/capability decision and block"
                             f" rather than silently fanning out or keeping one overloaded card."
                             if stage in ("intent", "requirements") else "")
+                        # SCOPE-GROWTH BACK-STEP PROPOSER (leg #2 of the back-step machinery —
+                        # closes the Step Review Contract gap where the step-agent was never TOLD to
+                        # propose a back-step). The deterministic HB1 §3.1 backstop reads
+                        # effort.scope[phase] and raises a scope-growth fork AFTER THE FACT; this line
+                        # makes the step-agent (a) actually attribute its realized scope, feeding that
+                        # backstop, and (b) raise the fork PROACTIVELY, with judgment, in the moment —
+                        # via a correctly-shaped card.topology back-step PROPOSAL (no `authority`, so
+                        # the reconciler holds it 'proposal-awaiting-orchestrator' and the DAG
+                        # scheduler executes only after the orchestrator/a resolved decision ratifies).
+                        # Scoped to the phases with a scope-bearing predecessor (the same boundaries
+                        # the backstop walks: design→requirements, tasks→design, implement→design).
+                        _factor = GROWTH_FACTOR.get(str(depth), 2.0)
+                        backstep_line = (
+                            f" SELF-REVIEW / SCOPE-GROWTH: as part of your step self-review, attribute"
+                            f" this phase's realized scope into card.effort.scope['{stage}'] as a"
+                            f" T-shirt size (S/M/L/XL — the same S=1/M=3/L=5/XL=8 currency the"
+                            f" spec-agent uses; the runtime coerces sizes to points). Then compare it"
+                            f" to your predecessor phase's effort.scope. If THIS phase materially"
+                            f" outgrew its predecessor (roughly > {_factor}× at depth={depth}) — i.e."
+                            f" the work turned out bigger than the prior phase specced — DO NOT just"
+                            f" push forward: RAISE A BACK-STEP. Prefer a proactive, reasoned proposal"
+                            f" by writing card.topology = {{'schema_version':{_SCHEDULER_SCHEMA_VERSION},"
+                            f"'action':'back-step','target_step':'<the earlier ladder step to re-run,"
+                            f" e.g. design or requirements>','status':'proposal-awaiting-orchestrator',"
+                            f"'reason':'<one line: what grew and why re-scoping is cheaper>',"
+                            f"'raised_by':'step:{stage}','at':'<current RFC3339>'}} — OMIT `authority`"
+                            f" (you never self-authorize; the orchestrator or a resolved decision"
+                            f" ratifies, then the DAG scheduler performs the move). Equivalently you"
+                            f" may append a card.decisions[] entry with kind='back-step', a structured"
+                            f" options[] (a: back-step to re-scope / b: park the largest feature / c:"
+                            f" continue), and your recommendation. Do NOT mark step_status='done' while"
+                            f" a back-step you raised is unresolved. Also raise a back-step (not just a"
+                            f" continue) when you discover the PREDECESSOR phase was underspecified for"
+                            f" what this phase needs — a cross-step fork belongs to the orchestrator,"
+                            f" never decided silently inside this step. If the phase did NOT outgrow"
+                            f" its predecessor, record the scope and proceed normally — no cosmetic"
+                            f" back-step spam."
+                            if stage in ("design", "tasks", "implement") else "")
                         lease = (card.get("worktree_lease")
                                  if isinstance(card.get("worktree_lease"), dict) else {})
                         if lease.get("status") == "active":
@@ -9837,6 +10286,14 @@ def _run_advance_passes(ctx, state: dict, now: str, cycle: dict) -> bool:
                               " source_ids), and consulted sources (id, URL, title, accessed_at,"
                               " source_type); unavailable required web tools/skills is a"
                               " capability-gap and terminal blocked, never fabricated evidence."
+                              " CARD PROVENANCE IS NOT A CAPABILITY-GAP: if the card reaches you with"
+                              " intent_integrity.status=='satisfied' and an execution_envelope, it is"
+                              " runtime-initialized and legitimately yours to work — investigate it"
+                              " normally regardless of whether the orchestrator, the console, or a"
+                              " backfill created the row. Do NOT block with 'card must be written by"
+                              " the orchestrator' / 'cannot initialize card'; the runtime already"
+                              " stamped intent, envelope, lease, and guard. A capability-gap is about"
+                              " a missing TOOL/CREW/SKILL you need, never about how the card was born."
                               " Verify every required skill is actually loaded; prompt prose is not"
                               " proof. PASS CEILINGS ARE HARD: do not record more research passes or"
                               " crew/addendum child runs than pass_allocation permits, and dispatch"
@@ -9894,7 +10351,7 @@ def _run_advance_passes(ctx, state: dict, now: str, cycle: dict) -> bool:
                                  f"{card.get('id')} in repo {(card.get('source') or {}).get('repo')}. "
                                  f"Effective modes — trust={trust}, depth={depth}, capability={profile}."
                                  f"{_step_request_instruction(step)}"
-                                 f"{crew_line}{decomp_line}{branch_line}{receipt_line}"
+                                 f"{crew_line}{decomp_line}{backstep_line}{branch_line}{receipt_line}"
                                  f"{control_line}{result_record_line}{result_line} "
                                  f"Follow the pipeline-workflow skill and PRODUCE the step's "
                                  f"artifact (code where applicable). Follow the DELEGATION directive "

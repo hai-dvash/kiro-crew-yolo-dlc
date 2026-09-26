@@ -67,7 +67,7 @@ test('state polling suppresses expected pointer misses without weakening writes'
   assert.match(app, /fetchCards\(true\)/)
   assert.match(app, /pollCount % 12 === 0/)
   assert.match(app, /readCurrentState\(readAppFile, STATE_PATH\)/)
-  assert.match(app, /destination = await resolveStateFile\(readAppFile\)/)
+  assert.match(app, /destination = await resolveStateFile\(readAppFile, readAppEndpoint\)/)
 })
 
 

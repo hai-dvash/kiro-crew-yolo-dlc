@@ -77,6 +77,10 @@ RATE_LIMIT = 120
 RETRY_AFTER_SECONDS = 120
 MAX_CONFIG_REQUEST_BYTES = 16 * 1024
 MAX_CREW_ROUTE_REQUEST_BYTES = 4 * 1024
+# Uncapped-by-intent state WRITE. The whole point of this endpoint is to write a state body that
+# EXCEEDS the host /api/file-write 512000-byte cap, so this ceiling is generous (8 MiB) — a sane
+# upper bound that still refuses a pathological body rather than being truly unbounded.
+MAX_STATE_WRITE_REQUEST_BYTES = 8 * 1024 * 1024
 CREW_ROUTE_CLI_TIMEOUT_SECONDS = 15
 _CREW_IDENTIFIER = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 
@@ -552,6 +556,174 @@ def _resolve_state_path():
     return Path(_os.path.expanduser("~/.dlc-yolo/state.json"))
 
 
+# ── Uncapped state read (backend state endpoint) ────────────────────────────────────────────────
+# The UI historically fetched state.json through the host ``/api/file-read`` endpoint, which
+# TRUNCATES the body at 512000 bytes. Once ~/.dlc-yolo/state.json grew past ~500KB the UI received
+# chopped JSON, JSON.parse failed, and the board rendered 0 cards despite a fully intact on-disk
+# state (root-caused: project.kirocrew.sdlc_pipeline.ghosting_root_cause_512kb). This endpoint reads
+# the SAME resolved state file (``_resolve_state_path`` — the cron's own resolution: DLC_YOLO_STATE
+# -> ~/.dlc-yolo/.statepath -> ~/.dlc-yolo/state.json) with NO size cap and returns the parsed JSON.
+# A missing/unreadable/malformed file yields the empty-but-valid shape at HTTP 200 so the UI renders
+# an empty board rather than erroring.
+_EMPTY_STATE = {"cards": [], "pipelines": [], "config": {}}
+
+
+def _read_state_document() -> dict:
+    """Read the resolved state file uncapped and return parsed JSON.
+
+    Returns the empty-but-valid shape ``{"cards":[],"pipelines":[],"config":{}}`` for any
+    failure (absent file, unreadable, or malformed JSON) so the caller can always return 200.
+    """
+    path = _resolve_state_path()
+    try:
+        raw = path.read_text("utf-8")
+    except (OSError, UnicodeDecodeError):
+        return dict(_EMPTY_STATE)
+    try:
+        data = json.loads(raw)
+    except (ValueError, TypeError):
+        return dict(_EMPTY_STATE)
+    if not isinstance(data, dict):
+        return dict(_EMPTY_STATE)
+    return data
+
+
+async def _handle_state(_request: web.Request) -> web.StreamResponse:
+    """GET the full resolved DLC-YOLO state as JSON, uncapped.
+
+    Reads off the event loop thread (the file can be hundreds of KB) and never raises to the
+    caller: a missing/unreadable/malformed file returns the empty-but-valid shape at HTTP 200.
+    """
+    data = await asyncio.to_thread(_read_state_document)
+    return web.json_response(data)
+
+
+# ── Uncapped state WRITE (backend state mutation endpoint) ───────────────────────────────────────
+# The WRITE-side mirror of _handle_state. The UI historically mutated state by POSTing the FULL
+# state.json to the host ``/api/file-write``, whose ``content`` field is validated at max_len=512000
+# (kiro_crew/validation.py). Once ~/.dlc-yolo/state.json grew past ~512KB EVERY mutation (gate
+# Approve, reject, config, cancel) was rejected 400 {"error":"invalid input"}. This endpoint writes
+# the SAME resolved state file (``_resolve_state_path``) with NO size cap, atomically and durably
+# (temp file in the same dir → flush → os.fsync → os.replace, mirroring the cron's ``_save``), under
+# the SAME cross-process advisory lock the cron/orchestrator hold so a UI write cannot interleave-
+# and-lose against an advance-cron ``_save``. A clobber guard refuses an empty (neither cards nor
+# pipelines) body over a populated on-disk file — mirroring the cron ``_save`` clobber guard.
+
+
+def _write_state_document(data: dict) -> int:
+    """Atomically write ``data`` to the resolved state path, uncapped, under the shared state lock.
+
+    Returns the number of bytes written. Mirrors the cron ``_save`` durability (temp+fsync+replace)
+    and the ``_fold_crew_tail`` locking (advisory flock on the sidecar ``<state>.json.lock``,
+    fail-open). Runs on a worker thread (see ``_handle_state_write``); does NOT touch the event loop.
+    """
+    from pathlib import Path  # noqa: PLC0415
+    import os as _os, tempfile, fcntl  # noqa: PLC0415
+
+    path = _resolve_state_path()
+    payload = json.dumps(data, indent=2)
+    encoded = payload.encode("utf-8")
+
+    lock_path = (str(path)[:-5] + ".json.lock") if str(path).endswith(".json") else (str(path) + ".lock")
+    lock_fd = None
+    try:
+        lock_fd = _os.open(lock_path, _os.O_CREAT | _os.O_RDWR | getattr(_os, "O_CLOEXEC", 0), 0o600)
+        deadline = time.monotonic() + 5.0
+        while True:
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    break  # fail-open: still write (atomic temp+replace remains torn-write safe)
+                time.sleep(0.05)
+    except OSError:
+        lock_fd = None
+    try:
+        parent = _os.path.dirname(str(path)) or "."
+        _os.makedirs(parent, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=parent, suffix=".tmp")
+        try:
+            with _os.fdopen(fd, "w") as fh:
+                fh.write(payload)
+                fh.flush()
+                _os.fsync(fh.fileno())
+            _os.replace(tmp, path)
+        except OSError:
+            with contextlib.suppress(OSError):
+                _os.unlink(tmp)
+            raise
+        # fsync the parent dir so the rename is durable across a crash (mirrors the cron _save).
+        with contextlib.suppress(OSError):
+            dir_fd = _os.open(parent, _os.O_RDONLY)
+            try:
+                _os.fsync(dir_fd)
+            finally:
+                _os.close(dir_fd)
+    finally:
+        if lock_fd is not None:
+            with contextlib.suppress(OSError):
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            with contextlib.suppress(OSError):
+                _os.close(lock_fd)
+    return len(encoded)
+
+
+def _state_is_populated(doc: object) -> bool:
+    """True when ``doc`` is a dict carrying at least one card or pipeline."""
+    if not isinstance(doc, dict):
+        return False
+    cards = doc.get("cards")
+    pipelines = doc.get("pipelines")
+    return bool((isinstance(cards, list) and cards) or (isinstance(pipelines, list) and pipelines))
+
+
+async def _handle_state_write(request: web.Request) -> web.StreamResponse:
+    """POST the full DLC-YOLO state object as JSON and write it uncapped to the resolved path.
+
+    Validates a card-shaped dict (has 'cards' and/or 'pipelines' lists; a non-dict or a dict with
+    NEITHER list is 400 invalid shape). Clobber guard: an empty incoming state (no cards, no
+    pipelines) over a populated on-disk file is 409. Writes atomically + durably off the event loop.
+    """
+    raw = await _read_bounded(request, MAX_STATE_WRITE_REQUEST_BYTES)
+    if raw is None:
+        return web.json_response(
+            {"code": "state_too_large", "error": "state body is too large"}, status=413,
+        )
+    try:
+        body = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return web.json_response(
+            {"code": "malformed_json", "error": "state must be JSON"}, status=400,
+        )
+    # Shape: a dict with a 'cards' list and/or a 'pipelines' list. Reject a non-dict or a dict that
+    # carries NEITHER a cards list nor a pipelines list — that is not a state document.
+    if not isinstance(body, dict) or not (
+        isinstance(body.get("cards"), list) or isinstance(body.get("pipelines"), list)
+    ):
+        return web.json_response(
+            {"code": "invalid_state_shape", "error": "invalid state shape"}, status=400,
+        )
+    # Clobber guard (mirrors cron _save): refuse to write an empty state (no cards AND no pipelines)
+    # over a currently-populated on-disk file. A genuinely-empty board is only writable when the
+    # on-disk state is also empty/absent.
+    if not _state_is_populated(body):
+        existing = await asyncio.to_thread(_read_state_document)
+        if _state_is_populated(existing):
+            return web.json_response(
+                {"code": "would_clobber", "error": "refusing to overwrite populated state with an empty body"},
+                status=409,
+            )
+    try:
+        written = await asyncio.to_thread(_write_state_document, body)
+    except OSError as exc:
+        logger.warning("DLC-YOLO state write failed: %s", exc)
+        return web.json_response(
+            {"code": "state_write_failed", "error": "could not persist state"}, status=500,
+        )
+    return web.json_response({"ok": True, "bytes": written})
+
+
 def _load_inotify_watch_module():
     """Load the sibling ``backend/inotify_watch.py`` by path (proxy loader safe)."""
     try:
@@ -775,6 +947,8 @@ def register_routes(app: web.Application) -> None:
     app.router.add_get(f"{BASE}/webhook/config", _require_enabled(_handle_config))
     app.router.add_post(f"{BASE}/webhook/config", _require_enabled(_handle_config_update))
     app.router.add_post(f"{BASE}/agents/crew", _require_enabled(_handle_crew_route_update))
+    app.router.add_get(f"{BASE}/state", _require_enabled(_handle_state))
+    app.router.add_post(f"{BASE}/state", _require_enabled(_handle_state_write))
     app.on_startup.append(_start_listener)
     app.on_cleanup.append(_stop_listener)
     app.on_startup.append(_start_state_watch)

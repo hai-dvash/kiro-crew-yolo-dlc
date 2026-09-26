@@ -9,6 +9,7 @@
     "shell",
     "web_search",
     "web_fetch",
+    "kirocrew-core::spawn_run",
     "kirocrew-core::ask_question",
     "kirocrew-core::send_message"
   ],
@@ -18,6 +19,7 @@
     "shell",
     "web_search",
     "web_fetch",
+    "kirocrew-core::spawn_run",
     "kirocrew-core::ask_question",
     "kirocrew-core::send_message"
   ],

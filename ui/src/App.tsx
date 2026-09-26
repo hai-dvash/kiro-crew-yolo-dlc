@@ -1366,6 +1366,10 @@ function PipelineCardItem({ card, config, isGate, cardStatus, effectiveCapabilit
   // whole affordance disappears when the session ends.
   const [wingOpen, setWingOpen] = useState(false)
   const [wingDragging, setWingDragging] = useState(false)
+  // Which content the shared wing shows: the live session tail, or the pending decision panel.
+  // The live handle opens 'live'; the decision sub-handle (below it, only when a decision is
+  // pending) opens 'decision'. Both slide the same wing shell.
+  const [wingMode, setWingMode] = useState<'live' | 'decision'>('live')
   const [wingWidth, setWingWidth] = useState<number>(() => {
     const v = Number(typeof localStorage !== 'undefined' && localStorage.getItem('dlc-live-wing-width'))
     return Number.isFinite(v) && v >= 220 ? v : 320
@@ -1416,7 +1420,12 @@ function PipelineCardItem({ card, config, isGate, cardStatus, effectiveCapabilit
         // mounts). `isolation:isolate` scopes every card's descendants to its own box so nothing
         // can bleed onto a sibling; the column's gap-2 then separates them cleanly.
         isolation: 'isolate',
-        zIndex: 1,
+        // Closed, zIndex:1 among siblings is fine (isolation contains the handle/shadow). But an
+        // OPEN wing extends past the card's right edge over the neighbour's area, and — trapped in
+        // this card's stacking context at zIndex:1 like every sibling — a LATER sibling card paints
+        // over it (the "decision/live wing z-index" bug). Lift the whole card above its siblings
+        // while its wing is open so the trapped wing wins.
+        zIndex: wingOpen ? 40 : 1,
       }}
     >
       {(() => {
@@ -1660,68 +1669,24 @@ function PipelineCardItem({ card, config, isGate, cardStatus, effectiveCapabilit
         ))
       })()}
 
-      {/* Raised decisions: surface the fork, its options, and the agent's recommendation so the
-          human can actually answer it — not a blind free-text box. Choosing an option writes a
-          structured interjection naming the choice (the step-agent reads it on its next run; the
-          deterministic gate-action processor is Slice B). block_reason gives the "why blocked". */}
-      {onResolveDecision && pendingDecisions.map(d => {
-        const blockedStep = d.step && card.block_reason?.[d.step] ? d.step
-          : Object.keys(card.block_reason || {})[0]
-        const blockText = blockedStep ? card.block_reason?.[blockedStep] : undefined
-        const opts = d.options || []
-        return (
-          <div key={d.id} className="mt-2 p-2 rounded-md text-[11px]"
-            style={{ background: 'color-mix(in srgb, var(--accent) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--accent) 35%, var(--border))' }}>
-            <div className="font-semibold" style={{ color: 'var(--text, var(--muted))' }}>
-              ⚖ Decision needed{d.step ? ` · ${d.step}` : ''}{d.confidence ? ` · confidence ${d.confidence}` : ''}
-            </div>
-            <div className="mt-1" style={{ color: 'var(--text, var(--muted))' }}>{d.question || d.kind}</div>
-            {blockText && (
-              <div className="mt-1 text-[10px] whitespace-pre-wrap" style={{ color: 'var(--muted)' }}>{blockText}</div>
-            )}
-            {opts.length > 0 && (
-              <div className="mt-1.5 flex flex-col gap-1">
-                {opts.map((o, i) => {
-                  const id = o.id || String.fromCharCode(65 + i)  // A, B, C…
-                  const recommended = o.recommended === true || d.chosen === o.id
-                    || (d.rationale || '').toLowerCase().includes((o.id || '').toLowerCase() + ')')
-                  return (
-                    <div key={id} className="flex items-start gap-2 p-1 rounded"
-                      style={{ background: recommended ? 'color-mix(in srgb, var(--accent) 12%, transparent)' : 'transparent' }}>
-                      <button className="text-[10px] px-2 py-0.5 rounded font-semibold shrink-0"
-                        style={{ background: 'var(--accent)', color: 'var(--bg)' }}
-                        title={`Resolve this decision by selecting option ${id} — the step resumes on this branch`}
-                        onClick={() => onResolveDecision(d.id, o.id || id)}>
-                        Choose {id}
-                      </button>
-                      <div className="text-[10px]" style={{ color: 'var(--muted)' }}>
-                        {o.note}{o.risk ? ` · risk: ${o.risk}` : ''}{recommended ? '  ⭐ recommended' : ''}
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-            {d.rationale && (
-              <div className="mt-1 text-[10px] italic" style={{ color: 'var(--muted)' }}>Agent rationale: {d.rationale}</div>
-            )}
-            <div className="mt-1.5 flex items-center gap-2">
-              {opts.length > 0 && (
-                <button className="px-2 py-0.5 rounded font-semibold" style={{ background: 'var(--accent)', color: 'var(--bg)' }}
-                  title="Open a picker to select an option and resolve this decision"
-                  onClick={() => setDecisionModalId(d.id)}>⚖ resolve in picker…</button>
-              )}
-              <button className="px-2 py-0.5 rounded" style={{ color: 'var(--muted)', border: '1px solid var(--border)' }}
-                title="Answer in your own words instead of choosing an option"
-                onClick={() => setWingOpen(true)}>✏️ answer in words</button>
-              {!opts.length && (
-                <button className="px-2 py-0.5 rounded font-semibold" style={{ background: 'var(--bg-hover, var(--border))', color: 'var(--accent)' }}
-                  onClick={() => onResolveDecision(d.id)}>Acknowledge &amp; continue</button>
-              )}
-            </div>
-          </div>
-        )
-      })}
+      {/* Raised decisions now live in the DECISION WING (opened by the ⚖ sub-handle on the card's
+          right edge), NOT on the card face — keeps the card uncluttered. A one-line hint here just
+          points the human to the sub-handle and opens it. */}
+      {onResolveDecision && pendingDecisions.length > 0 && (
+        <button
+          onClick={() => { setWingMode('decision'); setWingOpen(true) }}
+          className="mt-2 w-full text-left px-2 py-1.5 rounded-md text-[11px] flex items-center gap-1.5 hover:opacity-90"
+          style={{ background: 'color-mix(in srgb, var(--warn, var(--accent)) 12%, transparent)',
+            border: '1px solid color-mix(in srgb, var(--warn, var(--accent)) 40%, var(--border))', color: 'var(--text)' }}
+          title="Open the decision panel in the wing">
+          <span aria-hidden="true">⚖</span>
+          <span className="truncate">
+            {pendingDecisions.length === 1 ? 'Decision needs you' : `${pendingDecisions.length} decisions need you`}
+            {pendingDecisions[0]?.step ? ` · ${pendingDecisions[0].step}` : ''}
+          </span>
+          <span className="ml-auto opacity-70" aria-hidden="true">›</span>
+        </button>
+      )}
 
       {/* ── Live session WING (slide-out drawer). ALWAYS MOUNTED when the card has a step session.
              ARCHITECTURE (fixes the old overlay bug):
@@ -1738,7 +1703,7 @@ function PipelineCardItem({ card, config, isGate, cardStatus, effectiveCapabilit
              The old code translated the whole unit LEFT to hide it, which parked the panel ON TOP of
              the card (a positive-z child paints above its parent). Clipping at left:100% removes that
              overlap entirely. ── */}
-      {wingLive && (
+      {(wingLive || pendingDecisions.length > 0) && (
         <>
           {/* CLIP wrapper — flush to the card's right edge, never overlaps the card. */}
           <div
@@ -1789,17 +1754,26 @@ function PipelineCardItem({ card, config, isGate, cardStatus, effectiveCapabilit
               />
               <div className="flex items-center gap-1.5 px-2 py-1.5 text-[10px]"
                 style={{ borderBottom: '1px solid var(--border)' }}>
-                <span className="uppercase tracking-wider" style={{ color: 'var(--muted)' }}>
-                  {(_STAGE_GLYPH[wingLive.stage] || '⚙')} {wingLive.stage} · live session
-                </span>
-                {wingLive.active && <ActivitySpinner size={10} />}
-                <button className="ml-auto hover:underline" onClick={wingLive.onOpen}
-                  style={{ color: 'var(--accent)' }} title="Open the full step session">open ↗</button>
-                <button className="hover:underline" onClick={() => setWingOpen(false)}
+                {wingMode === 'decision' ? (
+                  <span className="uppercase tracking-wider" style={{ color: 'var(--accent)' }}>⚖ decision needed</span>
+                ) : (
+                  <span className="uppercase tracking-wider" style={{ color: 'var(--muted)' }}>
+                    {(_STAGE_GLYPH[wingLive?.stage || card.stage] || '⚙')} {wingLive?.stage || card.stage} · live session
+                  </span>
+                )}
+                {wingMode === 'live' && wingLive?.active && <ActivitySpinner size={10} />}
+                {wingMode === 'live' && wingLive && <button className="ml-auto hover:underline" onClick={wingLive.onOpen}
+                  style={{ color: 'var(--accent)' }} title="Open the full step session">open ↗</button>}
+                <button className={wingMode === 'decision' ? 'ml-auto hover:underline' : 'hover:underline'} onClick={() => setWingOpen(false)}
                   style={{ color: 'var(--muted)' }} title="Collapse">✕</button>
               </div>
-              <WingLiveBody tail={(wingLive as { buffer?: string }).buffer || wingLive.tail} active={wingLive.active} />
-              {onInterject && (
+              {wingMode === 'decision' ? (
+                <WingDecisionBody card={card} decisions={pendingDecisions} onResolveDecision={onResolveDecision}
+                  onInterject={onInterject} onClose={() => setWingOpen(false)} />
+              ) : (
+                <WingLiveBody tail={(wingLive as { buffer?: string } | null)?.buffer || wingLive?.tail || ''} active={!!wingLive?.active} />
+              )}
+              {wingMode === 'live' && onInterject && (
                 <div className="px-2 py-1.5 flex items-center gap-1.5" style={{ borderTop: '1px solid var(--border)' }}>
                   <input
                     value={interjectText}
@@ -1829,25 +1803,51 @@ function PipelineCardItem({ card, config, isGate, cardStatus, effectiveCapabilit
           </div>
           {/* HANDLE — rides on translateX from the card's right edge (closed) to the panel's right
               edge (open). Separate from the clip so it stays visible when the panel is clipped out. */}
-          <button
-            className={wingDragging ? undefined : 'dlc-wing-slide'}
-            aria-label={wingOpen ? 'Collapse live session panel' : 'Open live session panel'}
-            title={wingOpen ? 'Collapse live session' : 'Open live session'}
-            onClick={() => setWingOpen(o => !o)}
-            style={{
-              position: 'absolute', top: '10px', left: '100%', zIndex: 1,
-              width: '14px', height: '46px', cursor: 'pointer', padding: 0,
-              transform: wingOpen ? `translateX(${wingWidth}px)` : 'translateX(0)',
-              transition: wingDragging ? 'none' : undefined,
-              willChange: 'transform',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              background: wingLive.active ? 'var(--accent)' : 'var(--border)',
-              color: 'var(--bg)', border: 'none', borderRadius: '0 6px 6px 0',
-              boxShadow: '1px 0 4px rgba(0,0,0,0.25)',
-            }}
-          >
-            <span style={{ fontSize: '9px', lineHeight: 1 }} aria-hidden="true">{wingOpen ? '›' : '‹'}</span>
-          </button>
+          {wingLive && (
+            <button
+              className={wingDragging ? undefined : 'dlc-wing-slide'}
+              aria-label={wingOpen && wingMode === 'live' ? 'Collapse live session panel' : 'Open live session panel'}
+              title={wingOpen && wingMode === 'live' ? 'Collapse live session' : 'Open live session'}
+              onClick={() => { setWingMode('live'); setWingOpen(o => !(o && wingMode === 'live')) }}
+              style={{
+                position: 'absolute', top: '10px', left: '100%', zIndex: 1,
+                width: '14px', height: '46px', cursor: 'pointer', padding: 0,
+                transform: wingOpen ? `translateX(${wingWidth}px)` : 'translateX(0)',
+                transition: wingDragging ? 'none' : undefined,
+                willChange: 'transform',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: wingLive.active ? 'var(--accent)' : 'var(--border)',
+                color: 'var(--bg)', border: 'none', borderRadius: '0 6px 6px 0',
+                boxShadow: '1px 0 4px rgba(0,0,0,0.25)',
+              }}
+            >
+              <span style={{ fontSize: '9px', lineHeight: 1 }} aria-hidden="true">{wingOpen && wingMode === 'live' ? '›' : '‹'}</span>
+            </button>
+          )}
+          {/* Decision SUB-HANDLE — slides in below the live handle only when a decision is pending.
+              Opens the SAME wing shell with the decision panel. Takes the top slot when there is no
+              live session (so a decision-only card still shows a reachable handle). */}
+          {pendingDecisions.length > 0 && (
+            <button
+              className={wingDragging ? undefined : 'dlc-wing-slide'}
+              aria-label={wingOpen && wingMode === 'decision' ? 'Collapse decision panel' : 'Open decision panel'}
+              title={wingOpen && wingMode === 'decision' ? 'Collapse decision' : `${pendingDecisions.length} decision${pendingDecisions.length === 1 ? '' : 's'} awaiting you`}
+              onClick={() => { setWingMode('decision'); setWingOpen(o => !(o && wingMode === 'decision')) }}
+              style={{
+                position: 'absolute', top: wingLive ? '62px' : '10px', left: '100%', zIndex: 1,
+                width: '14px', height: '46px', cursor: 'pointer', padding: 0,
+                transform: wingOpen ? `translateX(${wingWidth}px)` : 'translateX(0)',
+                transition: wingDragging ? 'none' : undefined,
+                willChange: 'transform',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: 'var(--warn, var(--accent))',
+                color: 'var(--bg)', border: 'none', borderRadius: '0 6px 6px 0',
+                boxShadow: '1px 0 4px rgba(0,0,0,0.25)',
+              }}
+            >
+              <span style={{ fontSize: '10px', lineHeight: 1 }} aria-hidden="true">⚖</span>
+            </button>
+          )}
         </>
       )}
 
@@ -3247,6 +3247,73 @@ const _PEEK_LINES = (() => {
   } catch { return 14 }
 })()
 
+function WingDecisionBody({ card, decisions, onResolveDecision, onInterject, onClose }: {
+  card: PipelineCard
+  decisions: NonNullable<PipelineCard['decisions']>
+  onResolveDecision?: (decisionId: string, chosenOptionId?: string) => void
+  onInterject?: (kind: string, text: string) => void
+  onClose: () => void
+}) {
+  const [words, setWords] = useState('')
+  const d = decisions[0]  // surface the first pending decision (others queue behind it)
+  if (!d) return <div className="flex-1 p-3 text-[11px]" style={{ color: 'var(--muted)' }}>No pending decision.</div>
+  const opts = d.options || []
+  const recommendedId = opts.find(o => o.recommended === true)?.id
+    || opts.find(o => o.id && (d.rationale || '').toLowerCase().includes((o.id + ')').toLowerCase()))?.id
+    || opts[0]?.id
+  return (
+    <div className="flex-1 overflow-y-auto p-2.5 flex flex-col gap-2 text-[11px]" style={{ color: 'var(--text)' }}>
+      <div className="font-semibold" style={{ color: 'var(--text-strong, var(--text))' }}>
+        {d.question || d.kind || 'Decision needed'}{d.step ? <span className="font-normal" style={{ color: 'var(--muted)' }}> · {d.step}</span> : null}
+      </div>
+      {opts.length > 0 ? opts.map((o, i) => {
+        const id = o.id || String.fromCharCode(65 + i)
+        const recommended = (o.id || id) === recommendedId
+        return (
+          <button key={id} onClick={() => { onResolveDecision?.(d.id, o.id || id); onClose() }}
+            className="text-left p-2 rounded-md hover:opacity-90"
+            style={{ background: recommended ? 'color-mix(in srgb, var(--accent) 14%, transparent)' : 'var(--bg-elevated, var(--bg))',
+              border: `1px solid ${recommended ? 'var(--accent)' : 'var(--border)'}` }}>
+            <div className="font-semibold flex items-center gap-1.5" style={{ color: 'var(--text-strong, var(--text))' }}>
+              Option {id}{recommended && <span className="text-[9px] font-normal" style={{ color: 'var(--accent)' }}>⭐ recommended</span>}
+            </div>
+            {o.note && <div className="text-[10px] mt-0.5" style={{ color: 'var(--muted)' }}>{o.note}</div>}
+            {o.risk && <div className="text-[10px] mt-0.5" style={{ color: 'var(--warn, var(--muted))' }}>risk: {o.risk}</div>}
+          </button>
+        )
+      }) : (
+        <div className="text-[10px] italic p-2 rounded" style={{ color: 'var(--muted)', background: 'var(--bg-elevated, var(--bg))' }}>
+          Advisory decision — no options to choose. Acknowledge, or answer in words below.
+        </div>
+      )}
+      {d.rationale && (
+        <div className="text-[10px] italic p-2 rounded" style={{ color: 'var(--muted)', background: 'var(--bg-elevated, var(--bg))' }}>
+          Agent rationale: {d.rationale}
+        </div>
+      )}
+      {opts.length === 0 && (
+        <button onClick={() => { onResolveDecision?.(d.id); onClose() }}
+          className="text-[10px] px-2 py-1 rounded font-semibold self-start"
+          style={{ background: 'var(--accent)', color: 'var(--bg)' }}>Acknowledge</button>
+      )}
+      {onInterject && (
+        <div className="mt-1 flex items-center gap-1.5">
+          <input value={words} onChange={e => setWords(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && words.trim()) { onInterject('note', words.trim()); setWords('') } }}
+            placeholder="Answer in words…"
+            className="flex-1 text-[10px] px-2 py-1 rounded"
+            style={{ background: 'var(--bg-elevated, var(--bg))', color: 'var(--text)', border: '1px solid var(--border)', outline: 'none' }} />
+          <button onClick={() => { if (words.trim()) { onInterject('note', words.trim()); setWords('') } }}
+            disabled={!words.trim()}
+            className="text-[10px] px-2 py-1 rounded font-semibold"
+            style={{ background: words.trim() ? 'var(--accent)' : 'var(--border)', color: words.trim() ? 'var(--bg)' : 'var(--muted)', cursor: words.trim() ? 'pointer' : 'default' }}>Send</button>
+        </div>
+      )}
+      {decisions.length > 1 && <div className="text-[9px]" style={{ color: 'var(--muted)' }}>+{decisions.length - 1} more decision{decisions.length - 1 === 1 ? '' : 's'} queued</div>}
+    </div>
+  )
+}
+
 function WingLiveBody({ tail, active }: { tail: string; active: boolean }) {
   const shown = useTypewriter(tail, active)
   // Show as much text as the panel space holds; overflow:hidden on the flex body bounds it.
@@ -3433,7 +3500,7 @@ export default function SdlcPipeline() {
   useEffect(() => {
     // eslint-disable-next-line no-console
     // eslint-disable-next-line no-console
-    console.info('[dlc-yolo] UI bundle build: v40 (themed confirm modal, reason-free maintain). prefers-reduced-motion:',
+    console.info('[dlc-yolo] UI bundle build: v42 (wing-open zIndex lift). prefers-reduced-motion:',
       (typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches)
         ? 'REDUCE — drawer re-asserted, should play'
         : 'no-preference')

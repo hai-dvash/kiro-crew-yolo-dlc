@@ -137,23 +137,65 @@ def _advance_job_id() -> str:
     return hashlib.sha1(b"dlc-yolo-advance").hexdigest()[:12]
 
 
+def _resolve_advance_job_id() -> str:
+    """Return the advance cron's ACTUAL job id.
+
+    The event-driven wake must trigger the job the scheduler actually holds — not a value we
+    assume. setup-crons SHOULD converge the advance job to the deterministic ``_advance_job_id()``,
+    but a fresh install / app reinstall can register it under a scheduler-assigned id instead
+    (observed: e27ce8b8 while the hash was f838bdf3d496), so a wake at the hashed id gets
+    "Job not found" and silently falls back to the 120s poll — breaking the flow. Resolve the real
+    id from crons.json by name each wake; fall back to the deterministic hash if the store is
+    unreadable or the job is absent.
+    """
+    import os as _os  # noqa: PLC0415
+    default = _advance_job_id()
+    try:
+        store = _os.path.expanduser("~/.kiro/crew/crons.json")
+        with open(store, "r", encoding="utf-8") as fh:
+            doc = json.load(fh)
+        jobs = doc.get("jobs") or doc.get("crons") or []
+        if isinstance(jobs, dict):
+            jobs = list(jobs.values())
+        for job in jobs:
+            if not isinstance(job, dict):
+                continue
+            name = str(job.get("name") or "")
+            # Match the advance job by its stable name suffix, not its (possibly random) id.
+            if name.endswith("dlc-yolo-advance") or name == "dlc-yolo-advance":
+                jid = job.get("id")
+                if isinstance(jid, str) and jid:
+                    return jid
+    except (OSError, ValueError, json.JSONDecodeError):
+        pass
+    return default
+
+
 async def _wake_advance() -> None:
-    """Best-effort public-CLI wake; the 120-second poll remains repair."""
+    """Event-driven immediate advance wake; the 120-second poll remains the safety net.
+
+    Triggers the advance cron's RESOLVED id (see _resolve_advance_job_id) so a scheduler-assigned
+    id still matches. Captures stderr and logs the reason on failure so a broken wake is diagnosable
+    (job-not-found, owner-verification) rather than silently degrading to the poll.
+    """
     executable = shutil.which("kirocrew")
     if not executable:
+        logger.warning("DLC-YOLO advance wake unavailable: kirocrew not on PATH")
         return
+    job_id = _resolve_advance_job_id()
     try:
         proc = await asyncio.create_subprocess_exec(
-            executable, "cron", "trigger", _advance_job_id(),
+            executable, "cron", "trigger", job_id,
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
         )
-        await asyncio.wait_for(proc.wait(), timeout=10)
+        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
         if proc.returncode != 0:
-            logger.warning("DLC-YOLO webhook accepted; immediate advance wake failed")
-    except (OSError, asyncio.TimeoutError):
-        logger.warning("DLC-YOLO webhook accepted; immediate advance wake unavailable")
+            detail = (stderr or b"").decode("utf-8", "replace").strip()[:200]
+            logger.warning("DLC-YOLO advance wake failed (id=%s rc=%s): %s", job_id, proc.returncode, detail)
+    except (OSError, asyncio.TimeoutError) as exc:
+        logger.warning("DLC-YOLO advance wake unavailable (id=%s): %s", job_id, exc)
 
 
 async def _handle_github(request: web.Request) -> web.StreamResponse:
